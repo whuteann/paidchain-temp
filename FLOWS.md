@@ -1,42 +1,38 @@
 # PaidChain Flow Map
 
-This document maps the current implemented flows in the app based on the existing screens, routes, and in-memory context state.
+This document maps the implemented flows in the app based on the existing screens, routes, and in-memory context state. It is a product and workflow map of the current build, not an aspirational requirements document.
 
-It is a product and workflow map of the current build, not an aspirational requirements document.
+---
 
-## 1. System Overview
+## 1. Flow Index
 
-The app is organized around these main entities:
+| # | Flow | Entry point |
+|---|---|---|
+| 4.1 | Onboard new customer | `/customers` |
+| 4.2 | Add merchant to customer | `/customers/[id]` |
+| 5.1 | Create terminal setting (model template) | `/settings` → Terminal Settings tab |
+| 5.2 | Register new terminal device | `/settings` → Terminal Settings → Register from setting |
+| 5.3 | Manage terminal (status, SIM, timeline) | `/terminals/[id]` |
+| 5.4 | Add SIM card | `/simcards` |
+| 5.5 | Manage SIM card | `/simcards/[id]` |
+| 6.1 | Create rental | `/rentals` |
+| 6.2 | View rental and issue invoice / eInvoice | `/rentals/[id]` |
+| 7.1 | Job: Installation | `/jobs` |
+| 7.2 | Job: Repair / Maintenance | `/jobs` |
+| 7.3 | Job: Replacement | `/jobs` |
+| 7.4 | Job: Paper Roll Request | `/jobs` |
+| 7.5 | Job: Remote Support | `/jobs` |
+| 8.1 | Configure Job SLA thresholds | `/settings` → Job SLA Settings tab |
+| 9.1 | Manage paper roll stock | `/paper-rolls` |
+| 10.1 | Create payout | `/payouts` |
+| 10.2 | Upload transactions and auto-generate payouts | `/payouts` |
+| 10.3 | View payout and confirm payment | `/payouts/[id]` |
+| 11.1 | Configure MDR rates | `/mdr` |
+| 12.1 | Manage users and roles | `/users` |
 
-- `Customer`: billing entity
-- `Merchant`: operating outlet/site under a customer
-- `Terminal`: device inventory item
-- `SIM Card`: connectivity asset that can be linked to a terminal
-- `Rental`: commercial relationship linking customer + merchant + terminal
-- `Job`: operational workflow record
-- `Paper Roll Entry`: stock movement record
-- `Payout`: settlement/payment record
-- `Transaction`: payout line/source record
-- `Terminal Setting`: master template used to register devices
-- `Job SLA Rule`: per-job-type threshold rules by transition
-- `User`: display-level user directory / roles
-
-Core relationship model:
-
-- One customer can have many merchants.
-- One merchant belongs to one customer.
-- A terminal may or may not be linked to a merchant.
-- A SIM card may or may not be linked to a terminal.
-- A rental records `customer + merchant + terminal`.
-- A job records `customer + merchant` and may also reference:
-  - a replacement or installation inventory terminal
-  - an existing deployed merchant terminal
-  - a previous terminal in replacement flow
-- Jobs can create or update rentals, terminals, and paper roll stock.
+---
 
 ## 2. Route Map
-
-Primary routes currently exposed in the app:
 
 - `/dashboard`
 - `/customers`
@@ -58,614 +54,447 @@ Primary routes currently exposed in the app:
 - `/settings`
 - `/users`
 
-## 3. Navigation-Level Flow
+---
 
-### Dashboard
+## 3. System Overview
 
-Purpose:
+The app is organized around these main entities:
 
-- Summary view of fleet, jobs, payouts, and operational alerts.
+- `Customer` — billing entity
+- `Merchant` — operating outlet/site under a customer
+- `Terminal` — device inventory item
+- `SIM Card` — connectivity asset that can be linked to a terminal
+- `TermSetting` — brand/model template used to register terminal devices
+- `Rental` — commercial record linking customer + merchant + terminal
+- `Job` — operational workflow record
+- `PaperRollEntry` — stock movement log
+- `Payout` — settlement/disbursement record
+- `Transaction` — payout line/source record
+- `MDRRate` — merchant discount rate reference table
+- `User` — operator directory / roles
 
-Current behavior:
+Core relationship rules:
 
-- Shows operational metrics and recent jobs.
-- Links users deeper into jobs and other modules.
-- Does not create or mutate records directly.
+- One customer can have many merchants. A merchant belongs to exactly one customer.
+- A merchant cannot be created without a parent customer.
+- A terminal must be created from an existing terminal setting.
+- A SIM card may or may not be linked to one terminal.
+- A rental records `customer + merchant + terminal`.
+- A job records `customer + merchant` and may also reference a terminal.
+- Payout gross is derived from uploaded transaction totals, not entered manually.
+- MDR fee rates are configured in the MDR settings and applied when calculating payouts.
+
+---
 
 ## 4. Customer and Merchant Flows
 
-### 4.1 Create Customer
+### 4.1 Onboard New Customer
 
-Entry point:
-
-- `/customers`
-- Action: `Create Customer`
+Entry point: `/customers` → `Create Customer`
 
 Steps:
 
-1. User enters customer details.
-2. TIN can be captured here.
-3. Customer is created as the billing entity.
-4. On success, onboarding prompt appears.
+1. Admin fills in customer profile: name, type, registration number, TIN, contact details, address.
+2. Customer is created with status `Active`.
+3. Admin is prompted: add a merchant now, or do it later.
 
 Side effects:
 
-- Adds a new `Customer` record.
-- Customer starts as `Active`.
+- New `Customer` record created.
+- If the admin chooses to add a merchant immediately, flow continues into 4.2.
 
-### 4.2 Customer Onboarding
+### 4.2 Add Merchant to Customer
 
-Entry point:
+Entry point: `/customers/[id]` → `Add Merchant`
 
-- Immediately after customer creation.
+Rules:
 
-Steps:
-
-1. User can skip onboarding.
-2. Or user can create the first merchant under the new customer.
-
-Outcome:
-
-- Optional creation of a first merchant tied to the customer.
-
-### 4.3 Add Merchant
-
-Entry points:
-
-- `/merchants`
-- `/customers/[id]`
+- A merchant can only be created from within a customer detail page.
+- If no customer exists yet, the Admin must create one first (see 4.1).
+- There is no standalone "add merchant" entry on `/merchants` — that page is read-only listing.
 
 Steps:
 
-1. User selects or inherits an existing customer.
-2. User fills merchant details, bank, MDR plan, contact info.
-3. Merchant is created under the chosen customer.
+1. Admin opens a customer record.
+2. Admin clicks `Add Merchant`.
+3. Customer is pre-filled and locked.
+4. Admin fills merchant details: name, type, MID, bank, MDR plan, contact, bank account details.
+5. Merchant is created under that customer.
 
 Side effects:
 
-- Adds a `Merchant` record.
-- Merchant starts in `Onboarding`.
-- No manual device-linking to merchant exists anymore.
+- New `Merchant` record created with `customerId` set.
+- Merchant starts with status `Onboarding`.
 
-### 4.4 Merchant Detail
+---
 
-Purpose:
+## 5. Terminal and SIM Flows
 
-- Read/view merchant profile, linked terminals, and related jobs.
+### 5.1 Create Terminal Setting (Model Template)
 
-Current behavior:
-
-- Linked terminals are derived from terminal ownership data.
-- Merchant jobs are shown as related history.
-- There is a `New Job` button in UI, but the main implemented job creation flow is the jobs module.
-
-## 5. Terminal and SIM Inventory Flows
-
-### 5.1 Register Device
-
-Entry point:
-
-- `/terminals`
-- Action: `Register Device`
+Entry point: `/settings` → `Terminal Settings` tab → `Add Setting`
 
 Steps:
 
-1. User selects an existing `Terminal Setting`.
-2. Brand/model/category/rental metadata come from that setting.
-3. User selects initial location.
-4. User is prompted to optionally link a SIM card from `In Storage`.
-5. User can skip SIM linking.
-
-Outcome:
-
-- Terminal is created in inventory.
-- Serial is auto-generated.
+1. Admin selects brand and model.
+2. Admin sets rental rate (RM/month), deposit fee, and setup fee.
+3. Admin sets category (Countertop / Portable) and target bank.
+4. Setting is created as active.
 
 Side effects:
 
-- Adds a `Terminal` record.
-- If SIM is selected:
-  - SIM becomes `Active`
-  - SIM is linked to the terminal
-  - terminal connectivity becomes `4G + WiFi`
-- If SIM is skipped:
-  - terminal connectivity stays `WiFi only`
+- New `TermSetting` record created.
+- Available as a selectable template when registering new terminal devices.
 
-### 5.2 Terminal Detail
+### 5.2 Register New Terminal Device
 
-Entry point:
+Entry point: `/terminals` → `Register Device` (requires an existing terminal setting)
 
-- `/terminals/[id]`
+Rules:
+
+- A terminal setting must be selected — brand, model, and rental rates are inherited from it.
+- A terminal cannot be registered without a parent terminal setting.
+
+Steps:
+
+1. User selects an existing terminal setting. Brand, model, category, and rental rates populate from the setting.
+2. User selects initial location.
+3. Serial number is auto-generated.
+4. Optionally, user links a SIM card from `In Storage` inventory.
+5. Device is registered.
+
+Side effects:
+
+- New `Terminal` record created with `termSettingId` set, status `In Stock`.
+- If a SIM is linked: SIM status → `Active`; terminal connectivity → `4G + WiFi`.
+- If SIM is skipped: terminal connectivity → `WiFi only`.
+
+### 5.3 Manage Terminal Device
+
+Entry point: `/terminals/[id]`
 
 Supported actions:
 
-- Update terminal status
-- Link SIM card
-- Replace SIM card
-- Unlink SIM card
-- View linked jobs
-- View movement timeline
+- Update terminal status (logged to movement timeline).
+- Link SIM card from storage.
+- Replace existing SIM card.
+- Unlink SIM card (returns SIM to `In Storage`).
+- View linked jobs.
+- View movement timeline.
+- View linked terminal setting.
 
-SIM behavior:
+### 5.4 Add SIM Card
 
-- Replacing a SIM unlinks the current SIM first.
-- Unlinked SIM is moved back to `In Storage`.
-- Newly linked SIM becomes `Active`.
-- Terminal connectivity updates accordingly.
-
-Job behavior:
-
-- Terminal detail can show jobs related to that terminal.
-
-### 5.3 Add SIM Card
-
-Entry point:
-
-- `/simcards`
-- Action: `Add SIM Card`
+Entry point: `/simcards` → `Add SIM Card`
 
 Steps:
 
-1. User completes SIM form.
-2. User submits.
+1. User fills SIM details: ICCID, MSISDN, carrier, plan, data allowance.
+2. SIM is created as `In Storage`, unlinked.
 
-Outcome:
+### 5.5 Manage SIM Card
 
-- SIM card is created directly into inventory.
-
-Side effects:
-
-- New SIM is created as `In Storage`.
-- It is not linked at creation time.
-
-### 5.4 SIM Card Detail
-
-Entry point:
-
-- `/simcards/[id]`
+Entry point: `/simcards/[id]`
 
 Supported actions:
 
-- Edit SIM metadata
-- Change SIM status
-- Link terminal
-- Unlink terminal
-- Move SIM back to storage
+- Edit SIM metadata.
+- Change SIM status.
+- Link to a terminal (SIM → `Active`; terminal connectivity → `4G + WiFi`).
+- Unlink from terminal (SIM → `In Storage`; terminal connectivity → `WiFi only`).
+- If target terminal already has a SIM, the existing SIM is unlinked first.
 
-Cross-entity behavior:
-
-- Linking a SIM to a terminal sets SIM status to `Active`.
-- Clearing a linked terminal moves SIM to `In Storage`.
-- If a target terminal already has another SIM, the existing SIM is unlinked first.
-- Terminal connectivity flips between `4G + WiFi` and `WiFi only`.
+---
 
 ## 6. Rental Flows
 
-### 6.1 Create Rental
+### 6.1 View Rental and Issue Invoice / eInvoice
 
-Entry point:
-
-- `/rentals`
-- Action: `Create Rental`
-
-Steps:
-
-1. User selects merchant.
-2. Customer is inferred from the merchant.
-3. User selects terminal.
-4. User chooses plan, rate, deposit, and start date.
-5. User submits.
-
-Outcome:
-
-- Rental record is created with:
-  - customer
-  - merchant
-  - terminal
-
-### 6.2 Rental Detail
-
-Entry point:
-
-- `/rentals/[id]`
-
-Purpose:
-
-- View billing and device relationship details.
-- Generate invoice and eInvoice.
-
-Current rules:
-
-- Invoice generation is available from rental detail.
-- eInvoice is only available if the linked customer has a TIN number.
+Entry point: `/rentals/[id]`
 
 Displayed information:
 
-- Customer
-- Merchant
-- Terminal
-- Billing document state
-- Rental terms
-
-### 6.3 Rental Creation via Jobs
-
-Rental records can also be created or updated indirectly:
-
-- `Installation` job completion creates a rental.
-- `Replacement` job completion updates the active rental terminal.
-
-## 7. Overarching Job System
-
-### 7.1 Core Job Model
-
-Entry points:
-
-- `/jobs`
-- `/jobs/[id]`
-
-Each job contains:
-
-- job type
-- customer
-- merchant
-- optional terminal reference
-- optional previous terminal reference
-- stage and stage index
-- priority
-- assignee
-- history entries
-- evidence files
-- notification log
-- SLA state
-
-### 7.2 SLA Tracking
-
-Current implementation:
-
-- SLA is tracked per transition, not just per overall job.
-- Each history entry has a timestamp.
-- Elapsed time between status transitions is calculated.
-- Current transition state is flagged:
-  - `On Track`
-  - `Due Soon`
-  - `Breached`
-  - `Met`
-
-### 7.3 SLA Settings
-
-Entry point:
-
-- `/settings`
-- Tab: `Job SLA Settings`
-
-Admin can configure:
-
-- warning days per transition
-- breach days per transition
-- by job type / flow
-
-Example:
-
-- Replacement
-  - `Pending -> Device Prepared`
-  - warning `3` days
-  - breach `7` days
-
-### 7.4 Notifications
-
-Current implementation:
-
-- Email events are represented as notification log entries on the job.
-- They are not real outbound email integrations yet.
-
-### 7.5 Evidence
-
-Current implementation:
-
-- `Job Done` transitions require evidence.
-- `Completed` transitions require evidence.
-- Remote support completion also requires evidence.
-
-## 8. Job-Type Flows
-
-### 8.1 Installation Job
-
-Creation:
-
-1. Admin creates job.
-2. User selects:
-   - customer
-   - merchant
-   - inventory terminal
-   - type `Installation`
-3. Job starts as `Pending`.
-4. Notification log entry is created for Warehouse Manager.
-5. Selected terminal is reserved.
-
-Workflow:
-
-1. Warehouse Manager marks `Device Prepared`.
-2. Notification log entry is created for Operations.
-3. Operations marks `Job Done` with evidence.
-4. Notification log entry is created for Admin.
-5. Admin marks `Completed` with evidence.
-
-Completion side effects:
-
-- Rental record is created.
-- Terminal status becomes `Installed`.
-- Terminal is linked to merchant.
-- Terminal location becomes `Merchant Site`.
-- Terminal activity timeline is updated.
-
-### 8.2 Repair / Maintenance Job
-
-Creation:
-
-1. Helpdesk creates job.
-2. User selects:
-   - customer
-   - merchant
-   - type `Repair/Maintenance`
-3. Existing deployed merchant terminal is inferred.
-4. Job starts as `Pending`.
-5. Notification log entry is created for Operations.
-
-Workflow:
-
-1. Operations marks `Job Done` with evidence.
-2. Notification log entry is created for Helpdesk and Admin.
-3. Admin marks `Completed` with evidence.
-
-Completion side effects:
-
-- Linked terminal activity timeline is updated.
-- Terminal is returned to `Installed` at `Merchant Site`.
-
-Note:
-
-- The code currently sets the final actor role for completion to `Admin`.
-- The original requirement said `Admin or Helpdesk`.
-
-### 8.3 Replacement Job
-
-Creation:
-
-1. Helpdesk creates job.
-2. User selects:
-   - customer
-   - merchant
-   - type `Replacement`
-   - new inventory terminal
-3. Existing deployed merchant terminal is inferred as previous device.
-4. Job starts as `Pending`.
-5. Notification log entry is created for Warehouse Manager.
-6. New inventory terminal is reserved.
-
-Workflow:
-
-1. Warehouse Manager marks `Device Prepared`.
-2. Notification log entry is created for Operations.
-3. Operations marks `Job Done` with evidence.
-4. Notification log entry is created for Helpdesk and Admin.
-5. Helpdesk marks `Completed` with evidence.
-6. User is prompted to set the previous terminal inventory status.
-
-Completion side effects:
-
-- Previous terminal status is updated.
-- Previous terminal merchant link is cleared.
-- Previous terminal timeline is updated.
-- New terminal becomes `Installed`.
-- New terminal is linked to merchant.
-- New terminal timeline is updated.
-- Active rental terminal is updated to the new device.
-- If no active rental exists, a new rental is created.
-
-### 8.4 Paper Roll Request Job
-
-Creation:
-
-1. Admin creates job.
-2. User selects:
-   - customer
-   - merchant
-   - type `Paper Roll Request`
-   - roll quantity
-   - payment target `Merchant` or `Bank`
-3. Job starts as `Pending`.
-4. Notification log entry is created for Warehouse Manager.
-
-Workflow:
-
-1. Warehouse Manager marks `Stock Prepared`.
-2. Notification log entry is created for Operations.
-3. Operations marks `Job Done` with evidence.
-4. Notification log entry is created for Admin.
-5. Admin marks `Completed` with evidence.
-
-Completion side effects:
-
-- Paper roll stock movement is posted as an `Issued` entry with negative quantity.
-
-### 8.5 Remote Support Job
-
-Creation:
-
-1. Helpdesk creates job.
-2. User selects:
-   - customer
-   - merchant
-   - type `Remote Support`
-3. Existing deployed merchant terminal is inferred.
-4. Job starts as `Pending`.
-5. Notification log entry is created for Admin.
-
-Workflow:
-
-1. Helpdesk marks `Completed` with evidence.
-
-Completion side effects:
-
-- Linked terminal activity timeline is updated if a deployed merchant terminal exists.
-
-## 9. Paper Roll Inventory Flow
-
-Entry point:
-
-- `/paper-rolls`
-
-Purpose:
-
-- Manage stock levels independent of job flow.
+- Customer, merchant, terminal, billing terms, invoice status.
 
 Supported actions:
 
-- Manual `Update Stock`
-- Record:
-  - stock in / received
-  - stock out / issued
-  - stock adjustment
+- Issue invoice.
+- Issue eInvoice — only available if the linked customer has a TIN number.
 
-Behavior:
+---
 
-- Running balance is calculated from movement history.
-- Low and critical stock states are surfaced.
-- Job-driven paper roll completion also writes here.
+## 7. Job Flows
 
-## 10. Payout and Transaction Flows
+### Job System Overview
 
-### 10.1 Create Payout Manually
+Every job contains:
 
-Entry point:
+- Job type, customer, merchant, optional terminal reference.
+- Stage and stage history with timestamps.
+- SLA tracking per stage transition.
+- Evidence uploads per stage.
+- Notification log entries (representing emails).
+- Priority and assignee.
 
-- `/payouts`
-- Action: `Create Payout`
+SLA tracking:
+
+- Duration between each stage transition is calculated from history timestamps.
+- Each current transition is flagged as `On Track`, `Due Soon`, `Breached`, or `Met`.
+- SLA thresholds are configurable per job type and per transition in Settings (see 8.1).
+
+### 7.1 Job: Installation
+
+Created by: Admin
+
+Creation steps:
+
+1. Admin selects existing customer and merchant.
+2. Admin selects a terminal device from inventory.
+3. Job type: `Installation`. Status: `Pending`.
+4. Notification sent to Warehouse Manager.
+
+Workflow:
+
+1. Warehouse Manager marks `Device Prepared`. Notification sent to Operations.
+2. Operations completes on-site work, marks `Job Done` with evidence. Notification sent to Admin.
+3. Admin signs off and marks `Completed` with proof.
+
+Completion side effects:
+
+- `Rental` record created with customer, merchant, and selected terminal.
+- Terminal status → `Installed` at `Merchant Site`.
+- Terminal activity timeline updated.
+
+### 7.2 Job: Repair / Maintenance
+
+Created by: Helpdesk
+
+Creation steps:
+
+1. Helpdesk selects existing customer and merchant.
+2. Job type: `Repair/Maintenance`. Status: `Pending`.
+3. Existing deployed terminal for the merchant is inferred.
+4. Notification sent to Operations.
+
+Workflow:
+
+1. Operations completes maintenance and uploads form, marks `Job Done` with evidence. Notification sent to Helpdesk and Admin.
+2. Admin or Helpdesk marks `Completed` with proof.
+
+Completion side effects:
+
+- Linked terminal activity timeline updated.
+- Terminal returned to `Installed` at `Merchant Site`.
+
+### 7.3 Job: Replacement
+
+Created by: Helpdesk
+
+Creation steps:
+
+1. Helpdesk selects existing customer and merchant.
+2. Helpdesk selects replacement terminal device from inventory.
+3. Job type: `Replacement`. Status: `Pending`.
+4. Existing deployed merchant terminal is inferred as the previous device.
+5. Notification sent to Warehouse Manager.
+6. Replacement terminal is reserved.
+
+Workflow:
+
+1. Warehouse Manager marks `Device Prepared`. Notification sent to Operations.
+2. Operations completes swap, marks `Job Done` with evidence. Notification sent to Helpdesk and Admin.
+3. Admin or Helpdesk marks `Completed` with proof.
+4. A prompt is displayed asking for the previous terminal's new inventory status.
+
+Completion side effects:
+
+- Previous terminal: merchant link cleared, status updated per user input, timeline updated.
+- New terminal: status → `Installed` at `Merchant Site`, timeline updated.
+- Active rental terminal updated to the new device. If no active rental exists, a new rental is created.
+
+### 7.4 Job: Paper Roll Request
+
+Created by: Admin
+
+Creation steps:
+
+1. Admin selects existing customer and merchant.
+2. Job type: `Paper Roll Request`.
+3. Admin enters quantity and sets payment target: `Merchant` or `Bank`.
+4. Status: `Pending`. Notification sent to Warehouse Manager.
+
+Workflow:
+
+1. Warehouse Manager prepares rolls and marks `Stock Prepared`. Notification sent to Operations.
+2. Operations delivers rolls, marks `Job Done` with evidence. Notification sent to Admin.
+3. Admin confirms payment and marks `Completed`.
+
+Completion side effects:
+
+- Paper roll stock updated: `Issued` entry posted with negative quantity.
+
+### 7.5 Job: Remote Support
+
+Created by: Helpdesk
+
+Creation steps:
+
+1. Helpdesk selects existing customer and merchant.
+2. Job type: `Remote Support`. Status: `Pending`.
+3. Notification sent to Admin.
+
+Workflow:
+
+1. Helpdesk resolves the issue and marks `Completed` with evidence.
+
+Completion side effects:
+
+- If a deployed terminal is linked to the merchant, its activity timeline is updated.
+
+---
+
+## 8. Settings Flows
+
+### 8.1 Configure Job SLA Thresholds
+
+Entry point: `/settings` → `Job SLA Settings` tab
+
+Admin can configure warning and breach day thresholds for each stage transition within each job type.
+
+Example:
+
+- Replacement — `Pending → Device Prepared`: warning 3 days, breach 7 days.
+- Each transition is configured independently.
+
+These values drive the `On Track` / `Due Soon` / `Breached` / `Met` SLA flags shown on every job.
+
+---
+
+## 9. Paper Roll Stock Flow
+
+Entry point: `/paper-rolls`
+
+Supported actions:
+
+- Record stock in (received).
+- Record stock out (issued).
+- Record stock adjustment.
+- Monitor running balance and history.
+
+Running balance is calculated from all movement entries. Low and critical stock states are surfaced. Job-driven paper roll completion also writes here automatically.
+
+---
+
+## 10. Payout Flows
+
+### 10.1 Create Payout
+
+Entry point: `/payouts` → `Create Payout`
 
 Steps:
 
-1. User selects merchant.
-2. User selects settlement period.
-3. User chooses payment method.
-4. User enters gross amount.
-5. MDR fee is auto-derived at `1.8%` unless overridden.
-6. User submits.
+1. User selects existing customer.
+2. User selects merchant under that customer.
+3. User sets settlement period and payment method.
+4. User uploads a transactions file (Excel or CSV).
+5. File is parsed; transaction rows are displayed with totals.
+6. Gross is derived by summing all transaction amounts.
+7. MDR fee is auto-calculated (default 1.8%).
+8. User optionally checks `Generate eInvoice` to issue an invoice on creation.
+9. User confirms to create the payout.
 
-Outcome:
+Side effects:
 
-- Payout is created in `Pending`.
+- `Payout` record created as `Pending`.
+- `Transaction` records created and linked to the payout.
+- If eInvoice was selected: `einvoice = true` and `issued` date set.
 
-### 10.2 Upload Transactions and Auto-Generate Payouts
+### 10.2 Upload Transactions and Auto-Generate Payouts (Batch)
 
-Entry point:
-
-- `/payouts`
-- Action: `Upload Transactions`
+Entry point: `/payouts` → `Upload Transactions`
 
 Steps:
 
 1. User selects settlement period.
-2. User uploads CSV/Excel transaction file.
-3. App parses file and groups transactions by merchant.
-4. App shows preview:
-   - merchant
-   - transaction count
-   - gross
-   - MDR fee
-   - net payout
+2. User uploads a CSV/Excel file containing transactions for multiple merchants.
+3. File is parsed and transactions are grouped by merchant.
+4. Preview table shows: merchant, transaction count, gross, MDR fee, net payout per group.
 5. User confirms processing.
 
-Outcome:
+Side effects:
 
-- Multiple payouts are created.
-- Related transaction records are created and linked to payouts.
+- One `Payout` record created per merchant group, all as `Pending`.
+- `Transaction` records created and linked to their respective payouts.
 
-Note:
+### 10.3 View Payout and Confirm Payment
 
-- The current parser is simulated, not a real spreadsheet parser.
-
-### 10.3 Payout Detail and Payment Confirmation
-
-Entry point:
-
-- `/payouts/[id]`
+Entry point: `/payouts/[id]`
 
 Supported actions:
 
-- View payout summary
-- View transaction breakdown
-- Mark payout as paid
-- Upload proof of payment
+- View payout summary (merchant, period, gross, fee, net).
+- View transaction breakdown.
+- Mark as paid — requires uploading a proof-of-payment file.
 
-Behavior:
+Side effects on mark as paid:
 
-- `Mark as Paid` requires a proof file in the UI flow.
-- Payment proof is displayed on the payout.
+- `paymentProof` set to uploaded file name.
+- `einvoice = true`, `issued` date set.
 
-## 11. Settings and Configuration Flows
+---
 
-### 11.1 Settings
+## 11. MDR Rate Settings
 
-Entry point:
+Entry point: `/mdr`
 
-- `/settings`
+Purpose:
 
-Current tabs:
+- Configure merchant discount rates by payment type and network.
+- These rates are the reference for MDR fee calculations applied to payouts.
 
-- `Terminal Settings`
-- `Job SLA Settings`
+Supported actions:
 
-Terminal settings:
+- View all rate entries.
+- Edit rate values per payment type (e.g. Visa Domestic Debit, DuitNow QR, American Express).
 
-- Create and maintain brand/model/category/rental templates used during device registration.
+Rate structure: each entry has a payment type label, a network, a category (Debit / Credit / QR), and a percentage rate.
 
-Job SLA settings:
+---
 
-- Configure warning and breach thresholds by flow and stage transition.
+## 12. User Management
 
-### 11.2 Users & Roles
+Entry point: `/users`
 
-Entry point:
+Supported actions:
 
-- `/users`
+- View operator directory with roles and activity.
+- Invite or create a new user.
+- Assign or change roles.
 
-Current behavior:
+Roles: `Admin` · `Operations` · `Warehouse` · `Finance` · `Viewer`
 
-- User directory UI
-- Invite/create user UI
-- Role assignment UI
+Current limitation: roles are descriptive only. There is no enforced RBAC or permission engine in the current build.
 
-Current limitation:
+---
 
-- Roles are descriptive only.
-- There is no enforced RBAC or permission engine in the app yet.
+## 13. Cross-Module Side Effects
 
-## 12. Cross-Module Side Effects
+| Trigger | Side effects |
+|---|---|
+| Create Terminal + link SIM | SIM → `Active`; terminal connectivity → `4G + WiFi` |
+| Unlink/replace SIM on Terminal | Old SIM → `In Storage`; connectivity updated |
+| Installation Job → Completed | Terminal → `Installed` at Merchant Site; Rental created |
+| Replacement Job → Completed | Old terminal cleared; new terminal → `Installed`; active Rental device updated |
+| Paper Roll Request Job → Completed | `PaperRollEntry` Issued record posted with negative quantity |
+| Upload transactions for payout | `Transaction` records created and linked via `payoutId` |
+| Payout → Mark as Paid | `paymentProof` set; `einvoice = true`; `issued` date set |
+| Rental eInvoice | Only issuable if `customer.tin` is non-empty |
 
-These are the most important record mutations across modules:
+---
 
-- Creating a terminal can optionally activate and link a SIM.
-- Replacing/unlinking a SIM updates both SIM status and terminal connectivity.
-- Installation job completion creates a rental and activates terminal deployment state.
-- Replacement job completion updates both old and new terminal timelines and updates the active rental device.
-- Remote support and repair jobs append terminal activity.
-- Paper roll request completion posts stock movement.
-- Rental detail invoice actions update invoice/eInvoice fields on the rental.
+## 14. Implementation Notes
 
-## 13. Current Role / Permission Reality
-
-The app currently displays the signed-in header user as `Arif Rahman` with role `Administrator`.
-
-Important implementation note:
-
-- There is no actual `SuperAdmin` role implemented.
-- There is no enforced permission system.
-- The current build behaves like a full-access admin demo session rather than a role-restricted app.
-
-## 14. Known Implementation Notes
-
-- Context providers keep records in memory for the current app session.
-- Job notifications are stored as log entries, not sent as real emails.
-- Payout upload uses simulated parsing logic.
-- Merchant detail still reads some related jobs and terminals from static data instead of being fully context-driven everywhere.
-
+- Context providers keep all records in memory for the current session only.
+- Job notifications are stored as log entries — there is no real outbound email integration.
+- Transaction file parsing is simulated — there is no real spreadsheet parser.
+- There is no enforced RBAC; the current build behaves as a full-access admin demo session.
