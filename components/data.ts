@@ -59,13 +59,14 @@ export interface Job {
   history: JobHistoryEntry[];
   notifications: JobNotification[];
   paperRollRequest: { quantity: number; paymentTarget: "Merchant" | "Bank" } | null;
+  termSettingId?: string;
   isNew?: boolean;
 }
 
 export interface Payout {
   id: string; merchant: { id: string; name: string };
   mid: string; bank: string; gross: number; fee: number; net: number;
-  txns: number; period: string; status: string; exception: string | null;
+  txns: number; period: string; status: string; exceptions: PayoutException[];
   checks: string; einvoice: boolean; issued: string | null; isNew?: boolean;
   paymentMethod: string;
   paymentProof: string | null;
@@ -134,6 +135,22 @@ export interface User {
 }
 
 export interface TimelineEntry { dot: string; time: string; title: string; desc: string }
+
+export interface AuditLog {
+  id: string;
+  actionAt: string;
+  user: { id: string; name: string; role: string };
+  description: string;
+  type: "Create" | "Update" | "Delete" | "Auth" | "Export" | "System";
+  entityType?: string;
+  entityId?: string;
+}
+
+export interface PayoutException {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+}
 
 /* ---------------- Status meta ---------------- */
 export const TERMINAL_STATUS: Record<string, StatusMeta> = {
@@ -441,7 +458,7 @@ export const payouts: Payout[] = payoutStatusSeq.map((status, i) => {
     txns: 40 + i * 13,
     period: "2026-05-" + (i % 2 ? "16 – 31" : "01 – 15"),
     status,
-    exception: null, checks: "4 of 4 passed",
+    exceptions: [], checks: "8 of 8 passed",
     einvoice: status === "Paid",
     issued: status === "Paid" ? "2026-06-01" : null,
     paymentMethod: PAYOUT_METHODS[i % PAYOUT_METHODS.length],
@@ -539,6 +556,34 @@ export const rentals: Rental[] = terminals
     };
   });
 
+/* Back-fill exception checks on seed payouts now that terminals + rentals are available */
+{
+  const _allCodes = ["merchant_found","mid_tid_match","merchant_active","mdr_setup","commission_rule","terminal_assigned","rental_setup","tin_ready"];
+  payouts.forEach((p) => {
+    const m = merchants.find((mx) => mx.id === p.merchant.id)!;
+    const cust = _custSeed.find((c) => c.id === m.customerId);
+    const excs: PayoutException[] = [];
+    if (m.status === "Inactive" || m.status === "Suspended") {
+      excs.push({ code: "merchant_active", severity: "error", message: `Merchant is ${m.status.toLowerCase()} — payouts cannot be processed` });
+    }
+    if (!m.mdrPlan || m.finance !== "Ready") {
+      excs.push({ code: "mdr_setup", severity: "error", message: m.finance !== "Ready" ? `Finance status is "${m.finance}" — must be Ready` : "No MDR plan assigned to this merchant" });
+    }
+    if (!terminals.some((t) => t.merchant?.id === m.id && t.status === "Installed")) {
+      excs.push({ code: "terminal_assigned", severity: "warning", message: "No installed terminal linked to this merchant" });
+    }
+    if (!rentals.some((r) => r.merchant.id === m.id && r.status === "Active")) {
+      excs.push({ code: "rental_setup", severity: "warning", message: "No active rental found for this merchant" });
+    }
+    if (!cust?.tin) {
+      excs.push({ code: "tin_ready", severity: "warning", message: "Customer TIN not registered — eInvoice cannot be issued" });
+    }
+    p.exceptions = excs;
+    const failed = new Set(excs.map((e) => e.code));
+    p.checks = `${_allCodes.filter((c) => !failed.has(c)).length} of ${_allCodes.length} passed`;
+  });
+}
+
 /* ---------------- SIM Cards ---------------- */
 const _msisdnPrefixes = ["012","013","016","017","018","011","019","012","016","013","017","011","018","016","012","013"];
 
@@ -591,6 +636,109 @@ export const paperRollEntries: PaperRollEntry[] = [
 // Running total: 350 received − 275 issued/adjusted = 75 rolls remaining
 
 /* ---------------- Movement timeline helper ---------------- */
+/* ---------------- Audit Logs ---------------- */
+export const auditLogs: AuditLog[] = [
+  { id: "AL-0001", actionAt: "2026-06-07 09:41:03", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Marked payout PO-90216 as Paid",                            type: "Update", entityType: "Payout",   entityId: "PO-90216"  },
+  { id: "AL-0002", actionAt: "2026-06-07 09:28:17", user: { id: "U205", name: "Nurul Huda",    role: "Finance"    }, description: "Created payout PO-90223 for Harbour Seafood Market",         type: "Create", entityType: "Payout",   entityId: "PO-90223"  },
+  { id: "AL-0003", actionAt: "2026-06-07 09:05:44", user: { id: "U202", name: "Mei Ling Tan",  role: "Operations" }, description: "Updated job JOB-24088 to Job Done",                          type: "Update", entityType: "Job",      entityId: "JOB-24088" },
+  { id: "AL-0004", actionAt: "2026-06-07 08:52:09", user: { id: "U203", name: "Suresh Kumar",  role: "Warehouse"  }, description: "Updated job JOB-24085 to Device Prepared",                   type: "Update", entityType: "Job",      entityId: "JOB-24085" },
+  { id: "AL-0005", actionAt: "2026-06-07 08:31:55", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Exported terminal inventory report",                         type: "Export", entityType: "Terminal"                        },
+  { id: "AL-0006", actionAt: "2026-06-07 08:15:22", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Logged in",                                                  type: "Auth"                                                  },
+  { id: "AL-0007", actionAt: "2026-06-06 17:44:31", user: { id: "U206", name: "Daniel Wong",   role: "Operations" }, description: "Created job JOB-24095 — Repair/Maintenance for BlueWave Spa", type: "Create", entityType: "Job",      entityId: "JOB-24095" },
+  { id: "AL-0008", actionAt: "2026-06-06 17:12:08", user: { id: "U205", name: "Nurul Huda",    role: "Finance"    }, description: "Uploaded transactions batch — 6 payouts generated",          type: "Create", entityType: "Payout"                          },
+  { id: "AL-0009", actionAt: "2026-06-06 16:55:40", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Registered terminal SNPA480224 to inventory",                type: "Create", entityType: "Terminal", entityId: "SNPA480224" },
+  { id: "AL-0010", actionAt: "2026-06-06 16:30:17", user: { id: "U204", name: "Priya Nair",    role: "Finance"    }, description: "Issued eInvoice for rental RNT-4004",                        type: "Update", entityType: "Rental",   entityId: "RNT-4004"  },
+  { id: "AL-0011", actionAt: "2026-06-06 15:48:02", user: { id: "U202", name: "Mei Ling Tan",  role: "Operations" }, description: "Completed job JOB-24082 — Installation",                    type: "Update", entityType: "Job",      entityId: "JOB-24082" },
+  { id: "AL-0012", actionAt: "2026-06-06 15:20:55", user: { id: "U203", name: "Suresh Kumar",  role: "Warehouse"  }, description: "Linked SIM SIM-1003 to terminal SNIN480171",                 type: "Update", entityType: "SimCard",  entityId: "SIM-1003"  },
+  { id: "AL-0013", actionAt: "2026-06-06 14:37:19", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Updated SLA threshold — Replacement · Pending → Device Prepared from 7 to 5 days", type: "Update", entityType: "SLARule" },
+  { id: "AL-0014", actionAt: "2026-06-06 13:59:44", user: { id: "U207", name: "Hafiz Ismail",  role: "Operations" }, description: "Created rental RNT-4013 — Apex Fitness Studio",               type: "Create", entityType: "Rental",   entityId: "RNT-4013"  },
+  { id: "AL-0015", actionAt: "2026-06-06 13:22:08", user: { id: "U205", name: "Nurul Huda",    role: "Finance"    }, description: "Exported payout report for period 2026-05-16 – 31",          type: "Export", entityType: "Payout"                          },
+  { id: "AL-0016", actionAt: "2026-06-06 12:05:33", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Created merchant Harbour Seafood Market under Elara Capital", type: "Create", entityType: "Merchant", entityId: "M1055"     },
+  { id: "AL-0017", actionAt: "2026-06-06 11:48:20", user: { id: "U202", name: "Mei Ling Tan",  role: "Operations" }, description: "Updated terminal SNVE480437 status to Maintenance",           type: "Update", entityType: "Terminal", entityId: "SNVE480437" },
+  { id: "AL-0018", actionAt: "2026-06-06 10:31:05", user: { id: "U208", name: "Joanne Lee",    role: "Admin"      }, description: "Invited user priya.nair@paidchain.com with role Finance",    type: "Create", entityType: "User"                            },
+  { id: "AL-0019", actionAt: "2026-06-06 09:44:58", user: { id: "U203", name: "Suresh Kumar",  role: "Warehouse"  }, description: "Received paper roll stock — 100 rolls (PO-BX-2026-003)",    type: "Create", entityType: "PaperRoll"                       },
+  { id: "AL-0020", actionAt: "2026-06-06 09:12:37", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Logged in",                                                  type: "Auth"                                                  },
+  { id: "AL-0021", actionAt: "2026-06-05 18:03:14", user: { id: "U206", name: "Daniel Wong",   role: "Operations" }, description: "Logged out",                                                 type: "Auth"                                                  },
+  { id: "AL-0022", actionAt: "2026-06-05 17:55:41", user: { id: "U204", name: "Priya Nair",    role: "Finance"    }, description: "Exported MDR rate schedule",                                 type: "Export", entityType: "MDRRate"                          },
+  { id: "AL-0023", actionAt: "2026-06-05 16:29:08", user: { id: "U202", name: "Mei Ling Tan",  role: "Operations" }, description: "Swapped device on job JOB-24091 — SNPA480118 → SNIN480065",  type: "Update", entityType: "Job",      entityId: "JOB-24091" },
+  { id: "AL-0024", actionAt: "2026-06-05 15:44:22", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Deleted terminal setting PAX-103",                           type: "Delete", entityType: "TermSetting", entityId: "PAX-103" },
+  { id: "AL-0025", actionAt: "2026-06-05 14:58:09", user: { id: "U207", name: "Hafiz Ismail",  role: "Operations" }, description: "Uploaded transactions batch — 4 payouts generated",          type: "Create", entityType: "Payout"                          },
+  { id: "AL-0026", actionAt: "2026-06-05 13:22:46", user: { id: "U205", name: "Nurul Huda",    role: "Finance"    }, description: "Updated MDR rate for DuitNow QR from 0.25% to 0.20%",        type: "Update", entityType: "MDRRate",  entityId: "MDR-08"    },
+  { id: "AL-0027", actionAt: "2026-06-05 12:11:33", user: { id: "U203", name: "Suresh Kumar",  role: "Warehouse"  }, description: "Linked SIM SIM-1007 to terminal SNVE480490",                 type: "Update", entityType: "SimCard",  entityId: "SIM-1007"  },
+  { id: "AL-0028", actionAt: "2026-06-05 11:05:17", user: { id: "U208", name: "Joanne Lee",    role: "Admin"      }, description: "Created customer Primula Ventures Bhd",                      type: "Create", entityType: "Customer", entityId: "CUST-003"  },
+  { id: "AL-0029", actionAt: "2026-06-05 09:48:54", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "System backup completed",                                    type: "System"                                                },
+  { id: "AL-0030", actionAt: "2026-06-05 09:00:00", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Logged in",                                                  type: "Auth"                                                  },
+];
+
+/* ---------------- Role Permissions ---------------- */
+export const PERMISSION_MODULES: { module: string; actions: string[] }[] = [
+  { module: "Customers",   actions: ["View", "Create", "Edit", "Delete"] },
+  { module: "Merchants",   actions: ["View", "Create", "Edit", "Delete"] },
+  { module: "Terminals",   actions: ["View", "Create", "Edit", "Delete", "Export"] },
+  { module: "Jobs",        actions: ["View", "Create", "Edit", "Escalate", "Close", "Export"] },
+  { module: "Payouts",     actions: ["View", "Create", "Process", "Export"] },
+  { module: "Rentals",     actions: ["View", "Create", "Edit", "Delete"] },
+  { module: "MDR Rates",   actions: ["View", "Edit", "Export"] },
+  { module: "SIM Cards",   actions: ["View", "Edit", "Delete"] },
+  { module: "Paper Rolls", actions: ["View", "Record", "Adjust", "Export"] },
+  { module: "Users",       actions: ["View", "Invite", "Edit", "Suspend"] },
+  { module: "Settings",    actions: ["View", "Edit"] },
+  { module: "Audit Logs",  actions: ["View", "Export"] },
+];
+
+const _allPerms = PERMISSION_MODULES.flatMap((m) => m.actions.map((a) => `${m.module}.${a}`));
+
+export const ROLE_PERMISSIONS: Record<string, string[]> = {
+  "Admin": _allPerms,
+  "Operations": [
+    "Customers.View",
+    "Merchants.View",
+    "Terminals.View", "Terminals.Edit",
+    "Jobs.View", "Jobs.Create", "Jobs.Edit", "Jobs.Escalate", "Jobs.Close", "Jobs.Export",
+    "Payouts.View",
+    "Rentals.View", "Rentals.Create", "Rentals.Edit",
+    "MDR Rates.View",
+    "SIM Cards.View",
+    "Paper Rolls.View",
+    "Users.View",
+    "Settings.View",
+    "Audit Logs.View",
+  ],
+  "Warehouse": [
+    "Customers.View",
+    "Merchants.View",
+    "Terminals.View", "Terminals.Create", "Terminals.Edit", "Terminals.Export",
+    "Jobs.View", "Jobs.Edit",
+    "SIM Cards.View", "SIM Cards.Edit",
+    "Paper Rolls.View", "Paper Rolls.Record", "Paper Rolls.Adjust", "Paper Rolls.Export",
+    "Settings.View",
+  ],
+  "Finance": [
+    "Customers.View",
+    "Merchants.View",
+    "Terminals.View",
+    "Jobs.View",
+    "Payouts.View", "Payouts.Create", "Payouts.Process", "Payouts.Export",
+    "Rentals.View", "Rentals.Create", "Rentals.Edit",
+    "MDR Rates.View", "MDR Rates.Edit", "MDR Rates.Export",
+    "Users.View",
+    "Settings.View",
+    "Audit Logs.View", "Audit Logs.Export",
+  ],
+  "Viewer": [
+    "Customers.View",
+    "Merchants.View",
+    "Terminals.View",
+    "Jobs.View",
+    "Payouts.View",
+    "Rentals.View",
+    "MDR Rates.View",
+    "SIM Cards.View",
+    "Paper Rolls.View",
+    "Audit Logs.View",
+  ],
+};
+
 export function terminalTimeline(t: Terminal): TimelineEntry[] {
   const base: TimelineEntry[] = [
     { dot: "", time: t.lastMovement + " · 14:22", title: "Status → " + (TERMINAL_STATUS[t.status]?.label || t.status), desc: "Updated by " + STAFF[2] + (t.merchant ? " · linked to " + t.merchant.name : "") },

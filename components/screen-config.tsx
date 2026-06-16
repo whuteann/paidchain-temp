@@ -1,89 +1,20 @@
-/* PaidChain — Terminal Settings, MDR, Users & Roles */
+/* PaidChain — Settings: Job SLA, MDR, Users & Roles */
 import { useState } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity } from "./components";
-import { termSettings as initialTermSettings, mdr, users as initialUsers, BRANDS, BANKS, ROLES } from "./data";
-import type { TermSetting, User } from "./data";
+import { mdr, users as initialUsers, ROLES, PERMISSION_MODULES, ROLE_PERMISSIONS } from "./data";
+import type { User } from "./data";
 import { useJobSla } from "./job-sla-context";
 
-/* =================== TERMINAL SETTINGS =================== */
+/* =================== SETTINGS (SLA only) =================== */
 export function TerminalSettings() {
-  const [tab, setTab] = useState<"terminal" | "sla">("terminal");
-  const [rows, setRows] = useState<TermSetting[]>(initialTermSettings);
-  const [q, setQ] = useState("");
-  const [show, setShow] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-
-  const filtered = rows.filter((r) => (r.brand + " " + r.model + " " + r.category).toLowerCase().includes(q.toLowerCase()));
-
   return (
     <div>
       <PageHead
         title="Settings"
-        sub="Admin configuration for terminal inventory and job SLA thresholds"
-        actions={tab === "terminal" ? <Btn variant="primary" icon="plus" onClick={() => setShow(true)}>New Terminal Setting</Btn> : undefined}
+        sub="Configure job SLA thresholds by workflow and stage transition"
       />
-      <div className="tabs" style={{ marginBottom: 20 }}>
-        {[["terminal", "Terminal Settings"], ["sla", "Job SLA Settings"]].map(([id, label]) => (
-          <div key={id} className={"tab" + (tab === id ? " active" : "")} onClick={() => setTab(id as "terminal" | "sla")}>{label}</div>
-        ))}
-      </div>
-      {tab === "terminal" ? (
-        <>
-          <Card>
-            <Toolbar>
-              <SearchBox value={q} onChange={setQ} placeholder="Search brand or model…" />
-              <span className="tb-meta">{filtered.length} rate cards</span>
-            </Toolbar>
-            <div className="tbl-wrap">
-              <table className="tbl">
-                <thead><tr>{["Brand / Model","Bank","Category","Monthly Rental","Deposit","Setup Fee","Units","Status",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {filtered.map((r) => (
-                    <tr key={r.id}>
-                      <td>
-                        <div className="ent">
-                          <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
-                          <div><div className="ent-name">{r.brand}</div><div className="ent-sub">{r.model}</div></div>
-                        </div>
-                      </td>
-                      <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                        <Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{r.bank}
-                      </span></td>
-                      <td><Chip cls={r.category === "Portable" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
-                      <td className="td-strong">RM {r.monthly}.00 <span className="td-mut" style={{ fontWeight: 400 }}>/mo</span></td>
-                      <td className="td-mut">RM {r.deposit}</td>
-                      <td className="td-mut">{r.setup ? "RM " + r.setup : "Waived"}</td>
-                      <td className="td-mut">{r.units}</td>
-                      <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
-                      <td>
-                        <div className="row-actions">
-                          <button className="icon-btn"><Icon name="edit" size={14} /></button>
-                          <button className="icon-btn"><Icon name="more" size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-          {show && (
-            <TerminalSettingModal
-              onClose={() => setShow(false)}
-              onCreate={(r) => {
-                setRows([{ ...r, id: "NEW-" + rows.length }, ...rows]);
-                setShow(false);
-                setToast("Terminal setting created");
-                setTimeout(() => setToast(null), 2400);
-              }}
-            />
-          )}
-        </>
-      ) : (
-        <JobSlaSettings />
-      )}
-      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+      <JobSlaSettings />
     </div>
   );
 }
@@ -134,65 +65,6 @@ function JobSlaSettings() {
       </Card>
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
-  );
-}
-
-function TerminalSettingModal({ onClose, onCreate }: { onClose: () => void; onCreate: (r: TermSetting) => void }) {
-  const brandKeys = Object.keys(BRANDS);
-  const [f, setF] = useState({ brand: brandKeys[0], model: "", category: "Countertop", bank: BANKS[0], monthly: "", deposit: "", setup: "", active: true });
-  const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
-  const valid = f.model && f.monthly;
-
-  return (
-    <Modal
-      title="New Terminal Setting" sub="Define a device model and its rental rate card" icon="tag"
-      onClose={onClose}
-      foot={<>
-        <div className="mf-spacer" />
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={!valid} onClick={() => onCreate({
-          ...f, id: "", monthly: +f.monthly, deposit: +f.deposit || 0, setup: +f.setup || 0, units: 0,
-        })}>Create Setting</Btn>
-      </>}
-    >
-      <div className="field-row">
-        <Field label="Brand">
-          <select className="input" value={f.brand} onChange={(e) => set("brand", e.target.value)}>
-            {brandKeys.map((b) => <option key={b}>{b}</option>)}
-          </select>
-        </Field>
-        <Field label="Category">
-          <select className="input" value={f.category} onChange={(e) => set("category", e.target.value)}>
-            {["Countertop","Portable","Mobile (mPOS)","SoftPOS"].map((c) => <option key={c}>{c}</option>)}
-          </select>
-        </Field>
-      </div>
-      <div className="field-row">
-        <Field label="Model name" hint="required">
-          <input className="input" placeholder="e.g. A920 Pro" value={f.model} onChange={(e) => set("model", e.target.value)} />
-        </Field>
-        <Field label="Bank">
-          <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
-            {BANKS.map((b) => <option key={b}>{b}</option>)}
-          </select>
-        </Field>
-      </div>
-      <div className="field-row">
-        <Field label="Monthly rental (RM)" hint="required">
-          <input className="input" type="number" placeholder="0.00" value={f.monthly} onChange={(e) => set("monthly", e.target.value)} />
-        </Field>
-        <Field label="Deposit (RM)">
-          <input className="input" type="number" placeholder="0.00" value={f.deposit} onChange={(e) => set("deposit", e.target.value)} />
-        </Field>
-        <Field label="Setup fee (RM)">
-          <input className="input" type="number" placeholder="0.00" value={f.setup} onChange={(e) => set("setup", e.target.value)} />
-        </Field>
-      </div>
-      <label style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13, fontWeight: 500 }}>
-        <input type="checkbox" checked={f.active} onChange={(e) => set("active", e.target.checked)} />
-        Active — available for new rentals
-      </label>
-    </Modal>
   );
 }
 
@@ -247,6 +119,44 @@ export function MDR() {
 
 /* =================== USERS =================== */
 export function Users() {
+  const [tab, setTab] = useState<"users" | "roles">("users");
+  const [editRole, setEditRole] = useState<string | null>(null);
+
+  function switchTab(t: "users" | "roles") {
+    setTab(t);
+    setEditRole(null);
+  }
+
+  return (
+    <div>
+      <PageHead title="Users & Roles" sub="Manage team members and configure role permissions" />
+
+      <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--line)" }}>
+        {(["users", "roles"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => switchTab(t)}
+            style={{
+              padding: "10px 18px", border: "none", background: "none", cursor: "pointer", fontSize: 14,
+              borderBottom: `2px solid ${tab === t ? "var(--ink)" : "transparent"}`,
+              fontWeight: tab === t ? 700 : 500,
+              color: tab === t ? "var(--ink)" : "var(--ink-3)",
+              marginBottom: -1, transition: "color 0.15s",
+            }}
+          >
+            {t === "users" ? "Users" : "Roles & Permissions"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "users" && <UsersTabContent />}
+      {tab === "roles" && !editRole && <RolesTab onEdit={setEditRole} />}
+      {tab === "roles" && editRole && <RoleDetail roleName={editRole} onBack={() => setEditRole(null)} />}
+    </div>
+  );
+}
+
+function UsersTabContent() {
   const [rows, setRows] = useState<User[]>(initialUsers);
   const [q, setQ] = useState("");
   const [role, setRole] = useState("All");
@@ -262,13 +172,6 @@ export function Users() {
 
   return (
     <div>
-      <PageHead
-        title="Users & Roles"
-        sub={rows.length + " team members · manage access and role assignment"}
-        actions={<Btn variant="primary" icon="plus" onClick={() => setShow(true)}>Invite User</Btn>}
-      />
-
-      {/* Role legend */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         {Object.keys(ROLES).map((r) => (
           <div key={r} className="card" style={{ padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 150 }}>
@@ -285,6 +188,7 @@ export function Users() {
             {["All", ...Object.keys(ROLES)].map((r) => <option key={r}>{r === "All" ? "All Roles" : r}</option>)}
           </select>
           <span className="tb-meta">{filtered.length} users</span>
+          <Btn variant="primary" icon="plus" onClick={() => setShow(true)}>Invite User</Btn>
         </Toolbar>
         {filtered.length === 0 ? <Entity name="No users match" /> : (
           <div className="tbl-wrap">
@@ -330,7 +234,6 @@ function UserModal({ onClose, onCreate }: { onClose: () => void; onCreate: (u: O
   const [f, setF] = useState({ name: "", email: "", role: "Operations" });
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const valid = f.name && f.email.includes("@");
-
   const roleIcons: Record<string, string> = { Admin: "shield", Finance: "payouts", Warehouse: "box", Viewer: "eye", Operations: "wrench" };
 
   return (
@@ -370,5 +273,147 @@ function UserModal({ onClose, onCreate }: { onClose: () => void; onCreate: (u: O
         </div>
       </Field>
     </Modal>
+  );
+}
+
+/* =================== ROLES TAB =================== */
+function RolesTab({ onEdit }: { onEdit: (role: string) => void }) {
+  const userCounts: Record<string, number> = {};
+  initialUsers.forEach((u) => { userCounts[u.role] = (userCounts[u.role] || 0) + 1; });
+  const totalPerms = PERMISSION_MODULES.reduce((s, m) => s + m.actions.length, 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {Object.entries(ROLES).map(([role, meta]) => {
+        const granted = (ROLE_PERMISSIONS[role] || []).length;
+        return (
+          <div key={role} className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14 }}>
+            <Chip cls={meta.chip}>{role}</Chip>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{role}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 2 }}>{meta.desc}</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "right", minWidth: 70 }}>
+              <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{userCounts[role] || 0}</div>
+              <div>{(userCounts[role] || 0) === 1 ? "user" : "users"}</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "right", minWidth: 100 }}>
+              <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{granted}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--ink-3)" }}>/{totalPerms}</span></div>
+              <div>permissions</div>
+            </div>
+            <Btn variant="ghost" sm icon="edit" onClick={() => onEdit(role)}>Edit Permissions</Btn>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* =================== ROLE DETAIL =================== */
+function RoleDetail({ roleName, onBack }: { roleName: string; onBack: () => void }) {
+  const roleMeta = ROLES[roleName];
+  const [name, setName] = useState(roleName);
+  const [desc, setDesc] = useState(roleMeta?.desc || "");
+  const [perms, setPerms] = useState<Set<string>>(() => new Set(ROLE_PERMISSIONS[roleName] || []));
+  const [toast, setToast] = useState<string | null>(null);
+
+  const totalCount = PERMISSION_MODULES.reduce((s, m) => s + m.actions.length, 0);
+
+  function toggle(key: string) {
+    setPerms((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function save() {
+    setToast("Permissions updated for " + name);
+    setTimeout(() => setToast(null), 2600);
+  }
+
+  return (
+    <div>
+      {/* Sub-nav */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <Btn variant="ghost" sm icon="chevLeft" onClick={onBack}>All Roles</Btn>
+        <span style={{ color: "var(--ink-3)", fontSize: 13 }}>/</span>
+        <Chip cls={roleMeta?.chip}>{roleName}</Chip>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12.5, color: "var(--ink-3)", marginRight: 8 }}>{perms.size} of {totalCount} permissions granted</span>
+        <Btn variant="primary" onClick={save}>Save Changes</Btn>
+      </div>
+
+      {/* Role info */}
+      <div style={{ marginBottom: 16 }}>
+        <Card>
+          <div className="card-pad" style={{ paddingTop: 16 }}>
+            <div className="field-row">
+              <Field label="Role name">
+                <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label="Description">
+                <input className="input" value={desc} onChange={(e) => setDesc(e.target.value)} />
+              </Field>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Permission grid */}
+      <Card title="Permissions">
+        <div className="card-pad" style={{ paddingTop: 16, display: "flex", flexDirection: "column", gap: 22 }}>
+          {PERMISSION_MODULES.map(({ module, actions }) => {
+            const grantedCount = actions.filter((a) => perms.has(`${module}.${a}`)).length;
+            return (
+              <div key={module}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: "var(--ink-2)" }}>
+                    {module}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                    {grantedCount}/{actions.length}
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(148px, 1fr))", gap: 6 }}>
+                  {actions.map((action) => {
+                    const key = `${module}.${action}`;
+                    const checked = perms.has(key);
+                    return (
+                      <label
+                        key={key}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "7px 10px", borderRadius: 7, cursor: "pointer",
+                          border: `1.5px solid ${checked ? "var(--indigo)" : "var(--line)"}`,
+                          background: checked ? "var(--bg-2)" : "var(--bg)",
+                          transition: "border-color 0.1s, background 0.1s",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(key)}
+                          style={{ accentColor: "var(--indigo)", width: 14, height: 14, flexShrink: 0, cursor: "pointer" }}
+                        />
+                        <span style={{
+                          fontSize: 12.5, userSelect: "none",
+                          fontWeight: checked ? 600 : 400,
+                          color: checked ? "var(--ink)" : "var(--ink-3)",
+                        }}>
+                          {action}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+    </div>
   );
 }

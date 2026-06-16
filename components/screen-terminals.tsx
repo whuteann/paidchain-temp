@@ -2,8 +2,8 @@
 import { useState } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, SlaChip, Modal, Field, Chip } from "./components";
-import { jobs, TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, termSettings, terminalTimeline } from "./data";
-import type { Terminal } from "./data";
+import { jobs, TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS, termSettings, terminalTimeline } from "./data";
+import type { Terminal, TermSetting } from "./data";
 import { useTerminals } from "./terminals-context";
 import { useSimCards } from "./simcards-context";
 import { NavFn } from "./shell";
@@ -173,10 +173,136 @@ function SimLinkModal({ terminal, onClose, onLink }: {
   );
 }
 
+/* =================== TERMINAL SETTINGS TAB =================== */
+function TerminalSettingModal({ onClose, onCreate }: { onClose: () => void; onCreate: (r: TermSetting) => void }) {
+  const brandKeys = Object.keys(BRANDS);
+  const [f, setF] = useState({ brand: brandKeys[0], model: "", category: "Countertop", bank: BANKS[0], monthly: "", deposit: "", setup: "", active: true });
+  const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
+  const valid = f.model && f.monthly;
+
+  return (
+    <Modal title="New Terminal Setting" sub="Define a device model and its rental rate card" icon="tag" onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid} onClick={() => onCreate({ ...f, id: "", monthly: +f.monthly, deposit: +f.deposit || 0, setup: +f.setup || 0, units: 0 })}>Create Setting</Btn>
+      </>}
+    >
+      <div className="field-row">
+        <Field label="Brand">
+          <select className="input" value={f.brand} onChange={(e) => set("brand", e.target.value)}>
+            {brandKeys.map((b) => <option key={b}>{b}</option>)}
+          </select>
+        </Field>
+        <Field label="Category">
+          <select className="input" value={f.category} onChange={(e) => set("category", e.target.value)}>
+            {["Countertop","Portable","Mobile (mPOS)","SoftPOS"].map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Model name" hint="required">
+          <input className="input" placeholder="e.g. A920 Pro" value={f.model} onChange={(e) => set("model", e.target.value)} />
+        </Field>
+        <Field label="Bank">
+          <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
+            {BANKS.map((b) => <option key={b}>{b}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Monthly rental (RM)" hint="required">
+          <input className="input" type="number" placeholder="0.00" value={f.monthly} onChange={(e) => set("monthly", e.target.value)} />
+        </Field>
+        <Field label="Deposit (RM)">
+          <input className="input" type="number" placeholder="0.00" value={f.deposit} onChange={(e) => set("deposit", e.target.value)} />
+        </Field>
+        <Field label="Setup fee (RM)">
+          <input className="input" type="number" placeholder="0.00" value={f.setup} onChange={(e) => set("setup", e.target.value)} />
+        </Field>
+      </div>
+      <label style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13, fontWeight: 500 }}>
+        <input type="checkbox" checked={f.active} onChange={(e) => set("active", e.target.checked)} />
+        Active — available for new rentals
+      </label>
+    </Modal>
+  );
+}
+
+function TerminalSettingsTab() {
+  const [rows, setRows] = useState<TermSetting[]>(termSettings);
+  const [q, setQ] = useState("");
+  const [show, setShow] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const filtered = rows.filter((r) =>
+    (r.brand + " " + r.model + " " + r.category).toLowerCase().includes(q.toLowerCase())
+  );
+
+  return (
+    <>
+      <Card>
+        <Toolbar>
+          <SearchBox value={q} onChange={setQ} placeholder="Search brand or model…" />
+          <Btn variant="primary" icon="plus" onClick={() => setShow(true)}>New Terminal Setting</Btn>
+          <span className="tb-meta">{filtered.length} rate cards</span>
+        </Toolbar>
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>{["Brand / Model","Bank","Category","Monthly Rental","Deposit","Setup Fee","Units","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <div className="ent">
+                      <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
+                      <div><div className="ent-name">{r.brand}</div><div className="ent-sub">{r.model}</div></div>
+                    </div>
+                  </td>
+                  <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                    <Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{r.bank}
+                  </span></td>
+                  <td><Chip cls={r.category === "Portable" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
+                  <td className="td-strong">RM {r.monthly}.00 <span className="td-mut" style={{ fontWeight: 400 }}>/mo</span></td>
+                  <td className="td-mut">RM {r.deposit}</td>
+                  <td className="td-mut">{r.setup ? "RM " + r.setup : "Waived"}</td>
+                  <td className="td-mut">{r.units}</td>
+                  <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="icon-btn"><Icon name="edit" size={14} /></button>
+                      <button className="icon-btn"><Icon name="more" size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      {show && (
+        <TerminalSettingModal
+          onClose={() => setShow(false)}
+          onCreate={(r) => {
+            setRows([{ ...r, id: "NEW-" + rows.length }, ...rows]);
+            setShow(false);
+            setToast("Terminal setting created");
+            setTimeout(() => setToast(null), 2400);
+          }}
+        />
+      )}
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+    </>
+  );
+}
+
 /* =================== LISTING =================== */
 export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: string }) {
   const { terminals, addTerminal } = useTerminals();
   const { updateSimCard } = useSimCards();
+  const [tab, setTab] = useState<"inventory" | "settings">("inventory");
   const [q, setQ] = useState("");
   const [brand, setBrand] = useState("All");
   const [status, setStatus] = useState(initialFilter || "All");
@@ -211,9 +337,7 @@ export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: 
 
   function handleRegister(terminal: Terminal, simId?: string) {
     addTerminal(terminal);
-    if (simId) {
-      updateSimCard(simId, { terminalSerial: terminal.serial, status: "Active" });
-    }
+    if (simId) updateSimCard(simId, { terminalSerial: terminal.serial, status: "Active" });
     setToast("Device " + terminal.serial + " registered");
     setTimeout(() => setToast(null), 2800);
   }
@@ -221,78 +345,94 @@ export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: 
   return (
     <div>
       <PageHead
-        title="Terminal Inventory"
-        sub={terminals.length + " devices · search by serial, brand, model or assigned merchant"}
-        actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
-          <Btn variant="primary" icon="plus" onClick={() => setShowRegister(true)}>Register Device</Btn>
-        </>}
+        title="Terminals"
+        sub={tab === "inventory"
+          ? terminals.length + " devices · search by serial, brand, model or assigned merchant"
+          : "Device model templates · rental rates, deposit and setup fees"}
+        actions={tab === "inventory" ? (
+          <>
+            <Btn variant="ghost" icon="download">Export</Btn>
+            <Btn variant="primary" icon="plus" onClick={() => setShowRegister(true)}>Register Device</Btn>
+          </>
+        ) : undefined}
       />
 
-      <div className="seg" style={{ marginBottom: 14 }}>
-        {quick.map((qk) => (
-          <button key={qk.id} className={status === qk.id ? "active" : ""} onClick={() => setStatus(qk.id)}>
-            {qk.label} · {qk.n}
-          </button>
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        {([["inventory", "Inventory"], ["settings", "Terminal Settings"]] as const).map(([id, label]) => (
+          <div key={id} className={"tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)}>{label}</div>
         ))}
       </div>
 
-      {status === "Rented" && (
-        <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "11px 14px", background: "var(--green-050)", border: "1px solid var(--green-100)", borderRadius: 10, marginBottom: 14, fontSize: 13 }}>
-          <Icon name="link" size={16} style={{ color: "var(--green-700)" }} />
-          <span><b>Rented view</b> — showing devices currently out on rental (Installed Active + Assigned).</span>
-        </div>
-      )}
-
-      <Card>
-        <Toolbar>
-          <SearchBox value={q} onChange={setQ} placeholder="Search serial, model, merchant…" />
-          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="All">All Statuses</option>
-            <option value="Rented">Rented (out)</option>
-            {TERMINAL_STATUS_ORDER.map((s) => <option key={s} value={s}>{TERMINAL_STATUS[s].label}</option>)}
-          </select>
-          <select className="select" value={brand} onChange={(e) => setBrand(e.target.value)}>
-            {["All", ...Object.keys(BRANDS)].map((b) => <option key={b}>{b === "All" ? "All Brands" : b}</option>)}
-          </select>
-          <span className="tb-meta">{filtered.length} devices</span>
-        </Toolbar>
-        {filtered.length === 0 ? <Empty icon="terminal" title="No devices match" /> : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr>{["Serial","Brand / Model","Status","Assigned Merchant","Location","Last Movement","Rental",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-              <tbody>
-                {filtered.map((t) => (
-                  <tr key={t.serial} className="clickable" onClick={() => nav("terminal-detail", t.serial)}>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-mono td-strong">{t.serial}</span>
-                        {t.tid && <span className="c2-sub mono">{t.tid}</span>}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="ent">
-                        <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
-                        <div><div className="ent-name">{t.brand}</div><div className="ent-sub">{t.model}</div></div>
-                      </div>
-                    </td>
-                    <td><TerminalStatus status={t.status} /></td>
-                    <td className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</td>
-                    <td><span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span></td>
-                    <td className="td-mut td-mono">{t.lastMovement.slice(5)}</td>
-                    <td className="td-mut">RM {t.rentalRate}</td>
-                    <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {tab === "inventory" ? (
+        <>
+          <div className="seg" style={{ marginBottom: 14 }}>
+            {quick.map((qk) => (
+              <button key={qk.id} className={status === qk.id ? "active" : ""} onClick={() => setStatus(qk.id)}>
+                {qk.label} · {qk.n}
+              </button>
+            ))}
           </div>
-        )}
-        <Pagination total={terminals.length} shown={filtered.length} />
-      </Card>
 
-      {showRegister && <RegisterDeviceModal onClose={() => setShowRegister(false)} onRegister={handleRegister} />}
-      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+          {status === "Rented" && (
+            <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "11px 14px", background: "var(--green-050)", border: "1px solid var(--green-100)", borderRadius: 10, marginBottom: 14, fontSize: 13 }}>
+              <Icon name="link" size={16} style={{ color: "var(--green-700)" }} />
+              <span><b>Rented view</b> — showing devices currently out on rental (Installed Active + Assigned).</span>
+            </div>
+          )}
+
+          <Card>
+            <Toolbar>
+              <SearchBox value={q} onChange={setQ} placeholder="Search serial, model, merchant…" />
+              <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="All">All Statuses</option>
+                <option value="Rented">Rented (out)</option>
+                {TERMINAL_STATUS_ORDER.map((s) => <option key={s} value={s}>{TERMINAL_STATUS[s].label}</option>)}
+              </select>
+              <select className="select" value={brand} onChange={(e) => setBrand(e.target.value)}>
+                {["All", ...Object.keys(BRANDS)].map((b) => <option key={b}>{b === "All" ? "All Brands" : b}</option>)}
+              </select>
+              <span className="tb-meta">{filtered.length} devices</span>
+            </Toolbar>
+            {filtered.length === 0 ? <Empty icon="terminal" title="No devices match" /> : (
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead><tr>{["Serial","Brand / Model","Status","Assigned Merchant","Location","Last Movement","Rental",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {filtered.map((t) => (
+                      <tr key={t.serial} className="clickable" onClick={() => nav("terminal-detail", t.serial)}>
+                        <td>
+                          <div className="cell-2">
+                            <span className="td-mono td-strong">{t.serial}</span>
+                            {t.tid && <span className="c2-sub mono">{t.tid}</span>}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="ent">
+                            <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
+                            <div><div className="ent-name">{t.brand}</div><div className="ent-sub">{t.model}</div></div>
+                          </div>
+                        </td>
+                        <td><TerminalStatus status={t.status} /></td>
+                        <td className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</td>
+                        <td><span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span></td>
+                        <td className="td-mut td-mono">{t.lastMovement.slice(5)}</td>
+                        <td className="td-mut">RM {t.rentalRate}</td>
+                        <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <Pagination total={terminals.length} shown={filtered.length} />
+          </Card>
+
+          {showRegister && <RegisterDeviceModal onClose={() => setShowRegister(false)} onRegister={handleRegister} />}
+          {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+        </>
+      ) : (
+        <TerminalSettingsTab />
+      )}
     </div>
   );
 }

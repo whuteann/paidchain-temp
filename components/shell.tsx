@@ -3,27 +3,32 @@ import { useState, ReactNode } from "react";
 import { useRouter } from "next/router";
 import { Icon } from "./icons";
 
-export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "payouts" | "payout-detail" | "mdr" | "settings" | "users";
+export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "payouts" | "payout-detail" | "mdr" | "settings" | "users" | "audit-logs";
 export type NavFn = (to: Route, param?: string) => void;
 
 const NAV = [
+  { group: "", items: [
+    { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+  ]},
   { group: "Operations", items: [
-    { id: "dashboard", label: "Dashboard",  icon: "dashboard" },
-    { id: "customers", label: "Customers",  icon: "building" },
-    { id: "merchants", label: "Merchants",  icon: "merchants", badge: "18" },
-    { id: "terminals", label: "Terminals", icon: "terminal", badge: "24" },
-    { id: "simcards",  label: "SIM Cards", icon: "phone" },
-    { id: "jobs",      label: "Jobs",      icon: "jobs",     badge: "16" },
-    { id: "rentals",     label: "Rentals",     icon: "calendar" },
+    { id: "customers",   label: "Customers", icon: "building" },
+    { id: "merchants",   label: "Merchants", icon: "merchants", badge: "18" },
+    { id: "jobs",        label: "Jobs",      icon: "jobs",      badge: "16" },
+  ]},
+  { group: "Inventory", items: [
+    { id: "terminals",   label: "Terminals",   icon: "terminal", badge: "24" },
+    { id: "simcards",    label: "SIM Cards",   icon: "phone" },
     { id: "paper-rolls", label: "Paper Rolls", icon: "receipt" },
   ]},
   { group: "Finance", items: [
-    { id: "payouts", label: "Payouts",   icon: "payouts" },
-    { id: "mdr",     label: "MDR Rates", icon: "percent" },
+    { id: "rentals",     label: "Rentals",   icon: "calendar" },
+    { id: "payouts",     label: "Payouts",   icon: "payouts" },
+    { id: "mdr",         label: "MDR Rates", icon: "percent" },
   ]},
   { group: "Configuration", items: [
-    { id: "settings", label: "Settings", icon: "tag" },
-    { id: "users",    label: "Users & Roles",     icon: "users" },
+    { id: "settings",    label: "Settings",     icon: "tag" },
+    { id: "users",       label: "Users & Roles", icon: "users" },
+    { id: "audit-logs",  label: "Audit Logs",   icon: "activity" },
   ]},
 ];
 
@@ -40,6 +45,7 @@ const NAV_PATHS: Record<string, string> = {
   mdr: "/mdr",
   settings: "/settings",
   users: "/users",
+  "audit-logs": "/audit-logs",
 };
 
 function getActiveFromPath(pathname: string): string {
@@ -54,30 +60,38 @@ function getActiveFromPath(pathname: string): string {
   if (pathname === "/mdr") return "mdr";
   if (pathname === "/settings") return "settings";
   if (pathname === "/users") return "users";
+  if (pathname === "/audit-logs") return "audit-logs";
   return "dashboard";
 }
 
-function getCrumbsFromPath(pathname: string): string[] {
-  if (pathname === "/dashboard") return ["Dashboard"];
-  if (pathname === "/customers") return ["Operations", "Customers"];
-  if (pathname === "/customers/[id]") return ["Operations", "Customers", "Detail"];
-  if (pathname === "/merchants") return ["Operations", "Merchants"];
-  if (pathname.startsWith("/merchants/")) return ["Operations", "Merchants", "Detail"];
-  if (pathname === "/terminals") return ["Operations", "Terminals"];
-  if (pathname.startsWith("/terminals/")) return ["Operations", "Terminals", "Detail"];
-  if (pathname === "/simcards") return ["Operations", "SIM Cards"];
-  if (pathname === "/simcards/[id]") return ["Operations", "SIM Cards", "Detail"];
-  if (pathname === "/jobs") return ["Operations", "Jobs"];
-  if (pathname.startsWith("/jobs/")) return ["Operations", "Jobs", "Detail"];
-  if (pathname === "/rentals") return ["Operations", "Rentals"];
-  if (pathname === "/paper-rolls") return ["Operations", "Paper Rolls"];
-  if (pathname === "/rentals/[id]") return ["Operations", "Rentals", "Detail"];
-  if (pathname === "/payouts") return ["Finance", "Payouts"];
-  if (pathname === "/payouts/[id]") return ["Finance", "Payouts", "Detail"];
-  if (pathname === "/mdr") return ["Finance", "MDR Rates"];
-  if (pathname === "/settings") return ["Configuration", "Settings"];
-  if (pathname === "/users") return ["Configuration", "Users & Roles"];
-  return ["Dashboard"];
+type Crumb = { label: string; href?: string };
+
+function getCrumbsFromPath(pathname: string): Crumb[] {
+  if (pathname === "/dashboard") return [{ label: "Dashboard" }];
+  // Operations
+  if (pathname === "/customers")           return [{ label: "Operations" }, { label: "Customers" }];
+  if (pathname.startsWith("/customers/"))  return [{ label: "Operations" }, { label: "Customers", href: "/customers" }, { label: "Detail" }];
+  if (pathname === "/merchants")           return [{ label: "Operations" }, { label: "Merchants" }];
+  if (pathname.startsWith("/merchants/"))  return [{ label: "Operations" }, { label: "Merchants", href: "/merchants" }, { label: "Detail" }];
+  if (pathname === "/jobs")                return [{ label: "Operations" }, { label: "Jobs" }];
+  if (pathname.startsWith("/jobs/"))       return [{ label: "Operations" }, { label: "Jobs", href: "/jobs" }, { label: "Detail" }];
+  // Inventory
+  if (pathname === "/terminals")           return [{ label: "Inventory" }, { label: "Terminals" }];
+  if (pathname.startsWith("/terminals/"))  return [{ label: "Inventory" }, { label: "Terminals", href: "/terminals" }, { label: "Detail" }];
+  if (pathname === "/simcards")            return [{ label: "Inventory" }, { label: "SIM Cards" }];
+  if (pathname.startsWith("/simcards/"))   return [{ label: "Inventory" }, { label: "SIM Cards", href: "/simcards" }, { label: "Detail" }];
+  if (pathname === "/paper-rolls")         return [{ label: "Inventory" }, { label: "Paper Rolls" }];
+  // Finance
+  if (pathname === "/rentals")             return [{ label: "Finance" }, { label: "Rentals" }];
+  if (pathname.startsWith("/rentals/"))    return [{ label: "Finance" }, { label: "Rentals", href: "/rentals" }, { label: "Detail" }];
+  if (pathname === "/payouts")             return [{ label: "Finance" }, { label: "Payouts" }];
+  if (pathname.startsWith("/payouts/"))    return [{ label: "Finance" }, { label: "Payouts", href: "/payouts" }, { label: "Detail" }];
+  if (pathname === "/mdr")                 return [{ label: "Finance" }, { label: "MDR Rates" }];
+  // Configuration
+  if (pathname === "/settings")            return [{ label: "Configuration" }, { label: "Settings" }];
+  if (pathname === "/users")               return [{ label: "Configuration" }, { label: "Users & Roles" }];
+  if (pathname === "/audit-logs")          return [{ label: "Configuration" }, { label: "Audit Logs" }];
+  return [{ label: "Dashboard" }];
 }
 
 export function useNav(): NavFn {
@@ -119,8 +133,8 @@ export function Shell({ children }: ShellProps) {
         </div>
         <div className="sb-scroll">
           {NAV.map((sec) => (
-            <div key={sec.group}>
-              <div className="sb-section-label">{sec.group}</div>
+            <div key={sec.group || "_top"}>
+              {sec.group && <div className="sb-section-label">{sec.group}</div>}
               {sec.items.map((it) => (
                 <div
                   key={it.id}
@@ -148,7 +162,10 @@ export function Shell({ children }: ShellProps) {
             {crumbs.map((c, i) => (
               <span key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 {i > 0 && <Icon name="chevRight" size={13} style={{ opacity: .5 }} />}
-                <span className={i === crumbs.length - 1 ? "crumb-cur" : ""}>{c}</span>
+                {c.href
+                  ? <span className="crumb-link" style={{ cursor: "pointer" }} onClick={() => router.push(c.href!)}>{c.label}</span>
+                  : <span className={i === crumbs.length - 1 ? "crumb-cur" : ""}>{c.label}</span>
+                }
               </span>
             ))}
           </nav>

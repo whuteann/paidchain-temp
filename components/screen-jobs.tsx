@@ -2,8 +2,8 @@
 import { useMemo, useState } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, JobStatus, SlaChip, Pagination, Empty, Chip, Modal, Field, Dropzone, Stepper } from "./components";
-import { JOB_TYPES, STAFF } from "./data";
-import type { Job, JobHistoryEntry, JobNotification, Rental, SlaTransitionRule, Terminal } from "./data";
+import { JOB_TYPES, STAFF, termSettings } from "./data";
+import type { Job, JobHistoryEntry, JobNotification, Rental, SlaTransitionRule, Terminal, TermSetting } from "./data";
 import { useCustomers } from "./customers-context";
 import { useJobSla } from "./job-sla-context";
 import { useMerchants } from "./merchants-context";
@@ -167,7 +167,7 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
   const [form, setForm] = useState({
     customerId: "",
     merchant: "",
-    terminal: "",
+    termSettingId: "",
     assignee: STAFF[0],
     priority: "Normal",
     due: "",
@@ -182,17 +182,16 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
   const availableMerchants = form.customerId ? merchants.filter((m) => m.customerId === form.customerId) : merchants;
   const selectedMerchant = availableMerchants.find((m) => m.id === form.merchant) || null;
   const merchantDevice = selectedMerchant ? getMerchantDevice(selectedMerchant.id, terminals) : null;
-  const inventoryDevices = terminals.filter((t) => t.status === "In Stock");
-  const selectedTerminal = terminals.find((t) => t.serial === form.terminal) || null;
-  const requiresInventoryDevice = type === "Installation" || type === "Replacement";
+  const requiresTermSpec = type === "Installation" || type === "Replacement";
   const requiresMerchantDevice = type === "Repair/Maintenance" || type === "Replacement" || type === "Remote Support";
   const requiresPaperRollFields = type === "Paper Roll Request";
+  const selectedTermSetting = termSettings.find((ts) => ts.id === form.termSettingId) || null;
   const valid = !!(
     type &&
     form.customerId &&
     form.merchant &&
     form.due &&
-    (!requiresInventoryDevice || form.terminal) &&
+    (!requiresTermSpec || form.termSettingId) &&
     (!requiresMerchantDevice || merchantDevice) &&
     (!requiresPaperRollFields || Number(form.paperRollQty) > 0)
   );
@@ -220,11 +219,9 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
       bank: selectedMerchant.bank,
       customer: { id: selectedCustomer.id, name: selectedCustomer.name },
       merchant: { id: selectedMerchant.id, name: selectedMerchant.name },
-      terminal: requiresInventoryDevice && selectedTerminal
-        ? { serial: selectedTerminal.serial, brand: selectedTerminal.brand, model: selectedTerminal.model }
-        : (type === "Repair/Maintenance" || type === "Remote Support") && merchantDevice
-          ? { serial: merchantDevice.serial, brand: merchantDevice.brand, model: merchantDevice.model }
-          : null,
+      terminal: (type === "Repair/Maintenance" || type === "Remote Support") && merchantDevice
+        ? { serial: merchantDevice.serial, brand: merchantDevice.brand, model: merchantDevice.model }
+        : null,
       previousTerminal: type === "Replacement" && merchantDevice
         ? { serial: merchantDevice.serial, brand: merchantDevice.brand, model: merchantDevice.model }
         : null,
@@ -242,6 +239,7 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
       paperRollRequest: type === "Paper Roll Request"
         ? { quantity: Number(form.paperRollQty), paymentTarget: form.paymentTarget }
         : null,
+      termSettingId: requiresTermSpec ? form.termSettingId : undefined,
       isNew: true,
     };
     onCreate(job);
@@ -283,7 +281,7 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
           </div>
 
           <Field label="Customer" hint="required · billing entity">
-            <select className="input" value={form.customerId} onChange={(e) => { set("customerId", e.target.value); set("merchant", ""); set("terminal", ""); }}>
+            <select className="input" value={form.customerId} onChange={(e) => { set("customerId", e.target.value); set("merchant", ""); }}>
               <option value="">Select customer…</option>
               {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -296,7 +294,7 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
           </div>
 
           <Field label="Merchant" hint="required · job location">
-            <select className="input" value={form.merchant} onChange={(e) => { set("merchant", e.target.value); set("terminal", ""); }}>
+            <select className="input" value={form.merchant} onChange={(e) => set("merchant", e.target.value)}>
               <option value="">Select merchant…</option>
               {availableMerchants.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.mid}</option>)}
             </select>
@@ -323,47 +321,40 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
             </Field>
           )}
 
-          {type === "Replacement" && (
-            <>
-              <Field label="Previous merchant terminal">
-                {merchantDevice ? (
-                  <div className="input" style={{ background: "var(--bg-2, #f5f5f5)" }}>
-                    {merchantDevice.serial} · {merchantDevice.brand} {merchantDevice.model}
-                  </div>
-                ) : (
-                  <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)" }}>
-                    No currently deployed merchant terminal found to replace.
-                  </div>
-                )}
-              </Field>
-              <Field label="Replacement device from inventory" hint="required">
-                <select className="input" value={form.terminal} onChange={(e) => set("terminal", e.target.value)}>
-                  <option value="">Select inventory device…</option>
-                  {inventoryDevices.map((t) => (
-                    <option key={t.serial} value={t.serial}>{t.serial} · {t.brand} {t.model}</option>
-                  ))}
-                </select>
-              </Field>
-            </>
-          )}
-
-          {type === "Installation" && (
-            <Field label="Terminal device from inventory" hint="required">
-              <select className="input" value={form.terminal} onChange={(e) => set("terminal", e.target.value)}>
-                <option value="">Select inventory device…</option>
-                {inventoryDevices.map((t) => (
-                  <option key={t.serial} value={t.serial}>{t.serial} · {t.brand} {t.model}</option>
-                ))}
-              </select>
+          {type === "Replacement" && merchantDevice && (
+            <Field label="Device to be replaced">
+              <div className="input" style={{ background: "var(--bg-2, #f5f5f5)" }}>
+                {merchantDevice.serial} · {merchantDevice.brand} {merchantDevice.model}
+              </div>
             </Field>
           )}
 
-          {selectedTerminal && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-              <Chip cls="chip-neutral">{selectedTerminal.brand} {selectedTerminal.model}</Chip>
-              <Chip cls="chip-info">{selectedTerminal.status}</Chip>
-              {selectedTerminal.tid && <Chip cls="chip-neutral">TID {selectedTerminal.tid}</Chip>}
-            </div>
+          {type === "Replacement" && !merchantDevice && (
+            <Field label="Device to be replaced">
+              <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)" }}>
+                No currently deployed merchant terminal found to replace.
+              </div>
+            </Field>
+          )}
+
+          {requiresTermSpec && (
+            <Field label={type === "Replacement" ? "Replacement terminal model" : "Terminal model"} hint="required · warehouse assigns the actual unit">
+              <select className="input" value={form.termSettingId} onChange={(e) => set("termSettingId", e.target.value)}>
+                <option value="">Select brand &amp; model…</option>
+                {termSettings.filter((ts) => ts.active).map((ts) => (
+                  <option key={ts.id} value={ts.id}>{ts.brand} {ts.model} · {ts.category}</option>
+                ))}
+              </select>
+              {selectedTermSetting && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  <Chip cls="chip-neutral">{selectedTermSetting.brand} {selectedTermSetting.model}</Chip>
+                  <Chip cls="chip-info">{selectedTermSetting.category}</Chip>
+                </div>
+              )}
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 6 }}>
+                The Warehouse Manager will assign a specific unit from inventory.
+              </div>
+            </Field>
           )}
 
           {type === "Paper Roll Request" && (
@@ -371,9 +362,9 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
               <Field label="Paper roll quantity" hint="required">
                 <input className="input" type="number" min="1" value={form.paperRollQty} onChange={(e) => set("paperRollQty", e.target.value)} />
               </Field>
-              <Field label="Pay to">
+              <Field label="Pay by">
                 <select className="input" value={form.paymentTarget} onChange={(e) => set("paymentTarget", e.target.value)}>
-                  {["Merchant", "Bank"].map((option) => <option key={option}>{option}</option>)}
+                  {["Merchant", "Bank"].map((opt) => <option key={opt}>{opt}</option>)}
                 </select>
               </Field>
             </div>
@@ -387,7 +378,7 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
             </Field>
             <Field label="Priority">
               <select className="input" value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-                {["Low", "Normal", "High", "Urgent"].map((priority) => <option key={priority}>{priority}</option>)}
+                {["Low", "Normal", "High", "Urgent"].map((p) => <option key={p}>{p}</option>)}
               </select>
             </Field>
             <Field label="Due date" hint="required">
@@ -531,6 +522,128 @@ export function Jobs({ nav, jobs, onCreate }: JobsProps) {
   );
 }
 
+/* =================== SWAP DEVICE MODAL =================== */
+function SwapDeviceModal({ currentSerial, terminals, onClose, onSwap }: {
+  currentSerial: string;
+  terminals: Terminal[];
+  onClose: () => void;
+  onSwap: (t: Terminal) => void;
+}) {
+  const [selected, setSelected] = useState("");
+  const available = terminals.filter(
+    (t) => (t.status === "In Stock" || t.status === "Reserved") && t.serial !== currentSerial
+  );
+  const chosenTerminal = terminals.find((t) => t.serial === selected) ?? null;
+
+  return (
+    <Modal
+      title="Swap Device" sub="Select a replacement terminal from available inventory" icon="swap"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="swap" disabled={!selected} onClick={() => chosenTerminal && onSwap(chosenTerminal)}>
+          Swap Device
+        </Btn>
+      </>}
+    >
+      {available.length === 0 ? (
+        <Empty icon="terminal" title="No devices available" sub="All terminals are deployed or under maintenance" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {available.map((t) => {
+            const sel = selected === t.serial;
+            return (
+              <label key={t.serial} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", border: "1.5px solid " + (sel ? "var(--slate)" : "var(--line)"), borderRadius: 10, cursor: "pointer", background: sel ? "var(--bg-2, #f5f5f5)" : "transparent" }}>
+                <input type="radio" name="swap-terminal" checked={sel} onChange={() => setSelected(t.serial)} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t.brand} {t.model}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{t.serial} · {t.location}</div>
+                </div>
+                <Chip cls={t.status === "In Stock" ? "chip-ok" : "chip-neutral"}>{t.status}</Chip>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* =================== ASSIGN DEVICE MODAL =================== */
+function AssignDeviceModal({ job, terminals, onClose, onAssign }: {
+  job: Job;
+  terminals: Terminal[];
+  onClose: () => void;
+  onAssign: (t: Terminal) => void;
+}) {
+  const [selected, setSelected] = useState(job.terminal?.serial || "");
+  const spec: TermSetting | null = termSettings.find((ts) => ts.id === job.termSettingId) || null;
+  const inStock = terminals.filter((t) => t.status === "In Stock");
+  const matching = spec ? inStock.filter((t) => t.brand === spec.brand && t.model === spec.model) : [];
+  const matchingSerials = new Set(matching.map((t) => t.serial));
+  const others = inStock.filter((t) => !matchingSerials.has(t.serial));
+  const chosen = terminals.find((t) => t.serial === selected) ?? null;
+
+  function renderDevice(t: Terminal) {
+    const sel = selected === t.serial;
+    return (
+      <label key={t.serial} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", border: "1.5px solid " + (sel ? "var(--slate)" : "var(--line)"), borderRadius: 10, cursor: "pointer", background: sel ? "var(--bg-2, #f5f5f5)" : "transparent" }}>
+        <input type="radio" name="assign-terminal" checked={sel} onChange={() => setSelected(t.serial)} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{t.brand} {t.model}</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{t.serial} · {t.location}</div>
+        </div>
+        <Chip cls="chip-ok">In Stock</Chip>
+      </label>
+    );
+  }
+
+  return (
+    <Modal
+      title="Assign Device" sub="Select a unit from inventory to fulfil this job" icon="terminal"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={!selected} onClick={() => chosen && onAssign(chosen)}>Assign Device</Btn>
+      </>}
+    >
+      {spec && (
+        <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "10px 12px", background: "var(--info-bg)", borderRadius: 9, marginBottom: 16, fontSize: 12.5 }}>
+          <Icon name="terminal" size={15} style={{ color: "var(--info)" }} />
+          <span>Requested spec: <strong>{spec.brand} {spec.model}</strong> · {spec.category}</span>
+        </div>
+      )}
+
+      {inStock.length === 0 ? (
+        <Empty icon="terminal" title="No devices in stock" sub="All terminals are currently deployed or under maintenance" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {matching.length > 0 && (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--ink-3)", marginBottom: 4 }}>
+                Matching spec ({matching.length})
+              </div>
+              {matching.map(renderDevice)}
+            </>
+          )}
+          {others.length > 0 && (
+            <>
+              {matching.length > 0 && (
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--ink-3)", margin: "10px 0 4px" }}>
+                  Other available
+                </div>
+              )}
+              {others.map(renderDevice)}
+            </>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 interface JobDetailProps { id: string; nav: NavFn; jobs: Job[]; onUpdate: (id: string, patch: Partial<Job>) => void }
 
 export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
@@ -546,6 +659,8 @@ export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
   const [files, setFiles] = useState<{ name: string; size: string }[]>([]);
   const [transitionNote, setTransitionNote] = useState("");
   const [previousTerminalStatus, setPreviousTerminalStatus] = useState("Faulty");
+  const [showSwap, setShowSwap] = useState(false);
+  const [showAssignDevice, setShowAssignDevice] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   if (!job) {
@@ -562,6 +677,7 @@ export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
   const merchant = merchants.find((entry) => entry.id === currentJob.merchant.id);
   const selectedTerminal = currentJob.terminal ? terminals.find((entry) => entry.serial === currentJob.terminal!.serial) || null : null;
   const previousTerminal = currentJob.previousTerminal ? terminals.find((entry) => entry.serial === currentJob.previousTerminal!.serial) || null : null;
+  const requestedSpec = currentJob.termSettingId ? termSettings.find((ts) => ts.id === currentJob.termSettingId) || null : null;
   const activeRental = rentals.find((entry) => entry.merchant.id === currentJob.merchant.id && entry.status === "Active") || null;
   const def = JOB_TYPES[currentJob.type];
   const stages = def.stages;
@@ -585,6 +701,26 @@ export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
     setToast(message);
     setTimeout(() => setToast(null), 2600);
   };
+
+  function handleSwapDevice(newTerminal: Terminal) {
+    if (selectedTerminal) {
+      updateTerminal(selectedTerminal.serial, { status: "In Stock", lastMovement: new Date().toISOString().slice(0, 10) });
+      appendTerminalActivity(selectedTerminal.serial, "Removed from job", currentJob.id + " · swapped out");
+    }
+    updateTerminal(newTerminal.serial, { status: "Reserved", lastMovement: new Date().toISOString().slice(0, 10) });
+    appendTerminalActivity(newTerminal.serial, "Assigned to job", currentJob.id + " · swapped in");
+    onUpdate(currentJob.id, { terminal: { serial: newTerminal.serial, brand: newTerminal.brand, model: newTerminal.model } });
+    setShowSwap(false);
+    flash("Device swapped to " + newTerminal.serial);
+  }
+
+  function handleAssignDevice(terminal: Terminal) {
+    updateTerminal(terminal.serial, { status: "Reserved", lastMovement: new Date().toISOString().slice(0, 10) });
+    appendTerminalActivity(terminal.serial, "Reserved for " + currentJob.type + " job", currentJob.id + " · " + currentJob.merchant.name);
+    onUpdate(currentJob.id, { terminal: { serial: terminal.serial, brand: terminal.brand, model: terminal.model } });
+    setShowAssignDevice(false);
+    flash("Device " + terminal.serial + " assigned to " + currentJob.id);
+  }
 
   function appendTerminalActivity(serial: string, title: string, desc: string, patch: Partial<Terminal> = {}) {
     const terminal = terminals.find((entry) => entry.serial === serial);
@@ -782,13 +918,20 @@ export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
           <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
             {done
               ? "Workflow finished with evidence and notifications logged."
-              : nextStage && activeRule
-                ? `${activeElapsedDays} day(s) elapsed · warning after ${activeRule.warningDays} day(s), breach after ${activeRule.breachDays} day(s).`
-                : "Advance this job when the next team has completed its work."}
+              : (["Installation", "Replacement"].includes(currentJob.type) && nextStage === "Device Prepared" && !currentJob.terminal)
+                ? "Assign a device from inventory before advancing to Device Prepared."
+                : nextStage && activeRule
+                  ? `${activeElapsedDays} day(s) elapsed · warning after ${activeRule.warningDays} day(s), breach after ${activeRule.breachDays} day(s).`
+                  : "Advance this job when the next team has completed its work."}
           </div>
         </div>
         {!done && nextStage && (
-          <Btn variant="primary" iconRight={transitionNeedsEvidence(currentJob.type, nextStage) ? "upload" : "chevRight"} onClick={openAdvance}>
+          <Btn
+            variant="primary"
+            iconRight={transitionNeedsEvidence(currentJob.type, nextStage) ? "upload" : "chevRight"}
+            disabled={["Installation", "Replacement"].includes(currentJob.type) && nextStage === "Device Prepared" && !currentJob.terminal}
+            onClick={openAdvance}
+          >
             {transitionNeedsEvidence(currentJob.type, nextStage) ? "Record " + nextStage : "Advance to " + nextStage}
           </Btn>
         )}
@@ -880,18 +1023,41 @@ export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
             </div>
           </Card>
 
-          {currentJob.terminal && (
+          {(currentJob.terminal || (["Installation", "Replacement"].includes(currentJob.type) && !done)) && (
             <Card title={currentJob.type === "Replacement" ? "Replacement Device" : "Device"} icon="terminal">
               <div className="card-pad">
-                <div className="mono" style={{ fontWeight: 600, marginBottom: 2 }}>{currentJob.terminal.serial}</div>
-                <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 12 }}>{currentJob.terminal.brand + " " + currentJob.terminal.model}</div>
-                <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%" }} onClick={() => nav("terminal-detail", currentJob.terminal!.serial)}>View device</Btn>
-                {currentJob.previousTerminal && (
-                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-                    <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Previous rental device</div>
-                    <div className="mono" style={{ fontWeight: 600 }}>{currentJob.previousTerminal.serial}</div>
-                    <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{currentJob.previousTerminal.brand + " " + currentJob.previousTerminal.model}</div>
+                {requestedSpec && (
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid var(--line)" }}>
+                    <div style={{ fontWeight: 600, color: "var(--ink-2)", marginBottom: 2 }}>Requested spec</div>
+                    <div>{requestedSpec.brand} {requestedSpec.model} · {requestedSpec.category}</div>
                   </div>
+                )}
+                {currentJob.terminal ? (
+                  <>
+                    <div className="mono" style={{ fontWeight: 600, marginBottom: 2 }}>{currentJob.terminal.serial}</div>
+                    <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 12 }}>{currentJob.terminal.brand + " " + currentJob.terminal.model}</div>
+                    <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%" }} onClick={() => nav("terminal-detail", currentJob.terminal!.serial)}>View device</Btn>
+                    {!done && (
+                      <Btn variant="ghost" sm icon="swap" style={{ width: "100%", marginTop: 8 }} onClick={() => setShowSwap(true)}>Swap Device</Btn>
+                    )}
+                    {currentJob.previousTerminal && (
+                      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+                        <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Previous rental device</div>
+                        <div className="mono" style={{ fontWeight: 600 }}>{currentJob.previousTerminal.serial}</div>
+                        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{currentJob.previousTerminal.brand + " " + currentJob.previousTerminal.model}</div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--warn)", marginBottom: 12 }}>
+                      <Icon name="activity" size={14} />
+                      No device assigned yet
+                    </div>
+                    <Btn variant="ghost" sm icon="terminal" style={{ width: "100%" }} onClick={() => setShowAssignDevice(true)}>
+                      Assign Device from Inventory
+                    </Btn>
+                  </>
                 )}
               </div>
             </Card>
@@ -981,6 +1147,24 @@ export function JobDetail({ id, nav, jobs, onUpdate }: JobDetailProps) {
             </div>
           </Field>
         </Modal>
+      )}
+
+      {showSwap && currentJob.terminal && (
+        <SwapDeviceModal
+          currentSerial={currentJob.terminal.serial}
+          terminals={terminals}
+          onClose={() => setShowSwap(false)}
+          onSwap={handleSwapDevice}
+        />
+      )}
+
+      {showAssignDevice && (
+        <AssignDeviceModal
+          job={currentJob}
+          terminals={terminals}
+          onClose={() => setShowAssignDevice(false)}
+          onAssign={handleAssignDevice}
+        />
       )}
 
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}

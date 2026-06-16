@@ -2,17 +2,64 @@
 import { useState, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, PayoutStatus, Pagination, Empty, Chip, Modal, Field } from "./components";
-import { customers, merchants, PAYOUT_METHODS, TXN_PAYMENT_METHODS } from "./data";
-import type { Payout, Transaction } from "./data";
+import { customers, merchants, mdr, PAYOUT_METHODS, TXN_PAYMENT_METHODS } from "./data";
+import type { Payout, Transaction, PayoutException } from "./data";
+import { runPayoutChecks, checksPassedSummary, ALL_CHECKS } from "./payout-exceptions";
 import { usePayouts } from "./payouts-context";
+import { useTerminals } from "./terminals-context";
+import { useRentals } from "./rentals-context";
 import { NavFn } from "./shell";
 
 const money = (n: number) => "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/* =================== SHARED EXCEPTION UI =================== */
+function ExceptionBadge({ exceptions }: { exceptions: PayoutException[] }) {
+  const errors = exceptions.filter((e) => e.severity === "error").length;
+  const warns  = exceptions.filter((e) => e.severity === "warning").length;
+  if (errors > 0) return <Chip cls="chip-bad"><Icon name="x" size={12} />{errors} error{errors > 1 ? "s" : ""}{warns > 0 ? ` · ${warns} warn` : ""}</Chip>;
+  if (warns  > 0) return <Chip cls="chip-warn"><Icon name="alert" size={12} />{warns} warning{warns > 1 ? "s" : ""}</Chip>;
+  return <Chip cls="chip-ok"><Icon name="check" size={12} />All clear</Chip>;
+}
+
+function ExceptionChecksPanel({ exceptions }: { exceptions: PayoutException[] }) {
+  const failedCodes = new Set(exceptions.map((e) => e.code));
+  const errors = exceptions.filter((e) => e.severity === "error").length;
+  const warns  = exceptions.filter((e) => e.severity === "warning").length;
+  const summaryColor = errors > 0 ? "var(--bad)" : warns > 0 ? "var(--warn)" : "var(--ok)";
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
+      <div style={{ padding: "9px 14px", background: "var(--bg-2)", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>Exception Checks</span>
+        <span style={{ fontSize: 12, color: summaryColor, fontWeight: 600 }}>{checksPassedSummary(exceptions)}</span>
+      </div>
+      <div style={{ padding: "6px 0" }}>
+        {ALL_CHECKS.map((check) => {
+          const exc = exceptions.find((e) => e.code === check.code);
+          const passed = !exc;
+          const color = passed ? "var(--ok)" : exc.severity === "error" ? "var(--bad)" : "var(--warn)";
+          return (
+            <div key={check.code} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "5px 14px" }}>
+              <div style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, marginTop: 1, background: color, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name={passed ? "check" : exc.severity === "error" ? "x" : "alert"} size={9} style={{ color: "#fff" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12.5, color: passed ? "var(--ink-2)" : "var(--ink-1)", fontWeight: passed ? 400 : 500 }}>{check.label}</div>
+                {exc && <div style={{ fontSize: 11.5, color, marginTop: 1 }}>{exc.message}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /* =================== CREATE PAYOUT MODAL =================== */
 interface CreatePayoutModalProps { onClose: () => void; onCreate: (p: Payout, txns: Transaction[]) => void }
 
 function CreatePayoutModal({ onClose, onCreate }: CreatePayoutModalProps) {
+  const { terminals } = useTerminals();
+  const { rentals } = useRentals();
   const [step, setStep] = useState<1 | 2>(1);
   const [customerId, setCustomerId] = useState("");
   const [merchantId, setMerchantId] = useState("");
@@ -31,6 +78,15 @@ function CreatePayoutModal({ onClose, onCreate }: CreatePayoutModalProps) {
   const gross = parsedTxns ? Math.round(parsedTxns.reduce((a, t) => a + t.amount, 0) * 100) / 100 : 0;
   const fee = Math.round(gross * 0.018 * 100) / 100;
   const net = Math.round((gross - fee) * 100) / 100;
+
+  const exceptions: PayoutException[] = parsedTxns && merchant
+    ? runPayoutChecks({
+        merchant, customer: customer || null,
+        allTerminals: terminals, allRentals: rentals, allMdrRates: mdr,
+        txnPaymentMethods: parsedTxns.map((t) => t.paymentMethod),
+      })
+    : [];
+  const hasErrors = exceptions.some((e) => e.severity === "error");
 
   function handleFileDrop(files: FileList | null) {
     if (files?.[0]) { setFile(files[0]); setParsedTxns(null); }
@@ -62,7 +118,8 @@ function CreatePayoutModal({ onClose, onCreate }: CreatePayoutModalProps) {
       id: poId, merchant: { id: merchant.id, name: merchant.name },
       mid: merchant.mid, bank: merchant.bank,
       gross, fee, net, txns: parsedTxns.length,
-      period, status: "Pending", exception: null, checks: "4 of 4 passed",
+      period, status: "Pending",
+      exceptions, checks: checksPassedSummary(exceptions),
       einvoice: generateInvoice, issued: generateInvoice ? today : null,
       isNew: true, paymentMethod, paymentProof: null,
     };
@@ -90,16 +147,14 @@ function CreatePayoutModal({ onClose, onCreate }: CreatePayoutModalProps) {
           <Btn variant="ghost" icon="arrowLeft" onClick={() => { setStep(1); setParsedTxns(null); setFile(null); }}>Back</Btn>
           <div className="mf-spacer" />
           {parsedTxns && <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{parsedTxns.length} txns · {money(gross)} gross</span>}
-          <Btn variant="primary" icon="check" disabled={!parsedTxns} onClick={submit}>Create Payout</Btn>
+          <Btn variant="primary" icon="check" disabled={!parsedTxns || hasErrors} onClick={submit}>Create Payout</Btn>
         </>
       )}
     >
       {/* Step indicator */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 20 }}>
         {stepLabels.map((label, idx) => {
-          const n = idx + 1;
-          const active = n === step;
-          const done = n < step;
+          const n = idx + 1; const active = n === step; const done = n < step;
           return (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {idx > 0 && <div style={{ width: 28, height: 1, background: "var(--line)" }} />}
@@ -194,10 +249,16 @@ function CreatePayoutModal({ onClose, onCreate }: CreatePayoutModalProps) {
                 <span style={{ fontSize: 13, fontWeight: 500 }}>{file!.name}</span>
                 <button style={{ fontSize: 12, color: "var(--ink-3)", textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0 }} onClick={() => { setFile(null); setParsedTxns(null); }}>Change file</button>
               </div>
+              <ExceptionChecksPanel exceptions={exceptions} />
+              {hasErrors && (
+                <div style={{ padding: "10px 14px", background: "var(--bad-bg, #fff5f5)", border: "1px solid var(--bad-line, var(--line))", borderRadius: 8, fontSize: 12.5, color: "var(--bad)", marginBottom: 14 }}>
+                  Resolve the errors above before creating this payout.
+                </div>
+              )}
               <div style={{ marginBottom: 10, fontSize: 13, color: "var(--ink-2)" }}>
                 Found <strong>{parsedTxns.length} transactions</strong> totalling <strong>{money(gross)}</strong>
               </div>
-              <div className="tbl-wrap" style={{ maxHeight: 220, overflowY: "auto", marginBottom: 14 }}>
+              <div className="tbl-wrap" style={{ maxHeight: 200, overflowY: "auto", marginBottom: 14 }}>
                 <table className="tbl">
                   <thead>
                     <tr>{["Date","Payment Method","Amount (RM)"].map((h) => <th key={h}>{h}</th>)}</tr>
@@ -247,9 +308,12 @@ interface MerchantGroup {
   gross: number;
   fee: number;
   net: number;
+  exceptions: PayoutException[];
 }
 
-function simulateParse(fileName: string, period: string): MerchantGroup[] {
+type RawGroup = Omit<MerchantGroup, "exceptions">;
+
+function simulateParse(fileName: string, period: string): RawGroup[] {
   const seed = fileName.split("").reduce((a, c) => a + c.charCodeAt(0), 42);
   const rng = (n: number, s = 0) => ((seed + s) * 2654435761 + n * 1234567891) >>> 0;
   const merchantPool = merchants.slice(0, 6).map((m) => m.name);
@@ -260,7 +324,7 @@ function simulateParse(fileName: string, period: string): MerchantGroup[] {
     paymentMethod: TXN_PAYMENT_METHODS[rng(i, 300) % TXN_PAYMENT_METHODS.length],
     date: period.split(" – ")[0] + String(1 + rng(i, 400) % 14).padStart(2, "0"),
   }));
-  const byMerchant: Record<string, MerchantGroup> = {};
+  const byMerchant: Record<string, RawGroup> = {};
   raw.forEach((t) => {
     if (!byMerchant[t.merchantName]) byMerchant[t.merchantName] = { merchantName: t.merchantName, txns: [], gross: 0, fee: 0, net: 0 };
     byMerchant[t.merchantName].txns.push(t);
@@ -279,6 +343,8 @@ interface UploadModalProps {
 }
 
 function UploadTransactionsModal({ onClose, onProcess }: UploadModalProps) {
+  const { terminals } = useTerminals();
+  const { rentals } = useRentals();
   const [step, setStep] = useState<1 | 2>(1);
   const [file, setFile] = useState<File | null>(null);
   const [period, setPeriod] = useState("2026-06-01 – 15");
@@ -291,7 +357,22 @@ function UploadTransactionsModal({ onClose, onProcess }: UploadModalProps) {
 
   function parseFile() {
     if (!file) return;
-    setGroups(simulateParse(file.name, period));
+    const raw = simulateParse(file.name, period);
+    const enriched: MerchantGroup[] = raw.map((g) => {
+      const merchant = merchants.find((m) => m.name === g.merchantName);
+      const customer = merchant ? customers.find((c) => c.id === merchant.customerId) : null;
+      const exceptions = runPayoutChecks({
+        merchant: merchant || null,
+        customer: customer || null,
+        allTerminals: terminals,
+        allRentals: rentals,
+        allMdrRates: mdr,
+        txnPaymentMethods: g.txns.map((t) => t.paymentMethod),
+        fileMid: merchant?.mid,
+      });
+      return { ...g, exceptions };
+    });
+    setGroups(enriched);
     setStep(2);
   }
 
@@ -308,7 +389,8 @@ function UploadTransactionsModal({ onClose, onProcess }: UploadModalProps) {
         id: poId, merchant: { id: merchant.id, name: g.merchantName },
         mid: merchant.mid, bank: merchant.bank,
         gross: g.gross, fee: g.fee, net: g.net, txns: g.txns.length,
-        period, status: "Pending", exception: null, checks: "4 of 4 passed",
+        period, status: "Pending",
+        exceptions: g.exceptions, checks: checksPassedSummary(g.exceptions),
         einvoice: false, issued: null, isNew: true,
         paymentMethod: g.txns[0]?.paymentMethod.split(" ")[0] || "Multi-Method", paymentProof: null,
       };
@@ -318,7 +400,9 @@ function UploadTransactionsModal({ onClose, onProcess }: UploadModalProps) {
   }
 
   const totalTxns = groups.reduce((a, g) => a + g.txns.length, 0);
-  const totalNet = groups.reduce((a, g) => a + g.net, 0);
+  const totalNet  = groups.reduce((a, g) => a + g.net, 0);
+  const totalErrors = groups.reduce((a, g) => a + g.exceptions.filter((e) => e.severity === "error").length, 0);
+  const totalWarns  = groups.reduce((a, g) => a + g.exceptions.filter((e) => e.severity === "warning").length, 0);
 
   return (
     <Modal
@@ -378,24 +462,28 @@ function UploadTransactionsModal({ onClose, onProcess }: UploadModalProps) {
         </>
       ) : (
         <>
-          <div style={{ marginBottom: 14, fontSize: 13, color: "var(--ink-2)" }}>
-            Found <strong>{totalTxns} transactions</strong> across <strong>{groups.length} merchants</strong>. Review the breakdown before processing.
+          <div style={{ marginBottom: 10, fontSize: 13, color: "var(--ink-2)" }}>
+            Found <strong>{totalTxns} transactions</strong> across <strong>{groups.length} merchants</strong>.{" "}
+            {totalErrors > 0
+              ? <span style={{ color: "var(--bad)", fontWeight: 600 }}>{totalErrors} merchant{totalErrors > 1 ? "s" : ""} with errors.</span>
+              : totalWarns > 0
+                ? <span style={{ color: "var(--warn)", fontWeight: 600 }}>{totalWarns} warning{totalWarns > 1 ? "s" : ""} across merchants.</span>
+                : <span style={{ color: "var(--ok)", fontWeight: 600 }}>All checks passed.</span>}
           </div>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
-                <tr>
-                  {["Merchant","Transactions","Gross","MDR Fee","Net Payout"].map((h) => <th key={h}>{h}</th>)}
-                </tr>
+                <tr>{["Merchant","Transactions","Gross","MDR Fee","Net Payout","Checks"].map((h) => <th key={h}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {groups.map((g) => (
-                  <tr key={g.merchantName}>
+                  <tr key={g.merchantName} style={{ opacity: g.exceptions.some((e) => e.severity === "error") ? 0.6 : 1 }}>
                     <td className="td-strong">{g.merchantName}</td>
                     <td className="td-mut">{g.txns.length}</td>
                     <td className="td-mono td-mut">{money(g.gross)}</td>
                     <td className="td-mono td-mut" style={{ color: "var(--bad)" }}>− {money(g.fee)}</td>
                     <td className="td-mono td-strong" style={{ color: "var(--green-700)" }}>{money(g.net)}</td>
+                    <td><ExceptionBadge exceptions={g.exceptions} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -406,6 +494,7 @@ function UploadTransactionsModal({ onClose, onProcess }: UploadModalProps) {
                   <td className="td-mono">{money(groups.reduce((a, g) => a + g.gross, 0))}</td>
                   <td className="td-mono" style={{ color: "var(--bad)" }}>− {money(groups.reduce((a, g) => a + g.fee, 0))}</td>
                   <td className="td-mono td-strong" style={{ color: "var(--green-700)" }}>{money(totalNet)}</td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
@@ -494,7 +583,7 @@ export function Payouts({ nav }: { nav: NavFn }) {
             <table className="tbl">
               <thead>
                 <tr>
-                  {["Payout ID","Merchant","Txns","Gross","Net","Status","eInvoice",""].map((h) => <th key={h}>{h}</th>)}
+                  {["Payout ID","Merchant","Txns","Gross","Net","Status","Checks","eInvoice",""].map((h) => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -512,6 +601,7 @@ export function Payouts({ nav }: { nav: NavFn }) {
                     <td className="td-mono td-mut">{money(p.gross)}</td>
                     <td className="td-mono td-strong">{money(p.net)}</td>
                     <td><PayoutStatus status={p.status} /></td>
+                    <td><ExceptionBadge exceptions={p.exceptions} /></td>
                     <td>
                       {p.einvoice
                         ? <Chip cls="chip-indigo"><Icon name="invoice" size={13} />Issued</Chip>
@@ -700,6 +790,13 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
           </div>
         </Card>
       </div>
+
+      {/* Exception Checks */}
+      <Card title={"Exception Checks · " + payout.checks} icon="alert">
+        <div style={{ padding: "8px 20px 16px" }}>
+          <ExceptionChecksPanel exceptions={payout.exceptions} />
+        </div>
+      </Card>
 
       {/* Transactions table */}
       <Card title={`Transactions (${txns.length})`} icon="receipt">

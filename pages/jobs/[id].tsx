@@ -8,6 +8,7 @@ export default function JobDetailPage() {
   const nav = useNav();
   const { jobs, onUpdate } = useJobs();
   const { id } = router.query;
+
   if (!id) return null;
   return <Shell><JobDetail id={id as string} nav={nav} jobs={jobs} onUpdate={onUpdate} /></Shell>;
 }

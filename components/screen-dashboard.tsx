@@ -50,7 +50,7 @@ export function Dashboard({ nav }: { nav: NavFn }) {
   const breaches = jobs.filter((j) => j.sla === "Breached").length;
   const activeMerch = merchants.filter((m) => m.status === "Active").length;
   const cycleTotal = payouts.reduce((a, p) => a + p.net, 0);
-  const exceptions = payouts.filter((p) => p.exception).length;
+  const exceptions = payouts.filter((p) => p.exceptions.length > 0).length;
 
   const jobTypeCounts: Record<string, number> = {};
   Object.keys(JOB_TYPES).forEach((t) => (jobTypeCounts[t] = 0));
