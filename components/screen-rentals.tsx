@@ -1,13 +1,13 @@
 /* PaidChain — Rental listing + detail + create modal */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
 import { RENTAL_PLANS, RENTAL_STATUS } from "./data";
-import type { Rental } from "./data";
-import { useRentals } from "./rentals-context";
 import { useCustomers } from "./customers-context";
 import { useMerchants } from "./merchants-context";
 import { useTerminals } from "./terminals-context";
+import { api, ApiError } from "@/lib/api";
+import type { RentalOut } from "@/lib/api";
 import { NavFn } from "./shell";
 
 const money = (n: number) => "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -23,9 +23,7 @@ function monthsBetween(start: string, end: string): number {
 }
 
 /* =================== CREATE MODAL =================== */
-interface CreateRentalModalProps { onClose: () => void; onCreate: (r: Rental) => void }
-
-function CreateRentalModal({ onClose, onCreate }: CreateRentalModalProps) {
+function CreateRentalModal({ onClose, onCreate }: { onClose: () => void; onCreate: (r: RentalOut) => void }) {
   const { customers } = useCustomers();
   const { merchants } = useMerchants();
   const { terminals } = useTerminals();
@@ -36,9 +34,9 @@ function CreateRentalModal({ onClose, onCreate }: CreateRentalModalProps) {
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const selectedMerchant = merchants.find((m) => m.id === form.merchantId);
-  const selectedCustomer = customers.find((c) => c.id === selectedMerchant?.customerId);
-  const selectedTerminal = terminals.find((t) => t.serial === form.terminalSerial);
+  const selectedMerchant  = merchants.find((m) => m.id === form.merchantId);
+  const selectedCustomer  = customers.find((c) => c.id === selectedMerchant?.customerId);
+  const selectedTerminal  = terminals.find((t) => t.serial === form.terminalSerial);
   const valid = form.merchantId && form.terminalSerial && form.startDate;
 
   function selectTerminal(serial: string) {
@@ -50,21 +48,21 @@ function CreateRentalModal({ onClose, onCreate }: CreateRentalModalProps) {
     const m = selectedMerchant!;
     const c = selectedCustomer!;
     const t = selectedTerminal!;
-    onCreate({
+    const r: RentalOut = {
       id: "RNT-" + Math.floor(4100 + Math.random() * 400),
-      customer: { id: c.id, name: c.name, tin: c.tin },
+      customer: { id: c.id, name: c.name, tin: c.tin || "" },
       merchant: { id: m.id, name: m.name, mid: m.mid },
-      terminal: { serial: t.serial, brand: t.brand, model: t.model, tid: t.tid },
+      terminal: { serial: t.serial, brand: t.brand, model: t.model, tid: t.tid || null },
       plan: form.plan,
-      monthlyRate: parseFloat(form.monthlyRate) || t.rentalRate,
+      monthly_rate: parseFloat(form.monthlyRate) || t.rentalRate,
       deposit: parseFloat(form.deposit) || 0,
-      startDate: form.startDate,
-      endDate: null,
+      start_date: form.startDate,
+      end_date: null,
       status: "Active",
-      invoiceIssued: null,
-      einvoiceIssued: null,
-      isNew: true,
-    });
+      invoice_issued: null,
+      einvoice_issued: null,
+    };
+    onCreate(r);
     onClose();
   }
 
@@ -143,29 +141,65 @@ function CreateRentalModal({ onClose, onCreate }: CreateRentalModalProps) {
 }
 
 /* =================== LISTING =================== */
+const RENTALS_PAGE_SIZE = 20;
+
 export function Rentals({ nav }: { nav: NavFn }) {
-  const { rentals, addRental } = useRentals();
+  const [rentals, setRentals] = useState<RentalOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const filtered = rentals.filter((r) => {
-    const hay = (r.id + " " + r.customer.name + " " + r.customer.id + " " + r.merchant.name + " " + r.merchant.mid + " " + r.terminal.serial + " " + r.terminal.brand + " " + r.terminal.model).toLowerCase();
-    if (q && !hay.includes(q.toLowerCase())) return false;
-    if (status !== "All" && r.status !== status) return false;
-    return true;
-  });
+  useEffect(() => {
+    api.rentals.list({
+      page,
+      per_page: RENTALS_PAGE_SIZE,
+      query: q || undefined,
+      status: status !== "All" ? status : undefined,
+    })
+      .then((p) => {
+        setRentals(p.items);
+        setPages(p.pages);
+        setTotal(p.total);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [page, q, status]);
+
+  function resetPage() {
+    setLoading(true);
+    setPage(1);
+  }
+
+  function changePage(nextPage: number) {
+    setLoading(true);
+    setPage(nextPage);
+  }
 
   const stats = {
-    total: rentals.length,
-    active: rentals.filter((r) => r.status === "Active").length,
-    revenue: rentals.filter((r) => r.status === "Active").reduce((a, r) => a + r.monthlyRate, 0),
-    ended: rentals.filter((r) => r.status === "Ended").length,
+    total,
+    active:  rentals.filter((r) => r.status === "Active").length,
+    revenue: rentals.filter((r) => r.status === "Active").reduce((a, r) => a + r.monthly_rate, 0),
+    ended:   rentals.filter((r) => r.status === "Ended").length,
   };
 
-  function handleCreate(r: Rental) {
-    addRental(r);
+  function handleCreate(r: RentalOut) {
+    const hay = (r.id + " " + r.customer.name + " " + r.customer.id + " " + r.merchant.name + " " + r.merchant.mid + " " + r.terminal.serial + " " + r.terminal.brand + " " + r.terminal.model).toLowerCase();
+    const matchesQuery = !q || hay.includes(q.toLowerCase());
+    const matchesStatus = status === "All" || r.status === status;
+    const matchesCurrentFilters = matchesQuery && matchesStatus;
+    setRentals((prev) => page === 1 && matchesCurrentFilters ? [r, ...prev].slice(0, RENTALS_PAGE_SIZE) : prev);
+    setNewIds((prev) => new Set([...prev, r.id]));
+    if (matchesCurrentFilters) {
+      const nextTotal = total + 1;
+      setTotal(nextTotal);
+      setPages(Math.max(pages, Math.ceil(nextTotal / RENTALS_PAGE_SIZE)));
+    }
     setToast("Rental " + r.id + " created");
     setTimeout(() => setToast(null), 2800);
   }
@@ -200,27 +234,29 @@ export function Rentals({ nav }: { nav: NavFn }) {
 
       <Card>
         <Toolbar>
-          <SearchBox value={q} onChange={setQ} placeholder="Search rental ID, customer, merchant, terminal serial…" />
-          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <SearchBox value={q} onChange={(value) => { setQ(value); resetPage(); }} placeholder="Search rental ID, customer, merchant, terminal serial…" />
+          <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
             {["All", "Active", "Suspended", "Ended"].map((s) => (
-              <option key={s}>{s === "All" ? "All Statuses" : s}</option>
+              <option key={s} value={s}>{s === "All" ? "All Statuses" : s}</option>
             ))}
           </select>
-          <span className="tb-meta">{filtered.length} rentals</span>
+          <span className="tb-meta">{loading ? "Loading…" : `${total} rentals`}</span>
         </Toolbar>
-        {filtered.length === 0 ? <Empty icon="receipt" title="No rentals match" /> : (
+        {loading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : rentals.length === 0 ? <Empty icon="receipt" title="No rentals match" /> : (
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
                 <tr>{["Rental ID","Customer","Merchant","Terminal","Plan","Monthly Rate","Start Date","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
+                {rentals.map((r) => (
                   <tr key={r.id}>
                     <td>
                       <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
                         <span className="td-mono td-strong">{r.id}</span>
-                        {r.isNew && <Chip cls="chip-ok" sq>New</Chip>}
+                        {newIds.has(r.id) && <Chip cls="chip-ok" sq>New</Chip>}
                       </span>
                     </td>
                     <td>
@@ -242,8 +278,8 @@ export function Rentals({ nav }: { nav: NavFn }) {
                       </div>
                     </td>
                     <td className="td-mut">{r.plan}</td>
-                    <td className="td-mono td-strong">{money(r.monthlyRate)}</td>
-                    <td className="td-mono td-mut">{r.startDate}</td>
+                    <td className="td-mono td-strong">{money(r.monthly_rate)}</td>
+                    <td className="td-mono td-mut">{r.start_date}</td>
                     <td><RentalStatus status={r.status} /></td>
                     <td>
                       <Btn variant="ghost" sm icon="eye" onClick={() => nav("rental-detail", r.id)}>View</Btn>
@@ -254,67 +290,109 @@ export function Rentals({ nav }: { nav: NavFn }) {
             </table>
           </div>
         )}
-        <Pagination total={rentals.length} shown={filtered.length} />
+        <Pagination total={total} shown={rentals.length} page={page} pages={pages} onPageChange={changePage} />
       </Card>
 
       {showCreate && <CreateRentalModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
-      {toast && (
-        <div className="toast">
-          <span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}
-        </div>
-      )}
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
 }
 
 /* =================== DETAIL =================== */
 export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
-  const { rentals, updateRental } = useRentals();
-  const { customers } = useCustomers();
-  const { merchants } = useMerchants();
-  const { terminals } = useTerminals();
-  const rental = rentals.find((r) => r.id === id);
+  const [rental, setRental] = useState<RentalOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [docBusy, setDocBusy] = useState<"invoice" | "einvoice" | null>(null);
 
-  if (!rental) return (
+  useEffect(() => {
+    api.rentals.get(id)
+      .then(setRental)
+      .catch((e) => { if (e instanceof ApiError && e.status === 404) setNotFound(true); })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) return (
+    <div>
+      <PageHead title="Rental" actions={<Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back to Rentals</Btn>} />
+      <div style={{ padding: "40px 0", fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>Loading…</div>
+    </div>
+  );
+
+  if (notFound || !rental) return (
     <div>
       <PageHead title="Rental not found" actions={<Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back to Rentals</Btn>} />
       <Empty icon="receipt" title="Rental not found" sub={"No rental with ID " + id} />
     </div>
   );
 
-  const currentRental = rental;
-  const customer = customers.find((c) => c.id === currentRental.customer.id);
-  const merchant = merchants.find((m) => m.id === currentRental.merchant.id);
-  const terminal = terminals.find((t) => t.serial === currentRental.terminal.serial);
-  const customerTin = customer?.tin || currentRental.customer.tin;
+  const today = new Date().toISOString().slice(0, 10);
+  const durationEnd = rental.end_date || today;
+  const months = monthsBetween(rental.start_date, durationEnd);
+  const customerTin = rental.customer.tin;
   const canGenerateEinvoice = !!customerTin;
 
-  const today = new Date().toISOString().slice(0, 10);
-  const durationEnd = currentRental.endDate || today;
-  const months = monthsBetween(currentRental.startDate, durationEnd);
+  function showToast(message: string) { setToast(message); setTimeout(() => setToast(null), 2800); }
 
-  function showToast(message: string) {
-    setToast(message);
-    setTimeout(() => setToast(null), 2800);
+  const hadInvoice   = !!rental.invoice_issued;
+  const hadEinvoice  = !!rental.einvoice_issued;
+
+  async function refreshRental() {
+    const next = await api.rentals.get(id);
+    setRental(next);
   }
 
-  function generateInvoice() {
-    updateRental(currentRental.id, { invoiceIssued: today });
-    showToast(currentRental.invoiceIssued ? "Invoice regenerated" : "Invoice generated");
+  function openDocument(blob: Blob) {
+    if (typeof window === "undefined") return;
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
   }
 
-  function generateEinvoice() {
+  async function generateInvoice() {
+    setDocBusy("invoice");
+    try {
+      const document = await api.rentals.invoice(rental!.id);
+      openDocument(document);
+      await refreshRental().catch(() => {
+        setRental((r) => r ? { ...r, invoice_issued: r.invoice_issued || today } : r);
+      });
+      showToast(hadInvoice ? "Invoice regenerated" : "Invoice generated");
+    } catch {
+      showToast("Failed to generate invoice");
+    } finally {
+      setDocBusy(null);
+    }
+  }
+
+  async function generateEinvoice() {
     if (!canGenerateEinvoice) return;
-    updateRental(currentRental.id, { einvoiceIssued: today, invoiceIssued: currentRental.invoiceIssued || today });
-    showToast(currentRental.einvoiceIssued ? "eInvoice regenerated" : "eInvoice generated");
+    setDocBusy("einvoice");
+    try {
+      const document = await api.rentals.einvoice(rental!.id);
+      openDocument(document);
+      await refreshRental().catch(() => {
+        setRental((r) => r ? {
+          ...r,
+          einvoice_issued: r.einvoice_issued || today,
+          invoice_issued: r.invoice_issued || today,
+        } : r);
+      });
+      showToast(hadEinvoice ? "eInvoice regenerated" : "eInvoice generated");
+    } catch {
+      showToast("Failed to generate eInvoice");
+    } finally {
+      setDocBusy(null);
+    }
   }
 
   return (
     <div>
       <PageHead
-        title={currentRental.id}
-        sub={currentRental.customer.name + " · " + currentRental.merchant.name + " · " + currentRental.terminal.brand + " " + currentRental.terminal.model}
+        title={rental.id}
+        sub={rental.customer.name + " · " + rental.merchant.name + " · " + rental.terminal.brand + " " + rental.terminal.model}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back</Btn>
           <Btn variant="ghost" icon="download">Export</Btn>
@@ -323,23 +401,22 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       {/* Status bar */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
-        <RentalStatus status={currentRental.status} />
-        <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{currentRental.plan}</span>
-        {currentRental.invoiceIssued && <Chip cls="chip-info">Invoice {currentRental.invoiceIssued}</Chip>}
-        {currentRental.einvoiceIssued && <Chip cls="chip-indigo"><Icon name="invoice" size={13} />eInvoice {currentRental.einvoiceIssued}</Chip>}
-        {currentRental.isNew && <Chip cls="chip-ok" sq>New</Chip>}
+        <RentalStatus status={rental.status} />
+        <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{rental.plan}</span>
+        {rental.invoice_issued && <Chip cls="chip-info">Invoice {rental.invoice_issued}</Chip>}
+        {rental.einvoice_issued && <Chip cls="chip-indigo"><Icon name="invoice" size={13} />eInvoice {rental.einvoice_issued}</Chip>}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <Card title="Customer" icon="building">
           <div style={{ padding: "4px 20px 16px" }}>
             {[
-              ["Name", customer?.name || currentRental.customer.name],
-              ["Customer ID", customer?.id || currentRental.customer.id],
-              ["Registration No.", customer?.regNo || "—"],
-              ["TIN No.", customerTin || "—"],
-              ["Contact", customer?.contact || "—"],
-              ["Email", customer?.email || "—"],
+              ["Name",            rental.customer.name],
+              ["Customer ID",     rental.customer.id],
+              ["Registration No.", "—"],
+              ["TIN No.",         customerTin || "—"],
+              ["Contact",         "—"],
+              ["Email",           "—"],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -349,16 +426,15 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
           </div>
         </Card>
 
-        {/* Merchant card */}
         <Card title="Merchant" icon="merchants">
           <div style={{ padding: "4px 20px 16px" }}>
             {[
-              ["Name",    merchant?.name    || currentRental.merchant.name],
-              ["MID",     currentRental.merchant.mid],
-              ["Bank",    merchant?.bank    || "—"],
-              ["Type",    merchant?.type    || "—"],
-              ["Contact", merchant?.contact || "—"],
-              ["Phone",   merchant?.phone   || "—"],
+              ["Name",    rental.merchant.name],
+              ["MID",     rental.merchant.mid],
+              ["Bank",    "—"],
+              ["Type",    "—"],
+              ["Contact", "—"],
+              ["Phone",   "—"],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -368,16 +444,15 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
           </div>
         </Card>
 
-        {/* Terminal card */}
         <Card title="Terminal" icon="terminal">
           <div style={{ padding: "4px 20px 16px" }}>
             {[
-              ["Serial",    currentRental.terminal.serial],
-              ["Brand",     currentRental.terminal.brand],
-              ["Model",     currentRental.terminal.model],
-              ["TID",       currentRental.terminal.tid || "—"],
-              ["SIM",       terminal?.sim      || "—"],
-              ["Condition", terminal?.conditionNote || "—"],
+              ["Serial",    rental.terminal.serial],
+              ["Brand",     rental.terminal.brand],
+              ["Model",     rental.terminal.model],
+              ["TID",       rental.terminal.tid || "—"],
+              ["SIM",       "—"],
+              ["Condition", "—"],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -388,17 +463,17 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         </Card>
 
         <Card title="Billing Documents" icon="invoice" actions={<>
-          <Btn variant="ghost" sm icon="invoice" onClick={generateInvoice}>
-            {currentRental.invoiceIssued ? "Regenerate Invoice" : "Generate Invoice"}
+          <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
+            {docBusy === "invoice" ? "Generating…" : rental.invoice_issued ? "Regenerate Invoice" : "Generate Invoice"}
           </Btn>
-          <Btn variant="ghost" sm icon="invoice" disabled={!canGenerateEinvoice} title={canGenerateEinvoice ? "Generate eInvoice" : "Customer TIN number required"} onClick={generateEinvoice}>
-            {currentRental.einvoiceIssued ? "Regenerate eInvoice" : "Generate eInvoice"}
+          <Btn variant="ghost" sm icon="invoice" disabled={!canGenerateEinvoice || docBusy !== null} title={canGenerateEinvoice ? "Generate eInvoice" : "Customer TIN number required"} onClick={generateEinvoice}>
+            {docBusy === "einvoice" ? "Generating…" : rental.einvoice_issued ? "Regenerate eInvoice" : "Generate eInvoice"}
           </Btn>
         </>}>
           <div style={{ padding: "4px 20px 16px" }}>
             {[
-              ["Invoice", currentRental.invoiceIssued ? "Generated on " + currentRental.invoiceIssued : "Not generated"],
-              ["eInvoice", currentRental.einvoiceIssued ? "Generated on " + currentRental.einvoiceIssued : (canGenerateEinvoice ? "Ready to generate" : "Customer TIN number required")],
+              ["Invoice",  rental.invoice_issued  ? "Last generated on " + rental.invoice_issued  : "Not generated"],
+              ["eInvoice", rental.einvoice_issued ? "Last generated on " + rental.einvoice_issued : (canGenerateEinvoice ? "Ready to generate" : "Customer TIN number required")],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -418,12 +493,12 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       <Card title="Rental Terms" icon="receipt">
         <div style={{ padding: "4px 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
           {[
-            ["Plan",          currentRental.plan],
-            ["Monthly Rate",  money(currentRental.monthlyRate)],
-            ["Deposit Paid",  money(currentRental.deposit)],
-            ["Start Date",    currentRental.startDate],
-            ["End Date",      currentRental.endDate || "Ongoing"],
-            ["Duration",      months > 0 ? months + " month" + (months !== 1 ? "s" : "") : "< 1 month"],
+            ["Plan",         rental.plan],
+            ["Monthly Rate", money(rental.monthly_rate)],
+            ["Deposit Paid", money(rental.deposit)],
+            ["Start Date",   rental.start_date],
+            ["End Date",     rental.end_date || "Ongoing"],
+            ["Duration",     months > 0 ? months + " month" + (months !== 1 ? "s" : "") : "< 1 month"],
           ].map(([l, v]) => (
             <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
               <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -433,11 +508,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </Card>
 
-      {toast && (
-        <div className="toast">
-          <span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}
-        </div>
-      )}
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
 }

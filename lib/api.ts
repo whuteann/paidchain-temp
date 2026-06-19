@@ -1,0 +1,1086 @@
+/* PaidChain — typed API client (OpenAPI 3.1.0) */
+
+const BASE = process.env.NEXT_PUBLIC_API_URL;
+
+// ─── Token helpers (read/clear via Redux store; lazy require avoids SSR crash) ─
+
+type _Store = import("@/store").RootState;
+
+function getAuthStore() {
+  if (typeof window === "undefined") return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (require("@/store") as { store: { getState: () => { auth: _Store["auth"] }; dispatch: (a: unknown) => void } }).store;
+}
+
+export function getToken(): string | null {
+  return getAuthStore()?.getState().auth.token ?? null;
+}
+
+function dispatchLogout() {
+  const s = getAuthStore();
+  if (!s) return;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { logout } = require("@/store/authSlice") as { logout: () => { type: string } };
+  s.dispatch(logout());
+}
+
+// ─── Base request ─────────────────────────────────────────────────────────────
+
+async function req<T>(
+  method: string,
+  path: string,
+  opts: { body?: unknown; form?: FormData; params?: object } = {}
+): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const url = new URL(`${BASE}/api${path}`);
+  if (opts.params) {
+    for (const [k, v] of Object.entries(opts.params)) {
+      if (v !== null && v !== undefined) url.searchParams.append(k, String(v));
+    }
+  }
+
+  let body: BodyInit | undefined;
+  if (opts.form) {
+    body = opts.form;
+  } else if (opts.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.body);
+  }
+
+  const res = await fetch(url.toString(), { method, headers, body });
+
+  if (res.status === 401) {
+    const hadToken = !!getToken();
+    dispatchLogout();
+    if (hadToken && typeof window !== "undefined") window.location.href = "/login";
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  if (res.status === 204) return undefined as T;
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = typeof data?.detail === "string" ? data.detail : `HTTP ${res.status}`;
+    throw new ApiError(res.status, msg);
+  }
+  return data as T;
+}
+
+async function reqBlob(
+  method: string,
+  path: string,
+  opts: { body?: unknown; form?: FormData; params?: object } = {}
+): Promise<Blob> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const url = new URL(`${BASE}/api${path}`);
+  if (opts.params) {
+    for (const [k, v] of Object.entries(opts.params)) {
+      if (v !== null && v !== undefined) url.searchParams.append(k, String(v));
+    }
+  }
+
+  let body: BodyInit | undefined;
+  if (opts.form) {
+    body = opts.form;
+  } else if (opts.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.body);
+  }
+
+  const res = await fetch(url.toString(), { method, headers, body });
+
+  if (res.status === 401) {
+    const hadToken = !!getToken();
+    dispatchLogout();
+    if (hadToken && typeof window !== "undefined") window.location.href = "/login";
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const msg = typeof data?.detail === "string" ? data.detail : `HTTP ${res.status}`;
+    throw new ApiError(res.status, msg);
+  }
+
+  return res.blob();
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+// ─── Shared types ─────────────────────────────────────────────────────────────
+
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pages: number;
+  size: number;
+}
+
+export interface ActivityOut {
+  at: string;
+  event: string;
+  note: string | null;
+  actor: string | null;
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export type { AuthUser } from "@/store/authSlice";
+
+export interface LoginResponse {
+  access_token: string;
+  refresh_token?: string;
+  token_type: string;
+  user: import("@/store/authSlice").AuthUser;
+}
+
+export interface MeOut {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  last_active: string | null;
+  jobs: number;
+}
+
+export const auth = {
+  login: (email: string, password: string) =>
+    req<LoginResponse>("POST", "/auth/login", { body: { email, password } }),
+
+  me: () => req<MeOut>("GET", "/auth/me"),
+
+  logout: () => req<void>("POST", "/auth/logout"),
+
+  changePassword: (current_password: string, new_password: string) =>
+    req<void>("PATCH", "/auth/password", { body: { current_password, new_password } }),
+};
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+
+export interface DashboardSummary {
+  total_customers: number;
+  total_merchants: number;
+  active_terminals: number;
+  open_jobs: number;
+  pending_payouts: number;
+  jobs_breached: number;
+}
+
+export interface DashboardJobRef {
+  id: string;
+  type: string;
+  stage: string;
+  sla: string;
+  merchant: { id: string; name: string };
+  due: string;
+}
+
+export interface DashboardAlert {
+  type: string;
+  severity: "error" | "warning" | "info";
+  message: string;
+  entity_id: string | null;
+  entity_type: string | null;
+}
+
+export const dashboard = {
+  summary: () => req<DashboardSummary>("GET", "/dashboard/summary"),
+  recentJobs: (limit = 10) => req<DashboardJobRef[]>("GET", "/dashboard/recent-jobs", { params: { limit } }),
+  alerts: () => req<DashboardAlert[]>("GET", "/dashboard/alerts"),
+};
+
+// ─── Customers ────────────────────────────────────────────────────────────────
+
+export interface CustomerOut {
+  id: string;
+  name: string;
+  type: string;
+  reg_no: string;
+  tin: string | null;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+  status: string;
+  onboarded_date: string;
+  merchant_count: number;
+}
+
+export interface CustomerCreate {
+  name: string;
+  type: string;
+  reg_no: string;
+  tin?: string | null;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+}
+
+export interface CustomerListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  status?: string;
+}
+
+export interface CustomerPage {
+  items: CustomerOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface CustomerDetails {
+  total_customers: number;
+  total_active: number;
+  linked_merchants: number;
+}
+
+export interface CustomerMerchantOut {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  name: string;
+  type: string;
+  mid: string;
+  bank: string;
+  status: string;
+  finance_status: string;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+  onboarded_date: string;
+  mdr_plan: string;
+  bank_account_name: string;
+  bank_account_number: string;
+  bank_account_type: string;
+  terminal_count: number;
+  open_jobs_count: number;
+}
+
+export const customers = {
+  list: (p?: CustomerListParams) => req<CustomerPage>("GET", "/customers", { params: p }),
+  get: (id: string) => req<CustomerOut>("GET", `/customers/${id}`),
+  create: (body: CustomerCreate) => req<CustomerOut>("POST", "/customers/create", { body }),
+  update: (id: string, body: Partial<CustomerCreate>) =>
+    req<CustomerOut>("PATCH", `/customers/${id}`, { body }),
+  remove: (id: string) => req<void>("DELETE", `/customers/${id}`),
+  details: () => req<CustomerDetails>("GET", "/customers/details"),
+  merchants: (customerId: string, status?: string) =>
+    req<CustomerMerchantOut[]>("GET", `/customers/${customerId}/merchants`, { params: { status } }),
+};
+
+// ─── Merchants ────────────────────────────────────────────────────────────────
+
+export interface MerchantOut {
+  id: string;
+  name: string;
+  type: string;
+  mid: string;
+  bank: string;
+  status: string;
+  finance: string;
+  terminals: number;
+  open_jobs: number;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+  onboarded: string;
+  mdr_plan: string;
+  bank_account_name: string;
+  bank_account_number: string;
+  bank_account_type: string;
+  customer_id: string;
+  customer_name: string;
+}
+
+export interface MerchantCreate {
+  name: string;
+  type: string;
+  mid: string;
+  bank: string;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+  mdr_plan: string;
+  bank_account_name: string;
+  bank_account_number: string;
+  bank_account_type: string;
+  customer_id: string;
+  finance?: string;
+}
+
+export interface MerchantListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  status?: string;
+  bank?: string;
+  customer_id?: string;
+}
+
+export interface MerchantPage {
+  items: MerchantOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface MerchantDetails {
+  total_merchants: number;
+  by_status: Record<string, number>;
+}
+
+export interface MerchantTerminalOut {
+  serial: string;
+  term_setting_id: string;
+  brand: string;
+  model: string;
+  status: string;
+  tid: string | null;
+  location: string;
+  last_movement: string;
+  rental_rate: number;
+  rental_plan: string;
+  sim_type: string;
+  condition_note: string;
+  merchant: { id: string; name: string };
+}
+
+export interface MerchantJobOut {
+  id: string;
+  type: string;
+  stage: string;
+  stage_index: number;
+  status: string;
+  sla: string;
+  priority: string;
+  assignee: string;
+  bank: string;
+  due_date: string;
+  created_at: string;
+  created_by_role: string;
+  created_by_name: string;
+  escalated_to: string | null;
+  notes: string;
+  customer: { id: string; name: string };
+  merchant: { id: string; name: string };
+  terminal: { serial: string; brand: string; model: string } | null;
+  previous_terminal: { serial: string; brand: string; model: string } | null;
+}
+
+export const merchants = {
+  list: (p?: MerchantListParams) => req<MerchantPage>("GET", "/merchants", { params: p }),
+  get: (id: string) => req<MerchantOut>("GET", `/merchants/${id}`),
+  create: (body: MerchantCreate) => req<MerchantOut>("POST", "/merchants/create", { body }),
+  update: (id: string, body: Partial<MerchantCreate>) =>
+    req<MerchantOut>("PATCH", `/merchants/${id}`, { body }),
+  remove: (id: string) => req<CustomerMerchantOut>("DELETE", `/merchants/${id}`),
+  details: () => req<MerchantDetails>("GET", "/merchants/details"),
+  terminals: (merchantId: string) => req<MerchantTerminalOut[]>("GET", `/merchants/${merchantId}/terminals`),
+  jobs: (merchantId: string, status?: string) =>
+    req<MerchantJobOut[]>("GET", `/merchants/${merchantId}/jobs`, { params: { status } }),
+};
+
+// ─── Terminal Settings ────────────────────────────────────────────────────────
+
+export interface TermSettingOut {
+  id: string;
+  brand: string;
+  model: string;
+  category: string;
+  bank: string;
+  monthly_rental: number;
+  deposit: number;
+  setup_fee: number;
+  units: number;
+  active: boolean;
+}
+
+export interface TermSettingCreate {
+  brand: string;
+  model: string;
+  category: string;
+  bank: string;
+  monthly_rental: number;
+  deposit: number;
+  setup_fee: number;
+  active?: boolean;
+}
+
+export const termSettings = {
+  list: (params?: { bank?: string; active?: boolean }) =>
+    req<TermSettingOut[]>("GET", "/terminals/settings", { params }),
+  get: (id: string) => req<TermSettingOut>("GET", `/terminals/settings/${id}`),
+  create: (body: TermSettingCreate) => req<TermSettingOut>("POST", "/terminals/settings", { body }),
+  update: (id: string, body: Partial<TermSettingCreate>) =>
+    req<TermSettingOut>("PATCH", `/terminals/settings/${id}`, { body }),
+  remove: (id: string) => req<void>("DELETE", `/terminals/settings/${id}`),
+};
+
+// ─── Terminals ────────────────────────────────────────────────────────────────
+
+export interface TerminalOut {
+  serial_no: string;
+  serial?: string;
+  brand: string;
+  model: string;
+  status: string;
+  tid: string | null;
+  merchant: { id: string; name: string } | null;
+  location: string;
+  last_movement: string;
+  rental_rate: number;
+  rental_plan: string;
+  sim: string;
+  condition_note: string;
+  term_setting_id: string;
+  activity_log?: ActivityOut[];
+}
+
+export function terminalSerial(t: TerminalOut): string {
+  return t.serial_no || t.serial || "";
+}
+
+export interface TerminalCreate {
+  serial_no: string;
+  brand: string;
+  model: string;
+  location: string;
+  rental_rate: number;
+  rental_plan: string;
+  sim: string;
+  condition_note: string;
+  term_setting_id: string;
+}
+
+export interface TerminalUpdate {
+  status?: string;
+  tid?: string | null;
+  merchant_id?: string | null;
+  location?: string;
+  rental_rate?: number;
+  rental_plan?: string;
+  sim?: string;
+  condition_note?: string;
+}
+
+export interface TerminalListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  status?: string;
+  brand?: string;
+}
+
+export interface TerminalPage {
+  items: TerminalOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface SimCardLinkBody {
+  terminal_serial: string;
+  simcard_id: string;
+}
+
+export interface TerminalBulkCreate {
+  term_setting_id: string;
+  serial_numbers: string[];
+  initial_location: string;
+  sim_type: string;
+}
+
+export const terminals = {
+  list: (p?: TerminalListParams) => req<TerminalPage>("GET", "/terminals", { params: p }),
+  get: (serial: string) => req<TerminalOut>("GET", `/terminals/${serial}`),
+  create: (body: TerminalCreate) => req<TerminalOut>("POST", "/terminals", { body }),
+  bulkCreate: (body: TerminalBulkCreate) => req<BulkCreateResult>("POST", "/terminals/bulk", { body }),
+  update: (serial: string, body: TerminalUpdate) =>
+    req<TerminalOut>("PATCH", `/terminals/${serial}`, { body }),
+  activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
+  linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
+  unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
+};
+
+// ─── Jobs ─────────────────────────────────────────────────────────────────────
+
+export interface JobEvidenceOut {
+  id: number;
+  stage: string;
+  filename: string;
+  path: string;
+  uploaded_by: string;
+  uploaded_at: string;
+}
+
+export interface JobHistoryEntryOut {
+  stage: string;
+  at: string;
+  actor: string;
+  actor_role: string;
+  note: string | null;
+  evidence: JobEvidenceOut[] | null;
+}
+
+export interface JobNotificationOut {
+  at: string;
+  to: string[];
+  subject: string;
+}
+
+export interface JobSlaLeg {
+  from_stage: string;
+  to_stage: string;
+  elapsed_days: number;
+  warning_days: number;
+  breach_days: number;
+  status: string;
+}
+
+export interface JobOut {
+  id: string;
+  type: string;
+  stage: string;
+  stage_index: number;
+  status: string;
+  sla: string;
+  assignee: string;
+  bank: string;
+  customer: { id: string; name: string } | null;
+  merchant: { id: string; name: string };
+  terminal: { serial: string; brand: string; model: string } | null;
+  previous_terminal: { serial: string; brand: string; model: string } | null;
+  merchant_detail: { id: string; name: string; mid: string; bank: string } | null;
+  term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
+  created_at: string;
+  due_date: string;
+  priority: string;
+  escalated_to: string | null;
+  notes: string;
+  created_by_role: string;
+  created_by_name: string;
+  history: JobHistoryEntryOut[];
+  notifications: JobNotificationOut[];
+  paper_roll_request: { quantity: number; payment_target: string } | null;
+  sla_leg: JobSlaLeg | null;
+  stage_sequence: string[];
+  evidence_by_stage: Record<string, JobEvidenceOut[]>;
+}
+
+export interface JobCreate {
+  type: string;
+  customer_id?: string | null;
+  merchant_id: string;
+  assignee?: string;
+  priority?: string;
+  due_date?: string;
+  notes?: string;
+  term_setting_id?: string | null;
+  paper_roll_qty?: number;
+  payment_target?: string;
+}
+
+export interface JobUpdate {
+  assignee?: string;
+  priority?: string;
+  desc?: string;
+}
+
+export interface JobSlaTransition {
+  from_stage: string;
+  to_stage: string;
+  warning_days: number;
+  breach_days: number;
+}
+
+export type JobSlaMap = Record<string, JobSlaTransition[]>;
+
+export interface JobListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  type?: string;
+  status?: string;
+  sla?: string;
+}
+
+export interface JobPage {
+  items: JobOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface JobDetails {
+  total_open: number;
+  total_completed: number;
+  by_type: Record<string, number>;
+  by_sla: Record<string, number>;
+}
+
+export const jobs = {
+  list: (p?: JobListParams) => req<JobPage>("GET", "/jobs", { params: p }),
+  details: () => req<JobDetails>("GET", "/jobs/details"),
+  get: (id: string) => req<JobOut>("GET", `/jobs/${id}`),
+  create: (body: JobCreate) => req<JobOut>("POST", "/jobs", { body }),
+  update: (id: string, body: JobUpdate) => req<JobOut>("PATCH", `/jobs/${id}`, { body }),
+  remove: (id: string) => req<void>("DELETE", `/jobs/${id}`),
+  advance: (
+    id: string,
+    opts: { note?: string; previous_terminal_status?: string; proof?: Array<File | { file: File }> }
+  ) => {
+    const form = new FormData();
+    if (opts.note) form.append("note", opts.note);
+    if (opts.previous_terminal_status) form.append("previous_terminal_status", opts.previous_terminal_status);
+    for (const proof of opts.proof ?? []) {
+      const file = proof instanceof File ? proof : proof.file;
+      if (file instanceof File) form.append("proof", file, file.name);
+    }
+    return req<JobOut>("PATCH", `/jobs/${id}/next`, { form });
+  },
+
+  assignDevice: (id: string, serial_no: string) =>
+    req<JobOut>("POST", `/jobs/${id}/device`, { body: { serial_no } }),
+
+  slaList: () => req<JobSlaMap>("GET", "/settings/sla"),
+  slaUpdate: (job_type_slug: string, from_stage: string, to_stage: string, body: { warning_days?: number; breach_days?: number }) =>
+    req<JobSlaTransition>("PATCH", `/jobs/sla/${job_type_slug}`, { body: { from_stage, to_stage, ...body } }),
+};
+
+// ─── SIM Cards ────────────────────────────────────────────────────────────────
+
+export interface SimCardOut {
+  id: string;
+  iccid: string;
+  msisdn: string;
+  carrier: string;
+  plan: string;
+  data_allowance: string;
+  status: string;
+  terminal_serial: string | null;
+}
+
+export interface SimCardCreate {
+  iccid: string;
+  msisdn: string;
+  carrier: string;
+  plan: string;
+  data_allowance: string;
+}
+
+export interface SimCardListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  status?: string;
+}
+
+export interface SimCardPage {
+  items: SimCardOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface SimCardDetails {
+  total_sims: number;
+  total_active: number;
+  total_in_storage: number;
+  total_suspended: number;
+  total_retired: number;
+}
+
+export const simCards = {
+  list: (p?: SimCardListParams) => req<SimCardPage>("GET", "/simcards", { params: p }),
+  get: (id: string) => req<SimCardOut>("GET", `/simcards/${id}`),
+  create: (body: SimCardCreate) => req<SimCardOut>("POST", "/simcards", { body }),
+  update: (id: string, body: Partial<SimCardCreate> & { status?: string; terminal_serial?: string | null }) =>
+    req<SimCardOut>("PATCH", `/simcards/${id}`, { body }),
+  remove: (id: string) => req<void>("DELETE", `/simcards/${id}`),
+  details: () => req<SimCardDetails>("GET", "/simcards/details"),
+};
+
+// ─── Paper Rolls ──────────────────────────────────────────────────────────────
+
+export interface PaperRollOut {
+  id: string;
+  type: string;
+  quantity: number;
+  reference: string;
+  note: string;
+  date: string;
+  created_by: string;
+}
+
+export interface PaperRollCreate {
+  type: string;
+  quantity: number;
+  reference: string;
+  note?: string;
+  date: string;
+}
+
+export interface PaperRollListParams {
+  page?: number;
+  size?: number;
+  type?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface PaperRollDetails {
+  current_stock: number;
+  total_received: number;
+  total_issued: number;
+}
+
+export const paperRolls = {
+  list: (p?: PaperRollListParams) => req<PaperRollOut[]>("GET", "/paper-rolls", { params: p }),
+  create: (body: PaperRollCreate) => req<PaperRollOut>("POST", "/paper-rolls/update", { body }),
+  details: () => req<PaperRollDetails>("GET", "/paper-rolls/details"),
+};
+
+// ─── Rentals ──────────────────────────────────────────────────────────────────
+
+export interface RentalOut {
+  id: string;
+  customer: { id: string; name: string; tin: string };
+  merchant: { id: string; name: string; mid: string };
+  terminal: { serial: string; brand: string; model: string; tid: string | null };
+  plan: string;
+  monthly_rate: number;
+  deposit: number;
+  start_date: string;
+  end_date: string | null;
+  status: string;
+  invoice_issued: string | null;
+  einvoice_issued: string | null;
+}
+
+export interface RentalCreate {
+  customer_id: string;
+  merchant_id: string;
+  terminal_serial: string;
+  plan: string;
+  monthly_rate: number;
+  deposit: number;
+  start_date: string;
+  end_date?: string | null;
+}
+
+export interface RentalUpdate {
+  status?: string;
+  end_date?: string | null;
+  invoice_issued?: string | null;
+  einvoice_issued?: string | null;
+}
+
+export interface RentalListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  status?: string;
+}
+
+export const rentals = {
+  list: (p?: RentalListParams) => req<Page<RentalOut>>("GET", "/rentals", { params: p }),
+  get: (id: string) => req<RentalOut>("GET", `/rentals/${id}`),
+  create: (body: RentalCreate) => req<RentalOut>("POST", "/rentals", { body }),
+  update: (id: string, body: RentalUpdate) => req<RentalOut>("PATCH", `/rentals/${id}`, { body }),
+  invoice: (id: string) => reqBlob("GET", `/rentals/${id}/invoice`),
+  einvoice: (id: string) => reqBlob("GET", `/rentals/${id}/einvoice`),
+};
+
+// ─── Payouts ──────────────────────────────────────────────────────────────────
+
+export interface PayoutException {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export interface PayoutOut {
+  id: string;
+  merchant: { id: string; name: string };
+  mid: string;
+  bank: string;
+  gross: number;
+  fee: number;
+  net: number;
+  txns: number;
+  period: string;
+  status: string;
+  exceptions: PayoutException[];
+  checks: string;
+  einvoice: boolean;
+  issued: string | null;
+  payment_method: string;
+  payment_proof: string | null;
+}
+
+export interface BulkCreateResult {
+  created: number;
+  failed: string[];
+}
+
+export interface PayoutTransaction {
+  id: string;
+  merchant_name: string;
+  amount: number;
+  payment_method: string;
+  txn_date: string;
+}
+
+export interface PayoutDetails {
+  net_this_cycle: number;
+  total_paid_out: number;
+  total_pending: number;
+  pending_count: number;
+}
+
+export interface PayoutListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  status?: string;
+}
+
+export const payouts = {
+  list: (p?: PayoutListParams) => req<Page<PayoutOut>>("GET", "/payouts", { params: p }),
+  details: () => req<PayoutDetails>("GET", "/payouts/details"),
+  get: (id: string) => req<PayoutOut>("GET", `/payouts/${id}`),
+
+  create: (fields: {
+    customer_id: string;
+    merchant_id: string;
+    period_start: string;
+    period_end: string;
+    payment_method: string;
+    file: File;
+  }) => {
+    const form = new FormData();
+    form.append("customer_id", fields.customer_id);
+    form.append("merchant_id", fields.merchant_id);
+    form.append("period_start", fields.period_start);
+    form.append("period_end", fields.period_end);
+    form.append("payment_method", fields.payment_method);
+    form.append("file", fields.file);
+    return req<PayoutOut>("POST", "/payouts", { form });
+  },
+
+  upload: (file: File, period_start?: string, period_end?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (period_start) form.append("period_start", period_start);
+    if (period_end) form.append("period_end", period_end);
+    return req<BulkCreateResult>("POST", "/payouts/upload", { form });
+  },
+
+  update: (
+    id: string,
+    fields: {
+      status?: string;
+      payment_method?: string;
+      issued_date?: string;
+      payment_proof?: File;
+    }
+  ) => {
+    const form = new FormData();
+    if (fields.status) form.append("status", fields.status);
+    if (fields.payment_method) form.append("payment_method", fields.payment_method);
+    if (fields.issued_date) form.append("issued_date", fields.issued_date);
+    if (fields.payment_proof) form.append("payment_proof", fields.payment_proof);
+    return req<PayoutOut>("PATCH", `/payouts/${id}`, { form });
+  },
+
+  remove: (id: string) => req<void>("DELETE", `/payouts/${id}`),
+  transactions: (payout_id: string) => req<PayoutTransaction[]>("GET", `/payouts/${payout_id}/transactions`),
+};
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+
+export interface UserOut {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  last_active: string | null;
+  jobs: number;
+}
+
+export interface UserCreate {
+  name: string;
+  email: string;
+  role_id: string;
+  password: string;
+}
+
+export interface UserUpdate {
+  name?: string;
+  email?: string;
+  role_id?: string;
+  status?: string;
+}
+
+export interface UserListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  role?: string;
+  status?: string;
+}
+
+export interface UserPage {
+  items: UserOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export const users = {
+  list: (p?: UserListParams) => req<UserPage>("GET", "/users", { params: p }),
+  get: (id: string) => req<UserOut>("GET", `/users/${id}`),
+  create: (body: UserCreate) => req<UserOut>("POST", "/users", { body }),
+  update: (id: string, body: UserUpdate) => req<UserOut>("PATCH", `/users/${id}`, { body }),
+  remove: (id: string) => req<void>("DELETE", `/users/${id}`),
+  resetPassword: (id: string, new_password: string) =>
+    req<void>("POST", `/users/${id}/reset-password`, { body: { new_password } }),
+};
+
+// ─── Roles ────────────────────────────────────────────────────────────────────
+
+export interface RoleOut {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  user_count: number;
+}
+
+export interface RoleUpdate {
+  name?: string;
+  description?: string;
+  permissions?: string[];
+}
+
+export const roles = {
+  list: () => req<RoleOut[]>("GET", "/roles"),
+  get: (id: string) => req<RoleOut>("GET", `/roles/${id}`),
+  update: (id: string, body: RoleUpdate) => req<RoleOut>("PATCH", `/roles/${id}`, { body }),
+};
+
+// ─── Audit Logs ───────────────────────────────────────────────────────────────
+
+export interface AuditUserRef {
+  id: string | null;
+  name: string;
+  role: string;
+}
+
+export interface AuditLogOut {
+  id: number;
+  action_at: string;
+  user: AuditUserRef;
+  description: string;
+  type: string;
+  entity_type: string | null;
+  entity_id: string | null;
+}
+
+export interface AuditLogListParams {
+  page?: number;
+  size?: number;
+  query?: string;
+  type?: string;
+  entity_type?: string;
+  user_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface AuditLogPage {
+  items: AuditLogOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export const auditLogs = {
+  list: (p?: AuditLogListParams) => req<AuditLogPage>("GET", "/logs", { params: p }),
+};
+
+// ─── MDR Rates ────────────────────────────────────────────────────────────────
+
+export interface MdrOut {
+  id: string;
+  type: string;
+  rate: number;
+  category: string;
+  network: string;
+}
+
+export interface MdrCreate {
+  type: string;
+  rate: number;
+  category: string;
+  network: string;
+}
+
+export interface MdrUpdate {
+  type?: string;
+  rate?: number;
+  category?: string;
+  network?: string;
+}
+
+export const mdr = {
+  list: () => req<MdrOut[]>("GET", "/mdr"),
+  create: (body: MdrCreate) => req<MdrOut>("POST", "/mdr", { body }),
+  update: (rate_id: string, body: MdrUpdate) => req<MdrOut>("PATCH", `/mdr/${rate_id}`, { body }),
+};
+
+// ─── Unified export ───────────────────────────────────────────────────────────
+
+export const api = {
+  auth,
+  dashboard,
+  customers,
+  merchants,
+  termSettings,
+  terminals,
+  jobs,
+  simCards,
+  paperRolls,
+  rentals,
+  payouts,
+  users,
+  roles,
+  auditLogs,
+  mdr,
+};

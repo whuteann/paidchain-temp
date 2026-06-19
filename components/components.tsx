@@ -96,9 +96,9 @@ export function Field({ label, hint, children }: FieldProps) {
 }
 
 /* ---------- Searchbox ---------- */
-export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+export function SearchBox({ value, onChange, placeholder, fullWidth }: { value: string; onChange: (v: string) => void; placeholder?: string; fullWidth?: boolean }) {
   return (
-    <div className="search-box">
+    <div className="search-box" style={fullWidth ? { maxWidth: "none" } : undefined}>
       <Icon name="search" size={16} />
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder || "Search…"} />
     </div>
@@ -143,12 +143,21 @@ export function Stepper({ stages, current }: { stages: string[]; current: number
 }
 
 /* ---------- Dropzone ---------- */
-interface DzFile { name: string; size: string }
-export function Dropzone({ files, setFiles, hint }: { files: DzFile[]; setFiles: React.Dispatch<React.SetStateAction<DzFile[]>>; hint?: string }) {
+export interface DropzoneFile {
+  file: File;
+  name: string;
+  sizeLabel: string;
+}
+
+export function Dropzone({ files, setFiles, hint }: { files: DropzoneFile[]; setFiles: React.Dispatch<React.SetStateAction<DropzoneFile[]>>; hint?: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const add = (list: FileList) => {
-    const arr = Array.from(list).map((f) => ({ name: f.name, size: (f.size / 1024).toFixed(0) + " KB" }));
-    setFiles((prev) => [...prev, ...arr]);
+    const next = Array.from(list).map((file) => ({
+      file,
+      name: file.name,
+      sizeLabel: (file.size / 1024).toFixed(0) + " KB",
+    }));
+    setFiles((prev) => [...prev, ...next]);
   };
   return (
     <div>
@@ -169,8 +178,8 @@ export function Dropzone({ files, setFiles, hint }: { files: DzFile[]; setFiles:
             <div className="dz-file" key={i}>
               <Icon name="fileCheck" size={16} className="dzf-ico" />
               <span className="dzf-name">{f.name}</span>
-              <span className="dzf-size">{f.size}</span>
-              <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}>
+              <span className="dzf-size">{f.sizeLabel}</span>
+              <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); setFiles((prev) => prev.filter((_, j) => j !== i)); }}>
                 <Icon name="x" size={13} />
               </button>
             </div>
@@ -208,15 +217,37 @@ export function Readiness({ value }: { value: string }) {
 }
 
 /* ---------- Pagination ---------- */
-export function Pagination({ total, shown }: { total: number; shown: number }) {
+export function Pagination({ total, shown, page, pages, onPageChange }: {
+  total: number;
+  shown: number;
+  page?: number;
+  pages?: number;
+  onPageChange?: (page: number) => void;
+}) {
+  if (page === undefined || pages === undefined || !onPageChange) {
+    return (
+      <div className="pagination">
+        <span className="tb-meta" style={{ marginRight: "auto" }}>Showing 1–{shown} of {total}</span>
+        <button className="pg-btn"><Icon name="chevLeft" size={14} /></button>
+        <button className="pg-btn active">1</button>
+        <button className="pg-btn">2</button>
+        <button className="pg-btn">3</button>
+        <button className="pg-btn"><Icon name="chevRight" size={14} /></button>
+      </div>
+    );
+  }
+
+  const nums: number[] = [];
+  for (let p = Math.max(1, page - 2); p <= Math.min(pages, page + 2); p++) nums.push(p);
+
   return (
     <div className="pagination">
-      <span className="tb-meta" style={{ marginRight: "auto" }}>Showing 1–{shown} of {total}</span>
-      <button className="pg-btn"><Icon name="chevLeft" size={14} /></button>
-      <button className="pg-btn active">1</button>
-      <button className="pg-btn">2</button>
-      <button className="pg-btn">3</button>
-      <button className="pg-btn"><Icon name="chevRight" size={14} /></button>
+      <span className="tb-meta" style={{ marginRight: "auto" }}>Page {page} of {pages} · {shown} shown of {total}</span>
+      <button className="pg-btn" disabled={page <= 1} onClick={() => onPageChange(page - 1)}><Icon name="chevLeft" size={14} /></button>
+      {nums.map((n) => (
+        <button key={n} className={"pg-btn" + (n === page ? " active" : "")} onClick={() => onPageChange(n)}>{n}</button>
+      ))}
+      <button className="pg-btn" disabled={page >= pages} onClick={() => onPageChange(page + 1)}><Icon name="chevRight" size={14} /></button>
     </div>
   );
 }

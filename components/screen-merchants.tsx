@@ -1,55 +1,62 @@
 /* PaidChain — Merchant listing + detail */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field } from "./components";
-import { terminals, jobs, BANKS, JOB_TYPES } from "./data";
-import type { Merchant } from "./data";
-import { useMerchants } from "./merchants-context";
-import { useCustomers } from "./customers-context";
+import { BANKS, JOB_TYPES } from "./data";
+import { api, ApiError } from "@/lib/api";
+import type { MerchantOut, MerchantCreate, MerchantTerminalOut, MerchantJobOut } from "@/lib/api";
 import { NavFn } from "./shell";
 
 /* =================== CREATE MERCHANT MODAL =================== */
 interface CreateMerchantModalProps {
   onClose: () => void;
-  onCreate: (m: Merchant) => void;
-  prefilledCustomerId?: string;
+  onCreate: (m: MerchantOut) => void;
+  customerId: string;
+  customerName: string;
 }
 
-export function CreateMerchantModal({ onClose, onCreate, prefilledCustomerId }: CreateMerchantModalProps) {
-  const { customers } = useCustomers();
+export function CreateMerchantModal({ onClose, onCreate, customerId, customerName }: CreateMerchantModalProps) {
   const MERCHANT_TYPES = ["F&B", "Retail", "Healthcare", "Grocery", "Electronics", "Automotive", "Services", "Fitness", "Fuel", "Entertainment", "Furniture"];
   const MDR_PLANS = ["Standard Retail", "F&B Preferred", "Enterprise", "SME Flat"];
-
-  const prefilledCustomer = customers.find((c) => c.id === prefilledCustomerId);
+  const ACCOUNT_TYPES = ["Current", "Savings"];
 
   const [f, setF] = useState({
-    name: "", type: MERCHANT_TYPES[0],
-    customerId: prefilledCustomerId || "",
+    name: "", type: MERCHANT_TYPES[0], mid: "",
     bank: BANKS[0], mdrPlan: MDR_PLANS[0],
     contact: "", phone: "", email: "", address: "",
+    bankAccountName: "", bankAccountNumber: "", bankAccountType: ACCOUNT_TYPES[0],
   });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = f.name.trim() && f.customerId && f.contact.trim();
+  const valid = f.name.trim() && f.mid.trim() && f.contact.trim();
 
-  const selectedCustomer = customers.find((c) => c.id === f.customerId);
-
-  function submit() {
-    const cust = selectedCustomer!;
-    const now = new Date().toISOString().slice(0, 10);
-    const idx = Date.now();
-    onCreate({
-      id: "M" + String(idx).slice(-4),
-      name: f.name.trim(), type: f.type,
-      mid: "MID" + String(idx).slice(-8),
-      bank: f.bank, status: "Onboarding", finance: "Pending Docs",
-      terminals: 0, openJobs: 0,
-      contact: f.contact.trim(), phone: f.phone, email: f.email, address: f.address,
-      onboarded: now, mdrPlan: f.mdrPlan,
-      bankAccountName: f.name.trim(), bankAccountNumber: "", bankAccountType: "Current",
-      customerId: cust.id, customerName: cust.name,
-      isNew: true,
-    });
-    onClose();
+  async function submit() {
+    if (!valid) return;
+    setSaving(true); setErr(null);
+    try {
+      const body: MerchantCreate = {
+        customer_id: customerId,
+        name: f.name.trim(),
+        type: f.type,
+        mid: f.mid.trim(),
+        bank: f.bank,
+        mdr_plan: f.mdrPlan,
+        contact: f.contact.trim(),
+        phone: f.phone.trim(),
+        email: f.email.trim(),
+        address: f.address.trim(),
+        bank_account_name: f.bankAccountName.trim() || f.name.trim(),
+        bank_account_number: f.bankAccountNumber.trim(),
+        bank_account_type: f.bankAccountType,
+      };
+      const m = await api.merchants.create(body);
+      onCreate(m);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to create merchant");
+      setSaving(false);
+    }
   }
 
   return (
@@ -59,7 +66,9 @@ export function CreateMerchantModal({ onClose, onCreate, prefilledCustomerId }: 
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={!valid} onClick={submit}>Create Merchant</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+          {saving ? "Creating…" : "Create Merchant"}
+        </Btn>
       </>}
     >
       <div className="field-row">
@@ -73,17 +82,14 @@ export function CreateMerchantModal({ onClose, onCreate, prefilledCustomerId }: 
         </Field>
       </div>
 
-      <Field label="Customer (billing entity)" hint="required">
-        {prefilledCustomer ? (
-          <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-2)", cursor: "not-allowed" }}>
-            {prefilledCustomer.name}
-          </div>
-        ) : (
-          <select className="input" value={f.customerId} onChange={(e) => set("customerId", e.target.value)}>
-            <option value="">Select customer…</option>
-            {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        )}
+      <Field label="Customer (billing entity)">
+        <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-2)", cursor: "not-allowed" }}>
+          {customerName}
+        </div>
+      </Field>
+
+      <Field label="Merchant ID (MID)" hint="required">
+        <input className="input" placeholder="e.g. MID00012345" value={f.mid} onChange={(e) => set("mid", e.target.value)} />
       </Field>
 
       <div className="field-row">
@@ -113,20 +119,39 @@ export function CreateMerchantModal({ onClose, onCreate, prefilledCustomerId }: 
       <Field label="Address">
         <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
       </Field>
+
+      <div className="field-row">
+        <Field label="Bank account name">
+          <input className="input" placeholder="Defaults to merchant name" value={f.bankAccountName} onChange={(e) => set("bankAccountName", e.target.value)} />
+        </Field>
+        <Field label="Bank account number">
+          <input className="input" placeholder="e.g. 1234567890" value={f.bankAccountNumber} onChange={(e) => set("bankAccountNumber", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Bank account type">
+        <select className="input" value={f.bankAccountType} onChange={(e) => set("bankAccountType", e.target.value)}>
+          {ACCOUNT_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select>
+      </Field>
+
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
   );
 }
 
 /* =================== LISTING =================== */
 export function Merchants({ nav }: { nav: NavFn }) {
-  const { merchants, addMerchant } = useMerchants();
+  const [merchantList, setMerchantList] = useState<MerchantOut[]>([]);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [bank, setBank] = useState("All");
   const [status, setStatus] = useState("All");
-  const [showCreate, setShowCreate] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
-  const filtered = merchants.filter((m) => {
+  useEffect(() => {
+    api.merchants.list().then((p) => setMerchantList(p.items)).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const filtered = merchantList.filter((m) => {
     const hay = (m.name + " " + m.mid + " " + m.bank + " " + m.id).toLowerCase();
     if (q && !hay.includes(q.toLowerCase())) return false;
     if (bank !== "All" && m.bank !== bank) return false;
@@ -134,20 +159,12 @@ export function Merchants({ nav }: { nav: NavFn }) {
     return true;
   });
 
-  function handleCreate(m: Merchant) {
-    addMerchant(m);
-    setToast("Merchant " + m.name + " created");
-    setTimeout(() => setToast(null), 2800);
-  }
-
   return (
     <div>
       <PageHead
         title="Merchants"
-        sub={merchants.length + " merchants · search by name, MID, bank or merchant ID"}
-        actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
-        </>}
+        sub={merchantList.length + " merchants · search by name, MID, bank or merchant ID"}
+        actions={<Btn variant="ghost" icon="download">Export</Btn>}
       />
       <Card>
         <Toolbar>
@@ -160,7 +177,9 @@ export function Merchants({ nav }: { nav: NavFn }) {
           </select>
           <span className="tb-meta">{filtered.length} results</span>
         </Toolbar>
-        {filtered.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
+        {loading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : filtered.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr>{["Merchant","MID","Bank","Status","Terminals","Finance Readiness","Jobs",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
@@ -180,7 +199,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
                         </span>}
                     </td>
                     <td><Readiness value={m.finance} /></td>
-                    <td>{m.openJobs > 0 ? <Chip cls="chip-warn">{m.openJobs} open</Chip> : <span className="td-mut">None</span>}</td>
+                    <td>{m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : <span className="td-mut">None</span>}</td>
                     <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
                   </tr>
                 ))}
@@ -188,30 +207,43 @@ export function Merchants({ nav }: { nav: NavFn }) {
             </table>
           </div>
         )}
-        <Pagination total={merchants.length} shown={filtered.length} />
+        <Pagination total={merchantList.length} shown={filtered.length} />
       </Card>
-      {showCreate && <CreateMerchantModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
-      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
 }
 
 /* =================== DETAIL =================== */
 export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
-  const { merchants } = useMerchants();
+  const [merchant, setMerchant] = useState<MerchantOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState("overview");
-  const m = merchants.find((x) => x.id === id);
+  const [linkedTerminals, setLinkedTerminals] = useState<MerchantTerminalOut[]>([]);
+  const [merchantJobs, setMerchantJobs] = useState<MerchantJobOut[]>([]);
 
-  if (!m) return (
+  useEffect(() => {
+    api.merchants.get(id)
+      .then(setMerchant)
+      .catch((e) => { if (e instanceof ApiError && e.status === 404) setNotFound(true); })
+      .finally(() => setLoading(false));
+    api.merchants.terminals(id).then(setLinkedTerminals).catch(console.error);
+    api.merchants.jobs(id).then(setMerchantJobs).catch(console.error);
+  }, [id]);
+
+  if (loading) return (
+    <div>
+      <PageHead title="Merchant" actions={<Btn variant="ghost" icon="arrowLeft" onClick={() => nav("merchants")}>Back</Btn>} />
+      <div style={{ padding: "40px 0", fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>Loading…</div>
+    </div>
+  );
+
+  if (notFound || !merchant) return (
     <div>
       <PageHead title="Merchant not found" actions={<Btn variant="ghost" icon="arrowLeft" onClick={() => nav("merchants")}>Back</Btn>} />
       <Empty icon="merchants" title="Merchant not found" sub={"No merchant with ID " + id} />
     </div>
   );
-
-  const linkedTerminals = terminals.filter((t) => t.merchant?.id === m.id);
-  const merchantJobs = jobs.filter((j) => j.merchant.id === m.id);
-  const history = merchantJobs.length ? merchantJobs : jobs.slice(0, 3).map((j) => ({ ...j, merchant: { id: m.id, name: m.name } }));
 
   return (
     <div>
@@ -222,14 +254,14 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       <div className="page-head">
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <div className="ent-ava" style={{ width: 52, height: 52, fontSize: 18, borderRadius: 13 }}>
-            {m.name.split(" ").map((w) => w[0]).slice(0, 2).join("")}
+            {merchant.name.split(" ").map((w) => w[0]).slice(0, 2).join("")}
           </div>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h1 className="page-title">{m.name}</h1>
-              <MerchantStatus status={m.status} />
+              <h1 className="page-title">{merchant.name}</h1>
+              <MerchantStatus status={merchant.status} />
             </div>
-            <p className="page-sub">{m.id + " · " + m.type + " · onboarded " + m.onboarded}</p>
+            <p className="page-sub">{merchant.id + " · " + merchant.type}</p>
           </div>
         </div>
         <div className="page-head-actions">
@@ -241,10 +273,10 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 20 }}>
         {[
-          { l: "Merchant Terminals", v: linkedTerminals.length, ico: "terminal", c: "var(--info)" },
-          { l: "Open Jobs", v: history.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
-          { l: "Finance Readiness", v: m.finance, ico: "shield", c: m.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
-          { l: "MDR Plan", v: m.mdrPlan, ico: "percent", c: "var(--indigo)", small: true },
+          { l: "Merchant Terminals", v: linkedTerminals.length,    ico: "terminal", c: "var(--info)" },
+          { l: "Open Jobs",          v: merchantJobs.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
+          { l: "Finance Readiness",  v: merchant.finance,           ico: "shield",   c: merchant.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
+          { l: "MDR Plan",           v: merchant.mdr_plan,          ico: "percent",  c: "var(--indigo)", small: true },
         ].map((s, i) => (
           <div key={i} className="stat">
             <div className="stat-top">
@@ -257,18 +289,18 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       <div className="tabs">
-        {[["overview","Overview"],["terminals","Linked Terminals (" + linkedTerminals.length + ")"],["jobs","Job History (" + history.length + ")"]].map(([k,lbl]) => (
+        {[["overview","Overview"],["terminals","Linked Terminals (" + linkedTerminals.length + ")"],["jobs","Job History (" + merchantJobs.length + ")"]].map(([k,lbl]) => (
           <div key={k} className={"tab" + (tab === k ? " active" : "")} onClick={() => setTab(k)}>{lbl}</div>
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview" ? <OverviewTab m={m} /> : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} /> : <JobsTab rows={history} nav={nav} />}
+        {tab === "overview" ? <OverviewTab m={merchant} /> : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} /> : <JobsTab rows={merchantJobs} nav={nav} />}
       </div>
     </div>
   );
 }
 
-function OverviewTab({ m }: { m: Merchant }) {
+function OverviewTab({ m }: { m: MerchantOut }) {
   return (
     <div className="detail-grid">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -280,7 +312,7 @@ function OverviewTab({ m }: { m: Merchant }) {
               <dt>MID</dt><dd className="mono">{m.mid}</dd>
               <dt>Category</dt><dd>{m.type}</dd>
               <dt>Bank</dt><dd>{m.bank}</dd>
-              <dt>MDR plan</dt><dd>{m.mdrPlan}</dd>
+              <dt>MDR plan</dt><dd>{m.mdr_plan}</dd>
               <dt>Address</dt><dd style={{ fontWeight: 400 }}>{m.address}</dd>
             </dl>
           </div>
@@ -291,9 +323,9 @@ function OverviewTab({ m }: { m: Merchant }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {([
                 ["Business registration (SSM)", true],
-                ["Bank account verification", m.finance !== "Not Ready"],
-                ["Director IC / passport", m.finance === "Ready"],
-                ["Signed merchant agreement", m.finance === "Ready"],
+                ["Bank account verification",   m.finance !== "Not Ready"],
+                ["Director IC / passport",       m.finance === "Ready"],
+                ["Signed merchant agreement",    m.finance === "Ready"],
               ] as [string, boolean][]).map(([lbl, ok], i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
                   <div style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: ok ? "var(--green-050)" : "var(--warn-bg)", color: ok ? "var(--green-700)" : "var(--warn)", flexShrink: 0 }}>
@@ -310,9 +342,9 @@ function OverviewTab({ m }: { m: Merchant }) {
       <Card title="Bank Details" icon="bank">
         <div className="card-pad">
           <dl className="kv">
-            <dt>Account name</dt><dd>{m.bankAccountName}</dd>
-            <dt>Account number</dt><dd className="mono">{m.bankAccountNumber}</dd>
-            <dt>Account type</dt><dd>{m.bankAccountType}</dd>
+            <dt>Account name</dt><dd>{m.bank_account_name}</dd>
+            <dt>Account number</dt><dd className="mono">{m.bank_account_number}</dd>
+            <dt>Account type</dt><dd>{m.bank_account_type}</dd>
             <dt>Bank</dt><dd>{m.bank}</dd>
           </dl>
         </div>
@@ -329,8 +361,8 @@ function OverviewTab({ m }: { m: Merchant }) {
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 11, fontSize: 13 }}>
-            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail" size={15} style={{ color: "var(--ink-3)" }} />{m.email}</div>
-            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone" size={15} style={{ color: "var(--ink-3)" }} />{m.phone}</div>
+            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail"   size={15} style={{ color: "var(--ink-3)" }} />{m.email}</div>
+            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone"  size={15} style={{ color: "var(--ink-3)" }} />{m.phone}</div>
             <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mapPin" size={15} style={{ color: "var(--ink-3)" }} />{m.address}</div>
           </div>
         </div>
@@ -339,7 +371,7 @@ function OverviewTab({ m }: { m: Merchant }) {
   );
 }
 
-function TerminalsTab({ rows, nav }: { rows: typeof terminals; nav: NavFn }) {
+function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }) {
   if (!rows.length) return <Card><Empty icon="terminal" title="No terminals linked" sub="This merchant has no deployed devices yet" /></Card>;
   return (
     <Card>
@@ -354,7 +386,7 @@ function TerminalsTab({ rows, nav }: { rows: typeof terminals; nav: NavFn }) {
                 <td className="td-mono td-mut">{t.tid || "—"}</td>
                 <td><TerminalStatus status={t.status} /></td>
                 <td className="td-mut">{t.location}</td>
-                <td>RM {t.rentalRate}/mo</td>
+                <td>RM {t.rental_rate}/mo</td>
                 <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
               </tr>
             ))}
@@ -365,7 +397,8 @@ function TerminalsTab({ rows, nav }: { rows: typeof terminals; nav: NavFn }) {
   );
 }
 
-function JobsTab({ rows, nav }: { rows: typeof jobs; nav: NavFn }) {
+function JobsTab({ rows, nav }: { rows: MerchantJobOut[]; nav: NavFn }) {
+  if (!rows.length) return <Card><Empty icon="jobs" title="No job history" sub="This merchant has no jobs on record yet" /></Card>;
   return (
     <Card>
       <div className="tbl-wrap">
@@ -376,13 +409,13 @@ function JobsTab({ rows, nav }: { rows: typeof jobs; nav: NavFn }) {
               <tr key={j.id} className="clickable" onClick={() => nav("job-detail", j.id)}>
                 <td className="td-mono td-strong">{j.id}</td>
                 <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                  <Icon name={JOB_TYPES[j.type].icon} size={15} style={{ color: "var(--ink-3)" }} />{j.type}
+                  <Icon name={JOB_TYPES[j.type]?.icon ?? "jobs"} size={15} style={{ color: "var(--ink-3)" }} />{j.type}
                 </span></td>
                 <td><JobStatus status={j.stage} /></td>
                 <td><SlaChip sla={j.sla} /></td>
                 <td className="td-mut">{j.assignee}</td>
-                <td className="td-mut td-mono">{j.created.slice(5)}</td>
-                <td className="td-mut td-mono">{j.due.slice(5)}</td>
+                <td className="td-mut td-mono">{j.created_at.slice(5, 10)}</td>
+                <td className="td-mut td-mono">{j.due_date.slice(5)}</td>
               </tr>
             ))}
           </tbody>

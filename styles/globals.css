@@ -407,6 +407,10 @@ select.input { appearance: none; background: var(--surface) url("data:image/svg+
 .field-row { display: flex; gap: 14px; }
 .field-row > .field { flex: 1; }
 
+/* async search-select dropdown options */
+.search-opt { padding: 9px 14px; font-size: 13px; cursor: pointer; }
+.search-opt:hover { background: var(--bg-2, #f5f5f5); }
+
 /* type picker cards (job/payout types) */
 .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .type-card {

@@ -1,11 +1,11 @@
 /* PaidChain — Audit Logs */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Pagination, Empty } from "./components";
-import { auditLogs } from "./data";
-import type { AuditLog } from "./data";
+import { api } from "@/lib/api";
+import type { AuditLogOut } from "@/lib/api";
 
-const TYPE_META: Record<AuditLog["type"], { cls: string; icon: string }> = {
+const TYPE_META: Record<string, { cls: string; icon: string }> = {
   Create: { cls: "chip-ok",      icon: "plus" },
   Update: { cls: "chip-info",    icon: "edit" },
   Delete: { cls: "chip-bad",     icon: "x" },
@@ -25,23 +25,30 @@ const ROLE_CLS: Record<string, string> = {
 const PAGE_SIZE = 15;
 
 export function AuditLogs() {
-  const [q, setQ]         = useState("");
+  const [logs, setLogs]       = useState<AuditLogOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ]             = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
-  const [page, setPage]   = useState(1);
+  const [page, setPage]       = useState(1);
+  const [pages, setPages]     = useState(1);
+  const [total, setTotal]     = useState(0);
 
-  const filtered = auditLogs.filter((log) => {
-    if (typeFilter !== "All" && log.type !== typeFilter) return false;
-    if (q) {
-      const hay = [log.id, log.user.name, log.user.role, log.description, log.entityType || "", log.entityId || ""]
-        .join(" ").toLowerCase();
-      if (!hay.includes(q.toLowerCase())) return false;
-    }
-    return true;
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage   = Math.min(page, totalPages);
-  const pageRows   = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  useEffect(() => {
+    setLoading(true);
+    api.auditLogs.list({
+      page,
+      size: PAGE_SIZE,
+      query: q || undefined,
+      type: typeFilter !== "All" ? typeFilter : undefined,
+    })
+      .then((p) => {
+        setLogs(p.items);
+        setPages(p.pages);
+        setTotal(p.total);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [page, q, typeFilter]);
 
   function resetPage() { setPage(1); }
 
@@ -51,7 +58,7 @@ export function AuditLogs() {
     <div>
       <PageHead
         title="Audit Logs"
-        sub={auditLogs.length + " events · full activity trail across all modules"}
+        sub={total + " events · full activity trail across all modules"}
         actions={<Btn variant="ghost" icon="download">Export</Btn>}
       />
 
@@ -71,10 +78,12 @@ export function AuditLogs() {
               <option key={t} value={t}>{t === "All" ? "All Types" : t}</option>
             ))}
           </select>
-          <span className="tb-meta">{filtered.length} events</span>
+          <span className="tb-meta">{total} events</span>
         </Toolbar>
 
-        {pageRows.length === 0 ? (
+        {loading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : logs.length === 0 ? (
           <Empty icon="activity" title="No audit events match" sub="Try adjusting your search or filter" />
         ) : (
           <div className="tbl-wrap">
@@ -87,25 +96,25 @@ export function AuditLogs() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((log) => {
-                  const tm = TYPE_META[log.type];
+                {logs.map((log) => {
+                  const tm = TYPE_META[log.type] ?? { cls: "chip-neutral", icon: "activity" };
                   return (
                     <tr key={log.id}>
                       <td>
                         <div className="cell-2">
                           <span className="td-mono td-strong">{log.id}</span>
-                          {log.entityId && (
-                            <span className="c2-sub mono">{log.entityType} · {log.entityId}</span>
+                          {log.entity_id && (
+                            <span className="c2-sub mono">{log.entity_type} · {log.entity_id}</span>
                           )}
-                          {!log.entityId && log.entityType && (
-                            <span className="c2-sub mono">{log.entityType}</span>
+                          {!log.entity_id && log.entity_type && (
+                            <span className="c2-sub mono">{log.entity_type}</span>
                           )}
                         </div>
                       </td>
                       <td>
                         <div className="cell-2">
-                          <span className="td-mono td-strong">{log.actionAt.slice(0, 10)}</span>
-                          <span className="c2-sub mono">{log.actionAt.slice(11)}</span>
+                          <span className="td-mono td-strong">{log.action_at.slice(0, 10)}</span>
+                          <span className="c2-sub mono">{log.action_at.slice(11)}</span>
                         </div>
                       </td>
                       <td>
@@ -131,7 +140,7 @@ export function AuditLogs() {
           </div>
         )}
 
-        <Pagination total={filtered.length} shown={pageRows.length} />
+        <Pagination total={total} shown={logs.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
     </div>
   );
