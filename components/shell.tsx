@@ -26,7 +26,7 @@ const NAV = [
   ]},
   { group: "Finance", items: [
     { id: "rentals",     label: "Rentals",   icon: "calendar" },
-    { id: "payouts",     label: "Payouts",   icon: "payouts" },
+    // { id: "payouts",     label: "Payouts",   icon: "payouts" },
     { id: "referral-bonus-batches", label: "Referral Bonuses", icon: "cash" },
     { id: "mdr",         label: "MDR Rates", icon: "percent" },
   ]},
