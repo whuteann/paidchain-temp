@@ -1,14 +1,14 @@
 /* PaidChain — Job listing + detail + workflow engine */
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/router";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, JobStatus, SlaChip, Pagination, Empty, Chip, Modal, Field, Dropzone, Stepper } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, JobStatus, SlaChip, Pagination, Empty, Chip, Modal, Field, Dropzone, Stepper, MobileListItem, ResponsiveTable } from "./components";
 import type { DropzoneFile } from "./components";
 import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, UserOut, JobEvidenceOut } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantTerminalOut, UserOut, JobEvidenceOut } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
-import { useTerminals } from "./terminals-context";
 import { NavFn } from "./shell";
 
 /* =================== ASYNC SEARCH SELECT =================== */
@@ -98,11 +98,11 @@ function EntitySearchSelect<T extends { id: string }>({
 }
 
 const TYPE_META: Record<string, string> = {
-  "Installation":       "Deploy a terminal and create the rental after admin sign-off",
+  "Installation": "Deploy a terminal and create the rental after admin sign-off",
   "Repair/Maintenance": "Resolve a merchant device issue and close with maintenance proof",
-  "Replacement":        "Prepare a replacement device and swap out the previous rental unit",
+  "Replacement": "Prepare a replacement device and swap out the previous rental unit",
   "Paper Roll Request": "Prepare, deliver and reconcile paper roll stock requests",
-  "Remote Support":     "Resolve a merchant issue remotely and close with evidence",
+  "Remote Support": "Resolve a merchant issue remotely and close with evidence",
 };
 
 const REPLACEMENT_STATUS_OPTIONS = ["Faulty", "Maintenance", "Returned", "Retired", "In Stock"];
@@ -177,17 +177,32 @@ function evidenceIsImage(evidence: JobEvidenceOut) {
 
 /* =================== CREATE JOB MODAL =================== */
 
-interface CreateJobModalProps { onClose: () => void; onCreate: (job: JobOut) => void; nav: NavFn }
+interface CreateJobModalProps {
+  onClose: () => void;
+  onCreate: (job: JobOut) => void;
+  nav: NavFn;
+  presetCustomer?: CustomerOut | null;
+  presetMerchant?: MerchantOut | null;
+}
 
-export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) {
-  const { terminals } = useTerminals(); // used to detect existing merchant device
+export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, presetMerchant = null }: CreateJobModalProps) {
   const types = Object.keys(JOB_TYPES);
   const [step, setStep] = useState(1);
   const [type, setType] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOut | null>(null);
-  const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOut | null>(presetCustomer);
+  const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(presetMerchant);
+  const [selectedMerchantTerminalSerial, setSelectedMerchantTerminalSerial] = useState("");
+  const [merchantTerminalState, setMerchantTerminalState] = useState<{
+    merchantId: string | null;
+    items: MerchantTerminalOut[];
+    loading: boolean;
+  }>({
+    merchantId: presetMerchant?.id ?? null,
+    items: [],
+    loading: Boolean(presetMerchant?.id),
+  });
   const [selectedTermSetting, setSelectedTermSetting] = useState<TermSettingOut | null>(null);
   const [termSettingsList, setTermSettingsList] = useState<TermSettingOut[]>([]);
   const [adminUsers, setAdminUsers] = useState<UserOut[]>([]);
@@ -205,12 +220,39 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
     api.users.list({ role: "Admin", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
   }, []);
 
+  useEffect(() => {
+    if (!selectedMerchant?.id) return;
+
+    let cancelled = false;
+    api.merchants.terminals(selectedMerchant.id)
+      .then((items) => {
+        if (!cancelled) {
+          setMerchantTerminalState({ merchantId: selectedMerchant.id, items, loading: false });
+          setSelectedMerchantTerminalSerial((current) =>
+            current && items.some((terminal) => terminal.serial === current)
+              ? current
+              : (items[0]?.serial ?? "")
+          );
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.error(e);
+          setMerchantTerminalState({ merchantId: selectedMerchant.id, items: [], loading: false });
+          setSelectedMerchantTerminalSerial("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMerchant?.id]);
+
   const def = type ? JOB_TYPES[type] : null;
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const merchantDevice = selectedMerchant
-    ? terminals.find((t) => t.merchant?.id === selectedMerchant.id &&
-        ["Installed", "Assigned", "Maintenance", "Replacement Out"].includes(t.status)) ?? null
-    : null;
+  const merchantTerminals = merchantTerminalState.merchantId === selectedMerchant?.id ? merchantTerminalState.items : [];
+  const merchantTerminalsLoading = merchantTerminalState.merchantId === selectedMerchant?.id && merchantTerminalState.loading;
+  const selectedMerchantTerminal = merchantTerminals.find((t) => t.serial === selectedMerchantTerminalSerial) ?? null;
   const requiresTermSpec = type === "Installation" || type === "Replacement";
   const requiresMerchantDevice = type === "Repair/Maintenance" || type === "Replacement" || type === "Remote Support";
   const requiresPaperRollFields = type === "Paper Roll Request";
@@ -221,26 +263,29 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
     form.due &&
     form.assignee &&
     (!requiresTermSpec || selectedTermSetting) &&
-    (!requiresMerchantDevice || merchantDevice) &&
+    (!requiresMerchantDevice || (!!selectedMerchantTerminal && !merchantTerminalsLoading)) &&
     (!requiresPaperRollFields || Number(form.paperRollQty) > 0)
   );
 
   async function submit() {
-    if (!type || !selectedMerchant) return;
+    if (!type || !selectedCustomer || !selectedMerchant) return;
     setSaving(true); setErr(null);
     const body: JobCreate = {
       type,
-      customer_id: selectedCustomer?.id || null,
+      customer_id: selectedCustomer.id,
       merchant_id: selectedMerchant.id,
       assignee: form.assignee,
       priority: form.priority,
       due_date: form.due,
       notes: form.notes || TYPE_META[type],
       term_setting_id: requiresTermSpec ? (selectedTermSetting?.id || null) : null,
-      ...(requiresPaperRollFields ? {
-        paper_roll_qty: Number(form.paperRollQty),
-        payment_target: form.paymentTarget,
-      } : {}),
+      terminal_replace: requiresMerchantDevice ? (selectedMerchantTerminal?.serial ?? "") : "",
+      paper_roll_qty: requiresPaperRollFields ? Number(form.paperRollQty) : 0,
+      payment_target: requiresPaperRollFields ? form.paymentTarget : "",
+      courier_required: false,
+      courier_status: "Not Required",
+      courier_name: "",
+      courier_tracking_no: "",
     };
     try {
       const job = await api.jobs.create(body);
@@ -265,8 +310,8 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
         {step === 1
           ? <Btn variant="primary" iconRight="chevRight" disabled={!type} onClick={() => setStep(2)}>Continue</Btn>
           : <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
-              {saving ? "Creating…" : "Create Job"}
-            </Btn>}
+            {saving ? "Creating…" : "Create Job"}
+          </Btn>}
       </>}
     >
       {step === 1 ? (
@@ -288,46 +333,75 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
             <span>Stages: {def!.stages.join(" → ")}</span>
           </div>
 
-          <EntitySearchSelect<CustomerOut>
-            label="Customer" hint="required · billing entity"
-            placeholder="Search customer name, registration, contact…"
-            value={selectedCustomer}
-            onSelect={(c) => { setSelectedCustomer(c); setSelectedMerchant(null); }}
-            fetchResults={(query) => api.customers.list({ query, per_page: 8 }).then((p) => p.items)}
-            getLabel={(c) => c.name}
-            renderOption={(c) => (
-              <div className="cell-2">
-                <span className="td-strong">{c.name}</span>
-                <span className="c2-sub">{c.reg_no || c.id}</span>
+          {presetCustomer ? (
+            <Field label="Customer" hint="prefilled · billing entity">
+              <div className="input" style={{ display: "flex", flexDirection: "column", justifyContent: "center", background: "var(--bg-2, #f5f5f5)" }}>
+                <span style={{ fontWeight: 600 }}>{presetCustomer.name}</span>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{presetCustomer.reg_no || presetCustomer.id}</span>
               </div>
-            )}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -10, marginBottom: 14, fontSize: 12.5, color: "var(--info)" }}>
-            <Icon name="plus" size={13} />
-            <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => { onClose(); nav("customers"); }}>
-              Create new customer
-            </span>
-          </div>
+            </Field>
+          ) : (
+            <>
+              <EntitySearchSelect<CustomerOut>
+                label="Customer" hint="required · billing entity"
+                placeholder="Search customer name, registration, contact…"
+                value={selectedCustomer}
+                onSelect={(c) => {
+                  setSelectedCustomer(c);
+                  setSelectedMerchant(null);
+                  setSelectedMerchantTerminalSerial("");
+                  setMerchantTerminalState({ merchantId: null, items: [], loading: false });
+                }}
+                fetchResults={(query) => api.customers.list({ query, per_page: 8 }).then((p) => p.items)}
+                getLabel={(c) => c.name}
+                renderOption={(c) => (
+                  <div className="cell-2">
+                    <span className="td-strong">{c.name}</span>
+                    <span className="c2-sub">{c.reg_no || c.id}</span>
+                  </div>
+                )}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -10, marginBottom: 14, fontSize: 12.5, color: "var(--info)" }}>
+                <Icon name="plus" size={13} />
+                <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => { onClose(); nav("customers"); }}>
+                  Create new customer
+                </span>
+              </div>
+            </>
+          )}
 
-          <EntitySearchSelect<MerchantOut>
-            key={selectedCustomer?.id || "no-customer"}
-            label="Merchant" hint="required · job location"
-            placeholder="Search merchant name or MID…"
-            disabled={!selectedCustomer}
-            disabledHint="Select a customer first"
-            value={selectedMerchant}
-            onSelect={setSelectedMerchant}
-            fetchResults={(query) => selectedCustomer
-              ? api.merchants.list({ query, customer_id: selectedCustomer.id, per_page: 8 }).then((p) => p.items)
-              : Promise.resolve([])}
-            getLabel={(m) => m.name + " · " + m.mid}
-            renderOption={(m) => (
-              <div className="cell-2">
-                <span className="td-strong">{m.name}</span>
-                <span className="c2-sub">{m.mid}</span>
+          {presetMerchant ? (
+            <Field label="Merchant" hint="prefilled · job location">
+              <div className="input" style={{ display: "flex", flexDirection: "column", justifyContent: "center", background: "var(--bg-2, #f5f5f5)" }}>
+                <span style={{ fontWeight: 600 }}>{presetMerchant.name}</span>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{presetMerchant.mid}</span>
               </div>
-            )}
-          />
+            </Field>
+          ) : (
+            <EntitySearchSelect<MerchantOut>
+              key={selectedCustomer?.id || "no-customer"}
+              label="Merchant" hint="required · job location"
+              placeholder="Search merchant name or MID…"
+              disabled={!selectedCustomer}
+              disabledHint="Select a customer first"
+              value={selectedMerchant}
+              onSelect={(merchant) => {
+                setSelectedMerchant(merchant);
+                setSelectedMerchantTerminalSerial("");
+                setMerchantTerminalState({ merchantId: merchant?.id ?? null, items: [], loading: !!merchant });
+              }}
+              fetchResults={(query) => selectedCustomer
+                ? api.merchants.list({ query, customer_id: selectedCustomer.id, per_page: 8 }).then((p) => p.items)
+                : Promise.resolve([])}
+              getLabel={(m) => m.name + " · " + m.mid}
+              renderOption={(m) => (
+                <div className="cell-2">
+                  <span className="td-strong">{m.name}</span>
+                  <span className="c2-sub">{m.mid}</span>
+                </div>
+              )}
+            />
+          )}
 
           {selectedMerchant && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
@@ -338,30 +412,58 @@ export function CreateJobModal({ onClose, onCreate, nav }: CreateJobModalProps) 
 
           {(type === "Repair/Maintenance" || type === "Remote Support") && (
             <Field label="Affected terminal">
-              {merchantDevice ? (
-                <div className="input" style={{ background: "var(--bg-2, #f5f5f5)" }}>
-                  {merchantDevice.serial} · {merchantDevice.brand} {merchantDevice.model}
+              {merchantTerminalsLoading ? (
+                <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-3)" }}>
+                  Loading merchant terminals…
                 </div>
+              ) : merchantTerminals.length > 0 ? (
+                <select
+                  className="input"
+                  value={selectedMerchantTerminalSerial}
+                  onChange={(e) => setSelectedMerchantTerminalSerial(e.target.value)}
+                >
+                  {merchantTerminals.map((terminal) => (
+                    <option key={terminal.serial} value={terminal.serial}>
+                      {terminal.serial} · {terminal.brand} {terminal.model}
+                    </option>
+                  ))}
+                </select>
               ) : (
                 <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)" }}>
-                  No deployed merchant terminal found for this workflow.
+                  No linked merchant terminal found for this workflow.
                 </div>
               )}
             </Field>
           )}
 
-          {type === "Replacement" && merchantDevice && (
+          {type === "Replacement" && merchantTerminals.length > 0 && (
             <Field label="Device to be replaced">
-              <div className="input" style={{ background: "var(--bg-2, #f5f5f5)" }}>
-                {merchantDevice.serial} · {merchantDevice.brand} {merchantDevice.model}
+              <select
+                className="input"
+                value={selectedMerchantTerminalSerial}
+                onChange={(e) => setSelectedMerchantTerminalSerial(e.target.value)}
+              >
+                {merchantTerminals.map((terminal) => (
+                  <option key={terminal.serial} value={terminal.serial}>
+                    {terminal.serial} · {terminal.brand} {terminal.model}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {type === "Replacement" && merchantTerminalsLoading && (
+            <Field label="Device to be replaced">
+              <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-3)" }}>
+                Loading merchant terminal…
               </div>
             </Field>
           )}
 
-          {type === "Replacement" && !merchantDevice && (
+          {type === "Replacement" && !merchantTerminalsLoading && merchantTerminals.length === 0 && (
             <Field label="Device to be replaced">
               <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)" }}>
-                No currently deployed merchant terminal found to replace.
+                No linked merchant terminal found to replace.
               </div>
             </Field>
           )}
@@ -507,36 +609,35 @@ export function Jobs({ nav }: { nav: NavFn }) {
         {loading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : jobList.length === 0 ? <Empty icon="jobs" title="No jobs match" /> : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr>{["Job ID", "Type", "Customer / Merchant", "Status", "SLA", "Assignee", "Due", ""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-              <tbody>
-                {jobList.map((job) => (
-                  <tr key={job.id} className="clickable" onClick={() => nav("job-detail", job.id)}>
-                    <td><span className="td-mono td-strong">{job.id}</span></td>
-                    <td>
-                      <span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                        <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}>
-                          <Icon name={JOB_TYPES[job.type]?.icon ?? "jobs"} size={14} />
-                        </span>{job.type}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong">{job.customer?.name || "—"}</span>
-                        <span className="c2-sub">{job.merchant.name}</span>
-                      </div>
-                    </td>
-                    <td><JobStatus status={job.stage} /></td>
-                    <td><SlaChip sla={job.sla} /></td>
-                    <td className="td-mut">{job.assignee}</td>
-                    <td className="td-mut td-mono">{job.due_date.slice(5)}</td>
-                    <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveTable
+            rows={jobList}
+            getKey={(job) => job.id}
+            onRowClick={(job) => nav("job-detail", job.id)}
+            columns={[
+              { key: "id", header: "Job ID", render: (job) => <span className="td-mono td-strong">{job.id}</span> },
+              { key: "type", header: "Type", render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}><Icon name={JOB_TYPES[job.type]?.icon ?? "jobs"} size={14} /></span>{job.type}</span> },
+              { key: "merchant", header: "Customer / Merchant", mobileLabel: "Merchant", render: (job) => <div className="cell-2"><span className="td-strong">{job.customer?.name || "—"}</span><span className="c2-sub">{job.merchant.name}</span></div> },
+              { key: "status", header: "Status", render: (job) => <JobStatus status={job.stage} /> },
+              { key: "sla", header: "SLA", render: (job) => <SlaChip sla={job.sla} /> },
+              { key: "assignee", header: "Assignee", render: (job) => <span className="td-mut">{job.assignee}</span> },
+              { key: "due", header: "Due", render: (job) => <span className="td-mut td-mono">{job.due_date.slice(5)}</span> },
+            ]}
+            renderMobile={(job) => (
+              <MobileListItem
+                title={<span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}><Icon name={JOB_TYPES[job.type]?.icon ?? "jobs"} size={14} /></span>{job.type}</span>}
+                sub={<>{job.merchant.name} · <span className="td-mono">{job.id}</span></>}
+                status={<JobStatus status={job.stage} />}
+                meta={[
+                  { label: "SLA", value: <SlaChip sla={job.sla} /> },
+                  { label: "Assignee", value: job.assignee },
+                  { label: "Due", value: <span className="td-mono">{job.due_date.slice(5)}</span> },
+                  { label: "Customer", value: job.customer?.name || "—" },
+                ]}
+                onClick={() => nav("job-detail", job.id)}
+                chevron
+              />
+            )}
+          />
         )}
 
         <Pagination total={total} shown={jobList.length} page={page} pages={pages} onPageChange={setPage} />
@@ -648,6 +749,7 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
   onClose: () => void;
   onAssign: (serial: string) => void;
 }) {
+  const router = useRouter();
   const [terminals, setTerminals] = useState<TerminalOut[]>([]);
   const [spec, setSpec] = useState<TermSettingOut | null>(null);
   const [selected, setSelected] = useState(job.terminal?.serial || "");
@@ -667,6 +769,15 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
   const matchingSerials = new Set(matching.map((t) => terminalSerial(t)));
   const others = terminals.filter((t) => !matchingSerials.has(terminalSerial(t)));
   const chosen = terminals.find((t) => terminalSerial(t) === selected) ?? null;
+  const requestedSettingId = job.term_setting?.id ?? "";
+
+  function addRequestedTerminal() {
+    if (!requestedSettingId) return;
+    router.push({
+      pathname: "/terminals",
+      query: { register: "1", term_setting_id: requestedSettingId },
+    });
+  }
 
   function renderDevice(t: TerminalOut) {
     const sel = selected === terminalSerial(t);
@@ -692,6 +803,10 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
         <Btn variant="primary" icon="check" disabled={!chosen} onClick={() => chosen && onAssign(terminalSerial(chosen))}>Assign Device</Btn>
       </>}
     >
+      <div style={{display: "flex", gap: 10, marginBottom: 10}}>
+        <Btn variant="ghost" icon="plus" onClick={() => router.push("/terminals")}>Add New Terminal</Btn>
+        <Btn variant="ghost" icon="terminal" disabled={!requestedSettingId} onClick={addRequestedTerminal}>Add Requested Terminal</Btn>
+      </div>
       {spec && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "10px 12px", background: "var(--info-bg)", borderRadius: 9, marginBottom: 16, fontSize: 12.5 }}>
           <Icon name="terminal" size={15} style={{ color: "var(--info)" }} />
@@ -871,8 +986,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     <div>
       <div className="back-link" onClick={() => nav("jobs")}><Icon name="arrowLeft" size={16} /> Back to Jobs</div>
 
-      <div className="page-head">
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+      <div className="page-head job-detail-head">
+        <div className="job-title-block" style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <div style={{ width: 52, height: 52, borderRadius: 13, background: "var(--green-050)", color: "var(--green-700)", display: "grid", placeItems: "center" }}>
             <Icon name={def.icon} size={24} />
           </div>
@@ -891,13 +1006,13 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </div>
 
-      <Card>
+      <Card className="job-stepper-card">
         <div className="card-pad" style={{ paddingTop: 26, paddingBottom: 24 }}>
           <Stepper stages={stages} current={currentIndex} />
         </div>
       </Card>
 
-      <div style={{ margin: "16px 0", padding: "16px 18px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, boxShadow: "var(--sh-sm)", display: "flex", alignItems: "center", gap: 14 }}>
+      <div className="job-current-stage" style={{ margin: "16px 0", padding: "16px 18px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, boxShadow: "var(--sh-sm)", display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ width: 40, height: 40, borderRadius: 11, background: done ? "var(--green-050)" : currentSla === "Breached" ? "var(--bad-bg)" : currentSla === "Due Soon" ? "var(--warn-bg)" : "var(--info-bg)", color: done ? "var(--green-700)" : currentSla === "Breached" ? "var(--bad)" : currentSla === "Due Soon" ? "var(--warn)" : "var(--info)", display: "grid", placeItems: "center", flexShrink: 0 }}>
           <Icon name={done ? "checkCircle" : "activity"} size={20} />
         </div>
@@ -1091,7 +1206,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                     <div className="mono" style={{ fontWeight: 600, marginBottom: 2 }}>{job.terminal.serial}</div>
                     <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 12 }}>{job.terminal.brand + " " + job.terminal.model}</div>
                     <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%" }} onClick={() => nav("terminal-detail", job.terminal!.serial)}>View device</Btn>
-                    {!done && (
+                    {!done && job.type == "Replacement/Maintenance" && (
                       <Btn variant="ghost" sm icon="swap" style={{ width: "100%", marginTop: 8 }} onClick={() => setShowSwap(true)}>Swap Device</Btn>
                     )}
                     {job.previous_terminal && (

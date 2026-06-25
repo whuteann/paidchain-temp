@@ -1,21 +1,22 @@
 /* PaidChain — Terminal inventory + detail */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, SlaChip, Modal, Field, Chip } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, SlaChip, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
 import { jobs, TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import type { TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate } from "@/lib/api";
 import { NavFn } from "./shell";
 
 /* =================== REGISTER DEVICE MODAL =================== */
-function RegisterDeviceModal({ onClose, onRegister }: {
+function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
   onClose: () => void;
   onRegister: (t: TerminalOut) => void;
+  initialSettingId?: string;
 }) {
   const [settings, setSettings] = useState<TermSettingOut[]>([]);
   const [storedSims, setStoredSims] = useState<SimCardOut[]>([]);
   const [step, setStep] = useState<1 | 2>(1);
-  const [settingId, setSettingId] = useState("");
+  const [settingId, setSettingId] = useState(initialSettingId ?? "");
   const [serialNo, setSerialNo] = useState("");
   const [location, setLocation] = useState("KL Warehouse");
   const [selectedSimId, setSelectedSimId] = useState("");
@@ -564,7 +565,17 @@ function TerminalSettingsTab() {
 const TERMINALS_PAGE_SIZE = 20;
 const RENTED = ["Installed", "Assigned"];
 
-export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: string }) {
+export function Terminals({
+  nav,
+  initialFilter,
+  initialRegister = false,
+  initialTermSettingId,
+}: {
+  nav: NavFn;
+  initialFilter?: string;
+  initialRegister?: boolean;
+  initialTermSettingId?: string;
+}) {
   const [terminalList, setTerminalList] = useState<TerminalOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"inventory" | "settings">("inventory");
@@ -574,7 +585,7 @@ export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: 
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [showRegister, setShowRegister] = useState(false);
+  const [showRegister, setShowRegister] = useState(initialRegister);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -699,40 +710,46 @@ export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: 
             {loading ? (
               <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
             ) : terminalList.length === 0 ? <Empty icon="terminal" title="No devices match" /> : (
-              <div className="tbl-wrap">
-                <table className="tbl">
-                  <thead><tr>{["Serial","Brand / Model","Status","Assigned Merchant","Location","Last Movement","Rental",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-                  <tbody>
-                    {terminalList.map((t) => (
-                      <tr key={terminalSerial(t)} className="clickable" onClick={() => nav("terminal-detail", terminalSerial(t))}>
-                        <td>
-                          <div className="cell-2">
-                            <span className="td-mono td-strong">{terminalSerial(t)}</span>
-                            {t.tid && <span className="c2-sub mono">{t.tid}</span>}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="ent">
-                            <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
-                            <div><div className="ent-name">{t.brand}</div><div className="ent-sub">{t.model}</div></div>
-                          </div>
-                        </td>
-                        <td><TerminalStatus status={t.status} /></td>
-                        <td className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</td>
-                        <td><span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span></td>
-                        <td className="td-mut td-mono">{t.last_movement.slice(5)}</td>
-                        <td className="td-mut">RM {t.rental_rate}</td>
-                        <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ResponsiveTable
+                rows={terminalList}
+                getKey={(t) => terminalSerial(t)}
+                onRowClick={(t) => nav("terminal-detail", terminalSerial(t))}
+                columns={[
+                  { key: "serial", header: "Serial", render: (t) => <div className="cell-2"><span className="td-mono td-strong">{terminalSerial(t)}</span>{t.tid && <span className="c2-sub mono">{t.tid}</span>}</div> },
+                  { key: "device", header: "Brand / Model", mobileLabel: "Device", render: (t) => <div className="ent"><div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div><div><div className="ent-name">{t.brand}</div><div className="ent-sub">{t.model}</div></div></div> },
+                  { key: "status", header: "Status", render: (t) => <TerminalStatus status={t.status} /> },
+                  { key: "merchant", header: "Assigned Merchant", mobileLabel: "Merchant", render: (t) => <span className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</span> },
+                  { key: "location", header: "Location", render: (t) => <span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
+                  { key: "movement", header: "Last Movement", render: (t) => <span className="td-mut td-mono">{t.last_movement.slice(5)}</span> },
+                  { key: "rental", header: "Rental", render: (t) => <span className="td-mut">RM {t.rental_rate}</span> },
+                ]}
+                renderMobile={(t) => (
+                  <MobileListItem
+                    title={<span className="td-mono">{terminalSerial(t)}</span>}
+                    sub={`${t.brand} · ${t.model}`}
+                    status={<TerminalStatus status={t.status} />}
+                    meta={[
+                      { label: "TID", value: <span className="td-mono">{t.tid || "—"}</span> },
+                      { label: "Merchant", value: t.merchant ? t.merchant.name : "Unassigned" },
+                      { label: "Location", value: <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
+                      { label: "Rental", value: <>RM {t.rental_rate}</> },
+                    ]}
+                    onClick={() => nav("terminal-detail", terminalSerial(t))}
+                    chevron
+                  />
+                )}
+              />
             )}
             <Pagination total={total} shown={terminalList.length} page={page} pages={pages} onPageChange={setPage} />
           </Card>
 
-          {showRegister && <RegisterDeviceModal onClose={() => setShowRegister(false)} onRegister={handleRegister} />}
+          {showRegister && (
+            <RegisterDeviceModal
+              onClose={() => setShowRegister(false)}
+              onRegister={handleRegister}
+              initialSettingId={initialTermSettingId}
+            />
+          )}
           {showBulkUpload && <BulkUploadModal onClose={() => setShowBulkUpload(false)} onComplete={handleBulkUpload} />}
           {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
         </>
@@ -744,10 +761,20 @@ export function Terminals({ nav, initialFilter }: { nav: NavFn; initialFilter?: 
 }
 
 /* =================== DETAIL =================== */
-export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
+export function TerminalDetail({
+  id,
+  nav,
+  initialLinkedSim,
+  simLoaded,
+}: {
+  id: string;
+  nav: NavFn;
+  initialLinkedSim: SimCardOut | null;
+  simLoaded: boolean;
+}) {
   const [terminal, setTerminal] = useState<TerminalOut | null>(null);
   const [termSetting, setTermSetting] = useState<TermSettingOut | null>(null);
-  const [linkedSim, setLinkedSim] = useState<SimCardOut | null>(null);
+  const [linkedSimOverride, setLinkedSimOverride] = useState<SimCardOut | null | undefined>(undefined);
   const [detailLoading, setDetailLoading] = useState(true);
 
   const [showStatus, setShowStatus] = useState(false);
@@ -755,9 +782,9 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [statusSaving, setStatusSaving] = useState(false);
   const [showSimModal, setShowSimModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const linkedSim = linkedSimOverride === undefined ? initialLinkedSim : linkedSimOverride;
 
   useEffect(() => {
-    setDetailLoading(true);
     api.terminals.get(id)
       .then((t) => {
         setTerminal(t);
@@ -768,9 +795,6 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
       })
       .catch(console.error)
       .finally(() => setDetailLoading(false));
-    api.simCards.list({ per_page: 200 }).then((p) => {
-      setLinkedSim(p.items.find((s) => s.terminal_serial === id) ?? null);
-    }).catch(console.error);
   }, [id]);
 
   if (detailLoading) return (
@@ -793,9 +817,11 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
     if (!terminal) return;
     setStatusSaving(true);
     try {
-      await api.terminals.update(terminalSerial(terminal), { status: pendingStatus });
-      // console.log("udpated", updated);
-      // setTerminal(updated);
+      const updated = await api.terminals.update(terminalSerial(terminal), { status: pendingStatus });
+      setTerminal(prev => {return {
+        ...prev,
+        ...updated
+      }});
       setShowStatus(false);
       setToast(`Status updated to "${TERMINAL_STATUS[pendingStatus]?.label || pendingStatus}"`);
       setTimeout(() => setToast(null), 2600);
@@ -810,13 +836,17 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
   async function handleLinkSim(simId: string) {
     if (!terminal) return;
     try {
+      const serial = terminalSerial(terminal);
       if (linkedSim) {
-        await api.simCards.update(linkedSim.id, { terminal_serial: null, status: "In Storage" });
+        await api.terminals.unlinkSim(serial);
       }
-      const newSim = await api.simCards.update(simId, { terminal_serial: terminalSerial(terminal), status: "Active" });
-      setLinkedSim(newSim);
-      const updated = await api.terminals.update(terminalSerial(terminal), { sim: "4G + WiFi" });
-      setTerminal(updated);
+      const updated = await api.terminals.linkSim({ terminal_serial: serial, simcard_id: simId });
+      const newSim = await api.terminals.simCard(serial);
+      setLinkedSimOverride(newSim);
+      setTerminal(prev => {return {
+        ...prev,
+        ...updated
+      }});
       setShowSimModal(false);
       setToast(linkedSim ? "SIM card replaced" : "SIM card linked");
       setTimeout(() => setToast(null), 2600);
@@ -829,10 +859,12 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
   async function handleUnlinkSim() {
     if (!linkedSim || !terminal) return;
     try {
-      await api.simCards.update(linkedSim.id, { terminal_serial: null, status: "In Storage" });
-      setLinkedSim(null);
-      const updated = await api.terminals.update(terminalSerial(terminal), { sim: "WiFi only" });
-      setTerminal(updated);
+      const updated = await api.terminals.unlinkSim(terminalSerial(terminal));
+      setLinkedSimOverride(null);
+      setTerminal(prev => {return {
+        ...prev,
+        ...updated
+      }});
       setToast("SIM card unlinked — moved to storage");
       setTimeout(() => setToast(null), 2600);
     } catch {
@@ -875,7 +907,7 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
                 <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No activity recorded yet.</div>
               ) : (
                 <div className="timeline">
-                  {terminal.activity_log.map((e, i) => (
+                  {terminal.activity_log.slice(0, 10).map((e, i) => (
                     <div className="tl-item" key={i}>
                       <div className="tl-dot" />
                       <div className="tl-time">{e.at.slice(0, 10)}</div>
@@ -909,7 +941,7 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
               </div>
             )}
           </Card>
-          <Card title="Photos & Inspection Forms" icon="image">
+          {/* <Card title="Photos & Inspection Forms" icon="image">
             <div className="card-pad">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
                 {["device front","serial label","install site","signed form"].map((p, i) => (
@@ -919,7 +951,7 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
                 ))}
               </div>
             </div>
-          </Card>
+          </Card> */}
         </div>
 
         {/* RIGHT */}
@@ -962,7 +994,9 @@ export function TerminalDetail({ id, nav }: { id: string; nav: NavFn }) {
             </Btn>
           }>
             <div className="card-pad">
-              {linkedSim ? (
+              {!simLoaded ? (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading linked SIM card…</div>
+              ) : linkedSim ? (
                 <>
                   <dl className="kv" style={{ gridTemplateColumns: "100px 1fr" }}>
                     <dt>ICCID</dt><dd className="mono" style={{ fontSize: 12 }}>{linkedSim.iccid}</dd>

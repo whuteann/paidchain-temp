@@ -35,6 +35,7 @@ function CreateSimCardModal({ onClose, onCreate }: {
       onCreate(result);
       onClose();
     } catch (e) {
+      console.log("error: ", e);
       setErr(e instanceof ApiError ? e.message : "Failed to add SIM card");
       setSaving(false);
     }
@@ -52,7 +53,7 @@ function CreateSimCardModal({ onClose, onCreate }: {
         </Btn>
       </>}
     >
-      <Field label="ICCID" hint="required · min 10 digits">
+      <Field label="ICCID" hint="required · min 19 digits">
         <input className="input" placeholder="e.g. 89601100001234567890"
           value={form.iccid} onChange={(e) => set("iccid", e.target.value)} />
       </Field>

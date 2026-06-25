@@ -24,6 +24,27 @@ function dispatchLogout() {
   s.dispatch(logout());
 }
 
+function getErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data === "object" && data !== null) {
+    const detail = (data as { detail?: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const parts = detail
+        .map((item) => {
+          if (typeof item !== "object" || item === null) return null;
+          const entry = item as { loc?: unknown; msg?: unknown };
+          const field = Array.isArray(entry.loc) ? entry.loc.at(-1) : null;
+          const message = typeof entry.msg === "string" ? entry.msg : null;
+          if (!message) return null;
+          return typeof field === "string" ? `${field}: ${message}` : message;
+        })
+        .filter((part): part is string => !!part);
+      if (parts.length > 0) return parts.join(", ");
+    }
+  }
+  return fallback;
+}
+
 // ─── Base request ─────────────────────────────────────────────────────────────
 
 async function req<T>(
@@ -63,7 +84,7 @@ async function req<T>(
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = typeof data?.detail === "string" ? data.detail : `HTTP ${res.status}`;
+    const msg = getErrorMessage(data, `HTTP ${res.status}`);
     throw new ApiError(res.status, msg);
   }
   return data as T;
@@ -104,7 +125,7 @@ async function reqBlob(
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    const msg = typeof data?.detail === "string" ? data.detail : `HTTP ${res.status}`;
+    const msg = getErrorMessage(data, `HTTP ${res.status}`);
     throw new ApiError(res.status, msg);
   }
 
@@ -514,6 +535,7 @@ export interface TerminalBulkCreate {
 export const terminals = {
   list: (p?: TerminalListParams) => req<TerminalPage>("GET", "/terminals", { params: p }),
   get: (serial: string) => req<TerminalOut>("GET", `/terminals/${serial}`),
+  simCard: (serial: string) => req<SimCardOut>("GET", `/terminals/${serial}/simcard`),
   create: (body: TerminalCreate) => req<TerminalOut>("POST", "/terminals", { body }),
   bulkCreate: (body: TerminalBulkCreate) => req<BulkCreateResult>("POST", "/terminals/bulk", { body }),
   update: (serial: string, body: TerminalUpdate) =>
@@ -590,15 +612,20 @@ export interface JobOut {
 
 export interface JobCreate {
   type: string;
-  customer_id?: string | null;
+  customer_id: string;
   merchant_id: string;
-  assignee?: string;
-  priority?: string;
-  due_date?: string;
-  notes?: string;
-  term_setting_id?: string | null;
-  paper_roll_qty?: number;
-  payment_target?: string;
+  assignee: string;
+  priority: string;
+  due_date: string;
+  notes: string;
+  term_setting_id: string | null;
+  terminal_replace: string;
+  paper_roll_qty: number;
+  payment_target: string;
+  courier_required: boolean;
+  courier_status: string;
+  courier_name: string;
+  courier_tracking_no: string;
 }
 
 export interface JobUpdate {
@@ -920,6 +947,202 @@ export const payouts = {
   transactions: (payout_id: string) => req<PayoutTransaction[]>("GET", `/payouts/${payout_id}/transactions`),
 };
 
+// ─── Referral Bonuses ────────────────────────────────────────────────────────
+
+export interface ReferralUserRef {
+  id: string;
+  name: string;
+  email?: string | null;
+  role?: string | null;
+}
+
+export interface ReferralMerchantRef {
+  id: string;
+  name: string;
+  mid?: string | null;
+}
+
+export interface ReferralAttachmentOut {
+  id: string | number;
+  filename: string;
+  path?: string | null;
+  uploaded_by?: string | null;
+  uploaded_at?: string | null;
+  url?: string | null;
+}
+
+export interface ReferralOut {
+  id: string;
+  lead_type: string;
+  merchant_name: string;
+  business_reg_no?: string | null;
+  contact_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes?: string | null;
+  referrer?: ReferralUserRef | null;
+  processor?: ReferralUserRef | null;
+  processor_user_id?: string | null;
+  lead_status: string;
+  status: string;
+  commission_status: string;
+  submitted_at?: string | null;
+  is_bank_referred?: boolean | null;
+  is_existing_or_former_merchant?: boolean | null;
+  processing_status?: string | null;
+  document_submission_date?: string | null;
+  bank_submission_reference?: string | null;
+  next_follow_up_date?: string | null;
+  merchant_id?: string | null;
+  merchant?: ReferralMerchantRef | null;
+  activation_date?: string | null;
+  terminal_serial?: string | null;
+  terminal_tid?: string | null;
+  first_transaction_date?: string | null;
+  first_transaction_reference?: string | null;
+  eligibility_date?: string | null;
+  reversal_required?: boolean | null;
+  reversal_reason?: string | null;
+  reversed_at?: string | null;
+  reversal_line_created?: boolean | null;
+  attachments?: ReferralAttachmentOut[];
+  activity_log?: ActivityOut[];
+}
+
+export interface ReferralCreate {
+  lead_type: string;
+  merchant_name: string;
+  business_reg_no?: string | null;
+  contact_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes?: string | null;
+}
+
+export interface ReferralUpdate {
+  lead_type?: string;
+  merchant_name?: string;
+  business_reg_no?: string | null;
+  contact_name?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string | null;
+  is_bank_referred?: boolean;
+  is_existing_or_former_merchant?: boolean;
+  lead_status?: string;
+}
+
+export interface ReferralProcessingUpdate {
+  lead_status?: string;
+  processing_status?: string;
+  notes?: string | null;
+  document_submission_date?: string | null;
+  bank_submission_reference?: string | null;
+  next_follow_up_date?: string | null;
+}
+
+export interface ReferralListParams {
+  page?: number;
+  per_page?: number;
+  query?: string;
+  lead_status?: string;
+  status?: string;
+  commission_status?: string;
+}
+
+export interface ReferralPage {
+  items: ReferralOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface ReferralBonusLineOut {
+  id: string;
+  line_id?: string;
+  line_type?: string;
+  commission_role: string;
+  amount: number;
+  staff_user_id: string;
+  staff_name: string;
+  staff_email?: string | null;
+  referral_id: string;
+  merchant_id?: string | null;
+  merchant_name: string;
+  reason?: string | null;
+}
+
+export interface ReferralBonusBatchOut {
+  id: string;
+  year: number;
+  quarter: number;
+  status: string;
+  total_amount?: number;
+  line_count?: number;
+  generated_at?: string | null;
+  paid_date?: string | null;
+  payment_proof_filename?: string | null;
+  lines?: ReferralBonusLineOut[];
+}
+
+export interface ReferralBonusBatchListParams {
+  page?: number;
+  per_page?: number;
+  year?: number;
+  quarter?: number;
+  status?: string;
+}
+
+export interface ReferralBonusBatchPage {
+  items: ReferralBonusBatchOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export const referrals = {
+  list: (p?: ReferralListParams) => req<ReferralPage>("GET", "/referrals", { params: p }),
+  get: (id: string) => req<ReferralOut>("GET", `/referrals/${id}`),
+  create: (body: ReferralCreate) => req<ReferralOut>("POST", "/referrals", { body }),
+  update: (id: string, body: ReferralUpdate) => req<ReferralOut>("PATCH", `/referrals/${id}`, { body }),
+  assignProcessor: (id: string, processor_user_id: string) =>
+    req<ReferralOut>("POST", `/referrals/${id}/assign-processor`, { body: { processor_user_id } }),
+  updateProcessing: (id: string, body: ReferralProcessingUpdate) =>
+    req<ReferralOut>("PATCH", `/referrals/${id}/processing`, { body }),
+  uploadAttachment: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return req<ReferralAttachmentOut>("POST", `/referrals/${id}/attachments`, { form });
+  },
+  linkMerchant: (id: string, merchant_id: string) =>
+    req<ReferralOut>("POST", `/referrals/${id}/link-merchant`, { body: { merchant_id } }),
+  cancel: (id: string, reason: string) =>
+    req<ReferralOut>("POST", `/referrals/${id}/cancel`, { body: { reason } }),
+  confirm: (id: string, body: { first_transaction_date: string; first_transaction_reference?: string | null }) =>
+    req<ReferralOut>("POST", `/referrals/${id}/confirm`, { body }),
+};
+
+export const referralBonusBatches = {
+  list: (p?: ReferralBonusBatchListParams) =>
+    req<ReferralBonusBatchPage>("GET", "/referral-bonus-batches", { params: p }),
+  get: (id: string) => req<ReferralBonusBatchOut>("GET", `/referral-bonus-batches/${id}`),
+  create: (body: { year: number; quarter: number }) =>
+    req<ReferralBonusBatchOut>("POST", "/referral-bonus-batches", { body }),
+  export: (id: string) => reqBlob("GET", `/referral-bonus-batches/${id}/export`),
+  markPaid: (id: string, paid_date: string, payment_proof: File) => {
+    const form = new FormData();
+    form.append("status", "Paid");
+    form.append("paid_date", paid_date);
+    form.append("payment_proof", payment_proof);
+    return req<ReferralBonusBatchOut>("PATCH", `/referral-bonus-batches/${id}`, { form });
+  },
+};
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export interface UserOut {
@@ -968,8 +1191,8 @@ export const users = {
   create: (body: UserCreate) => req<UserOut>("POST", "/users", { body }),
   update: (id: string, body: UserUpdate) => req<UserOut>("PATCH", `/users/${id}`, { body }),
   remove: (id: string) => req<void>("DELETE", `/users/${id}`),
-  resetPassword: (id: string, new_password: string) =>
-    req<void>("POST", `/users/${id}/reset-password`, { body: { new_password } }),
+  resetPassword: (id: string, password: string) =>
+    req<UserOut>("PATCH", `/users/${id}/password`, { body: { password } }),
 };
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
@@ -1079,6 +1302,8 @@ export const api = {
   paperRolls,
   rentals,
   payouts,
+  referrals,
+  referralBonusBatches,
   users,
   roles,
   auditLogs,

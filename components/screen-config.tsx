@@ -348,7 +348,6 @@ export function Users() {
           onRoleFilterChange={(v) => { setUserRole(v); setUserPage(1); }}
           onAdd={(u) => setUserList((p) => [u, ...p])}
           onUpdate={(u) => setUserList((p) => p.map((x) => x.id === u.id ? u : x))}
-          onRemove={(id) => setUserList((p) => p.filter((x) => x.id !== id))}
         />
       )}
       {tab === "roles" && !editRoleId && (
@@ -371,7 +370,7 @@ export function Users() {
 function UsersTabContent({
   users, loading, roles, page, pages, total, pageSize, query, roleFilter,
   onPageChange, onPageSizeChange, onQueryChange, onRoleFilterChange,
-  onAdd, onUpdate, onRemove,
+  onAdd, onUpdate,
 }: {
   users: UserOut[];
   loading: boolean;
@@ -388,12 +387,9 @@ function UsersTabContent({
   onRoleFilterChange: (role: string) => void;
   onAdd: (u: UserOut) => void;
   onUpdate: (u: UserOut) => void;
-  onRemove: (id: string) => void;
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser] = useState<UserOut | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const statusChip: Record<string, string> = { Active: "chip-ok", Invited: "chip-info", Suspended: "chip-warn" };
@@ -406,25 +402,11 @@ function UsersTabContent({
   async function handleStatusToggle(u: UserOut) {
     const next = u.status === "Active" ? "Suspended" : "Active";
     try {
-      // const updated = await api.users.setStatus(u.id, next);
-      // onUpdate(updated);
+      const updated = await api.users.update(u.id, { status: next });
+      onUpdate(updated);
       showToast(`${u.name} ${next === "Active" ? "activated" : "suspended"}`);
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : "Failed to update status", 3000);
-    }
-  }
-
-  async function handleDelete(id: string) {
-    setDeleting(true);
-    try {
-      await api.users.remove(id);
-      onRemove(id);
-      setDeleteId(null);
-      showToast("User removed");
-    } catch (e) {
-      showToast(e instanceof ApiError ? e.message : "Delete failed", 3000);
-    } finally {
-      setDeleting(false);
     }
   }
 
@@ -465,24 +447,12 @@ function UsersTabContent({
                   <td className="td-mut">{u.jobs || "—"}</td>
                   <td className="td-mut">{u.last_active ?? "—"}</td>
                   <td>
-                    {deleteId === u.id ? (
-                      <div className="row-actions">
-                        <Btn variant="ghost" sm style={{ color: "var(--bad)", fontSize: 12 }} disabled={deleting} onClick={() => handleDelete(u.id)}>
-                          {deleting ? "…" : "Confirm"}
-                        </Btn>
-                        <Btn variant="ghost" sm onClick={() => setDeleteId(null)}>Cancel</Btn>
-                      </div>
-                    ) : (
-                      <div className="row-actions">
-                        <button className="icon-btn" title="Edit" onClick={() => setEditUser(u)}><Icon name="edit" size={14} /></button>
-                        <button className="icon-btn" title={u.status === "Active" ? "Suspend" : "Activate"} onClick={() => handleStatusToggle(u)}>
-                          <Icon name={u.status === "Active" ? "x" : "check"} size={14} />
-                        </button>
-                        <button className="icon-btn" title="Remove" style={{ color: "var(--bad)" }} onClick={() => setDeleteId(u.id)}>
-                          <Icon name="trash" size={14} />
-                        </button>
-                      </div>
-                    )}
+                    <div className="row-actions">
+                      <button className="icon-btn" title="Edit" onClick={() => setEditUser(u)}><Icon name="edit" size={14} /></button>
+                      <button className="icon-btn" title={u.status === "Active" ? "Suspend" : "Activate"} onClick={() => handleStatusToggle(u)}>
+                        <Icon name={u.status === "Active" ? "x" : "check"} size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -554,7 +524,8 @@ function UserModal({ onClose, onSave, existing, roles }: {
     if (!existing || !resetPw) return;
     setResetting(true); setErr(null);
     try {
-      await api.users.resetPassword(existing.id, resetPw);
+      const updated = await api.users.resetPassword(existing.id, resetPw);
+      onSave(updated);
       setResetPw(""); setResetOk(true);
       setTimeout(() => setResetOk(false), 3000);
     } catch (e) {

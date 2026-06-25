@@ -1,6 +1,6 @@
 /* PaidChain — Dashboard */
 import { Icon } from "./icons";
-import { Card, Btn, JobStatus, SlaChip, PageHead, TerminalStatus } from "./components";
+import { Card, Btn, JobStatus, SlaChip, PageHead, MobileListItem, ResponsiveTable } from "./components";
 import { terminals, jobs, merchants, payouts, TERMINAL_STATUS_ORDER, TERMINAL_STATUS, JOB_TYPES } from "./data";
 import { NavFn } from "./shell";
 
@@ -84,7 +84,7 @@ export function Dashboard({ nav }: { nav: NavFn }) {
       </div>
 
       {/* Terminal breakdown + jobs by type */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
+      <div className="dashboard-split-grid" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
         <Card title="Terminal Inventory by Status" icon="terminal"
           actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("terminals")}>Inventory</Btn>}
         >
@@ -117,56 +117,63 @@ export function Dashboard({ nav }: { nav: NavFn }) {
       </div>
 
       {/* Recent jobs + side column */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
+      <div className="dashboard-lower-grid" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
         <Card title="Recent Jobs" icon="clock"
           actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>View all</Btn>}
         >
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr>{["Job ID","Type","Merchant","Status","SLA","Due"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-              <tbody>
-                {recent.map((j) => (
-                  <tr key={j.id} className="clickable" onClick={() => nav("job-detail", j.id)}>
-                    <td className="td-mono td-strong">{j.id}</td>
-                    <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                      <Icon name={JOB_TYPES[j.type].icon} size={15} style={{ color: "var(--ink-3)" }} />
-                      {j.type}
-                    </span></td>
-                    <td className="td-mut">{j.merchant.name}</td>
-                    <td><JobStatus status={j.stage} /></td>
-                    <td><SlaChip sla={j.sla} /></td>
-                    <td className="td-mut td-mono">{j.due.slice(5)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveTable
+            rows={recent}
+            getKey={(j) => j.id}
+            onRowClick={(j) => nav("job-detail", j.id)}
+            columns={[
+              { key: "id", header: "Job ID", render: (j) => <span className="td-mono td-strong">{j.id}</span> },
+              { key: "type", header: "Type", render: (j) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type].icon} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
+              { key: "merchant", header: "Merchant", render: (j) => <span className="td-mut">{j.merchant.name}</span> },
+              { key: "status", header: "Status", render: (j) => <JobStatus status={j.stage} /> },
+              { key: "sla", header: "SLA", render: (j) => <SlaChip sla={j.sla} /> },
+              { key: "due", header: "Due", render: (j) => <span className="td-mut td-mono">{j.due.slice(5)}</span> },
+            ]}
+            renderMobile={(j) => (
+              <MobileListItem
+                title={<span className="td-mono">{j.id}</span>}
+                sub={j.merchant.name}
+                status={<JobStatus status={j.stage} />}
+                meta={[
+                  { label: "Type", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type].icon} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
+                  { label: "SLA", value: <SlaChip sla={j.sla} /> },
+                  { label: "Due", value: <span className="td-mono">{j.due.slice(5)}</span> },
+                ]}
+                onClick={() => nav("job-detail", j.id)}
+                chevron
+              />
+            )}
+          />
         </Card>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card title="Needs Attention" icon="alert">
-            <div style={{ padding: "6px 8px" }}>
+            <div className="attention-list">
               {[
                 { ico: "alert",    c: "var(--bad)",    bg: "var(--bad-bg)",    t: breaches + " jobs breached SLA",                      s: "Review and reassign",        go: () => nav("jobs") },
                 { ico: "payouts",  c: "var(--warn)",   bg: "var(--warn-bg)",   t: exceptions + " payouts flagged",                       s: "Exception checks pending",   go: () => nav("payouts") },
                 { ico: "wrench",   c: "var(--orange)", bg: "var(--orange-bg)", t: tCounts["Faulty"] + " faulty terminals",               s: "Awaiting repair routing",     go: () => nav("terminals") },
                 { ico: "merchants",c: "var(--info)",   bg: "var(--info-bg)",   t: merchants.filter((m) => m.finance !== "Ready").length + " merchants not finance-ready", s: "Documents outstanding", go: () => nav("merchants") },
               ].map((a, i) => (
-                <div
-                  key={i} onClick={a.go}
-                  style={{ display: "flex", gap: 11, alignItems: "center", padding: "10px 8px", borderRadius: 8, cursor: "pointer" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: a.bg, color: a.c, display: "grid", placeItems: "center", flexShrink: 0 }}>
-                    <Icon name={a.ico} size={16} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{a.t}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{a.s}</div>
-                  </div>
-                  <Icon name="chevRight" size={15} style={{ color: "var(--ink-4)" }} />
-                </div>
+                <MobileListItem
+                  key={i}
+                  className="attention-item"
+                  title={
+                    <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+                      <span style={{ width: 32, height: 32, borderRadius: 8, background: a.bg, color: a.c, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                        <Icon name={a.ico} size={16} />
+                      </span>
+                      {a.t}
+                    </span>
+                  }
+                  sub={a.s}
+                  onClick={a.go}
+                  chevron
+                />
               ))}
             </div>
           </Card>

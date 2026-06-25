@@ -1,7 +1,7 @@
 /* PaidChain — Customer listing + detail + onboarding */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";
 import { CUSTOMER_TYPES, CUSTOMER_STATUS, BANKS } from "./data";
 import type { Merchant } from "./data";
 import { useMerchants } from "./merchants-context";
@@ -317,41 +317,35 @@ export function Customers({ nav }: { nav: NavFn }) {
         {loading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : customers.length === 0 ? <Empty icon="building" title="No customers match" /> : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Customer","Type","Reg No","Merchants","Contact","Onboarded","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {customers.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          {c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}
-                        </span>
-                        <span className="c2-sub mono">{c.id}</span>
-                      </div>
-                    </td>
-                    <td><Chip cls="chip-neutral">{c.type}</Chip></td>
-                    <td className="td-mono td-mut">{c.reg_no || "—"}</td>
-                    <td>
-                      <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}>
-                        <Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />
-                        {c.merchant_count}
-                      </span>
-                    </td>
-                    <td className="td-mut">{c.contact}</td>
-                    <td className="td-mono td-mut">{c.onboarded_date}</td>
-                    <td><CustomerStatus status={c.status} /></td>
-                    <td>
-                      <Btn variant="ghost" sm icon="eye" onClick={() => nav("customer-detail", c.id)}>View</Btn>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveTable
+            rows={customers}
+            getKey={(c) => c.id}
+            onRowClick={(c) => nav("customer-detail", c.id)}
+            columns={[
+              { key: "customer", header: "Customer", render: (c) => <div className="cell-2"><span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</span><span className="c2-sub mono">{c.id}</span></div> },
+              { key: "type", header: "Type", render: (c) => <Chip cls="chip-neutral">{c.type}</Chip> },
+              { key: "reg", header: "Reg No", mobileLabel: "Registration", render: (c) => <span className="td-mono td-mut">{c.reg_no || "—"}</span> },
+              { key: "merchants", header: "Merchants", render: (c) => <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
+              { key: "contact", header: "Contact", render: (c) => <span className="td-mut">{c.contact}</span> },
+              { key: "onboarded", header: "Onboarded", render: (c) => <span className="td-mono td-mut">{c.onboarded_date}</span> },
+              { key: "status", header: "Status", render: (c) => <CustomerStatus status={c.status} /> },
+            ]}
+            renderMobile={(c) => (
+              <MobileListItem
+                title={<>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</>}
+                sub={<span className="mono">{c.id}</span>}
+                status={<CustomerStatus status={c.status} />}
+                meta={[
+                  { label: "Type", value: <Chip cls="chip-neutral">{c.type}</Chip> },
+                  { label: "Merchants", value: <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
+                  { label: "Contact", value: c.contact },
+                  { label: "Registration", value: <span className="td-mono">{c.reg_no || "—"}</span> },
+                ]}
+                onClick={() => nav("customer-detail", c.id)}
+                chevron
+              />
+            )}
+          />
         )}
         <Pagination total={total} shown={customers.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
@@ -425,7 +419,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
         <Chip cls="chip-neutral">{customer.type}</Chip>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+      <div className="customer-detail-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <Card title="Company Details" icon="building">
           <div style={{ padding: "4px 20px 16px" }}>
             {[
@@ -474,39 +468,43 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
         ) : linked.length === 0 ? (
           <Empty icon="merchants" title="No merchants linked" sub="Add a merchant account to this customer to get started" />
         ) : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Merchant","MID","Bank","Type","Terminals","Finance","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {linked.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong">{m.name}</span>
-                        <span className="c2-sub mono">{m.id}</span>
-                      </div>
-                    </td>
-                    <td className="td-mono td-mut">{m.mid}</td>
-                    <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span></td>
-                    <td className="td-mut">{m.type}</td>
-                    <td className="td-mut">{m.terminal_count || "—"}</td>
-                    <td><MerchantStatus status={m.finance_status} /></td>
-                    <td><MerchantStatus status={m.status} /></td>
-                    <td><Btn variant="ghost" sm icon="eye" onClick={() => nav("merchant-detail", m.id)}>View</Btn></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveTable
+            rows={linked}
+            getKey={(m) => m.id}
+            onRowClick={(m) => nav("merchant-detail", m.id)}
+            columns={[
+              { key: "merchant", header: "Merchant", render: (m) => <div className="cell-2"><span className="td-strong">{m.name}</span><span className="c2-sub mono">{m.id}</span></div> },
+              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{m.mid}</span> },
+              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+              { key: "type", header: "Type", render: (m) => <span className="td-mut">{m.type}</span> },
+              { key: "terminals", header: "Terminals", render: (m) => <span className="td-mut">{m.terminal_count || "—"}</span> },
+              { key: "finance", header: "Finance", render: (m) => <MerchantStatus status={m.finance_status} /> },
+              { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
+            ]}
+            renderMobile={(m) => (
+              <MobileListItem
+                title={m.name}
+                sub={<span className="mono">{m.id}</span>}
+                status={<MerchantStatus status={m.status} />}
+                meta={[
+                  { label: "MID", value: <span className="td-mono">{m.mid}</span> },
+                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+                  { label: "Type", value: m.type },
+                  { label: "Terminals", value: m.terminal_count || "—" },
+                  { label: "Finance", value: <MerchantStatus status={m.finance_status} /> },
+                ]}
+                onClick={() => nav("merchant-detail", m.id)}
+                chevron
+              />
+            )}
+          />
         )}
       </Card>
 
       {showAddMerchant && (
         <CreateMerchantModal
           onClose={() => setShowAddMerchant(false)}
-          onCreate={handleAddMerchant}
+          onSave={handleAddMerchant}
           customerId={customer.id}
           customerName={customer.name}
         />

@@ -1,38 +1,150 @@
 /* PaidChain — Merchant listing + detail */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { MerchantOut, MerchantCreate, MerchantTerminalOut, MerchantJobOut } from "@/lib/api";
+import type { MerchantOut, MerchantCreate, MerchantTerminalOut, MerchantJobOut, MdrOut } from "@/lib/api";
 import { NavFn } from "./shell";
+import { CreateJobModal } from "./screen-jobs";
+
+function EntitySearchSelect<T extends { id: string }>({
+  label, hint, placeholder, value, onSelect, fetchResults, renderOption, getLabel, disabled, disabledHint,
+}: {
+  label: string;
+  hint?: string;
+  placeholder: string;
+  value: T | null;
+  onSelect: (item: T | null) => void;
+  fetchResults: (query: string) => Promise<T[]>;
+  renderOption: (item: T) => React.ReactNode;
+  getLabel: (item: T) => string;
+  disabled?: boolean;
+  disabledHint?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function runSearch(v: string) {
+    setLoading(true);
+    fetchResults(v).then(setResults).catch(console.error).finally(() => setLoading(false));
+  }
+
+  function handleChange(v: string) {
+    setQuery(v);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => runSearch(v), 300);
+  }
+
+  function handleFocus() {
+    setOpen(true);
+    if (!loading && results.length === 0) runSearch(query);
+  }
+
+  return (
+    <Field label={label} hint={hint}>
+      <div style={{ position: "relative" }}>
+        {value ? (
+          <div className="input" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-2, #f5f5f5)" }}>
+            <span>{getLabel(value)}</span>
+            <button type="button" className="icon-btn" onClick={() => { onSelect(null); setQuery(""); setResults([]); }}>
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+        ) : (
+          <input
+            className="input"
+            placeholder={disabled ? disabledHint : placeholder}
+            value={query}
+            disabled={disabled}
+            onChange={(e) => handleChange(e.target.value)}
+            onFocus={handleFocus}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+          />
+        )}
+        {open && !value && !disabled && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20,
+            background: "#fff", border: "1px solid var(--line)", borderRadius: 10,
+            boxShadow: "var(--sh-sm)", maxHeight: 220, overflowY: "auto",
+          }}>
+            {loading ? (
+              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>Searching…</div>
+            ) : results.length === 0 ? (
+              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>No matches</div>
+            ) : (
+              results.map((item) => (
+                <div
+                  key={item.id}
+                  className="search-opt"
+                  onMouseDown={() => { onSelect(item); setQuery(""); setOpen(false); }}
+                >
+                  {renderOption(item)}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </Field>
+  );
+}
 
 /* =================== CREATE MERCHANT MODAL =================== */
 interface CreateMerchantModalProps {
   onClose: () => void;
-  onCreate: (m: MerchantOut) => void;
+  onSave: (m: MerchantOut) => void;
   customerId: string;
   customerName: string;
+  existingMerchant?: MerchantOut | null;
 }
 
-export function CreateMerchantModal({ onClose, onCreate, customerId, customerName }: CreateMerchantModalProps) {
+export function CreateMerchantModal({ onClose, onSave, customerId, customerName, existingMerchant = null }: CreateMerchantModalProps) {
   const MERCHANT_TYPES = ["F&B", "Retail", "Healthcare", "Grocery", "Electronics", "Automotive", "Services", "Fitness", "Fuel", "Entertainment", "Furniture"];
-  const MDR_PLANS = ["Standard Retail", "F&B Preferred", "Enterprise", "SME Flat"];
   const ACCOUNT_TYPES = ["Current", "Savings"];
+  const editing = Boolean(existingMerchant);
 
   const [f, setF] = useState({
-    name: "", type: MERCHANT_TYPES[0], mid: "",
-    bank: BANKS[0], mdrPlan: MDR_PLANS[0],
-    contact: "", phone: "", email: "", address: "",
-    bankAccountName: "", bankAccountNumber: "", bankAccountType: ACCOUNT_TYPES[0],
+    name: existingMerchant?.name ?? "",
+    type: existingMerchant?.type ?? MERCHANT_TYPES[0],
+    mid: existingMerchant?.mid ?? "",
+    bank: existingMerchant?.bank ?? BANKS[0],
+    contact: existingMerchant?.contact ?? "",
+    phone: existingMerchant?.phone ?? "",
+    email: existingMerchant?.email ?? "",
+    address: existingMerchant?.address ?? "",
+    bankAccountName: existingMerchant?.bank_account_name ?? "",
+    bankAccountNumber: existingMerchant?.bank_account_number ?? "",
+    bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [selectedMdrRate, setSelectedMdrRate] = useState<MdrOut | null>(null);
+  const [mdrLoading, setMdrLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = f.name.trim() && f.mid.trim() && f.contact.trim();
+  const valid = f.name.trim() && f.mid.trim() && f.contact.trim() && selectedMdrRate;
+
+  useEffect(() => {
+    api.mdr.list()
+      .then((rates) => {
+        setMdrRates(rates);
+        if (!existingMerchant) return;
+        const matchedRate = rates.find((rate) =>
+          rate.id === existingMerchant.mdr_plan ||
+          rate.type === existingMerchant.mdr_plan
+        ) ?? null;
+        setSelectedMdrRate(matchedRate);
+      })
+      .catch(console.error)
+      .finally(() => setMdrLoading(false));
+  }, [existingMerchant]);
 
   async function submit() {
-    if (!valid) return;
+    if (!valid || !selectedMdrRate) return;
     setSaving(true); setErr(null);
     try {
       const body: MerchantCreate = {
@@ -41,7 +153,7 @@ export function CreateMerchantModal({ onClose, onCreate, customerId, customerNam
         type: f.type,
         mid: f.mid.trim(),
         bank: f.bank,
-        mdr_plan: f.mdrPlan,
+        mdr_plan: selectedMdrRate.id,
         contact: f.contact.trim(),
         phone: f.phone.trim(),
         email: f.email.trim(),
@@ -50,24 +162,28 @@ export function CreateMerchantModal({ onClose, onCreate, customerId, customerNam
         bank_account_number: f.bankAccountNumber.trim(),
         bank_account_type: f.bankAccountType,
       };
-      const m = await api.merchants.create(body);
-      onCreate(m);
+      const m = editing && existingMerchant
+        ? await api.merchants.update(existingMerchant.id, body)
+        : await api.merchants.create(body);
+      onSave(m);
       onClose();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Failed to create merchant");
+      setErr(e instanceof ApiError ? e.message : `Failed to ${editing ? "update" : "create"} merchant`);
       setSaving(false);
     }
   }
 
   return (
     <Modal
-      title="Create Merchant" sub="Add a new merchant under an existing customer" icon="merchants"
+      title={editing ? "Edit Merchant" : "Create Merchant"}
+      sub={editing ? "Update merchant profile, banking and contact details" : "Add a new merchant under an existing customer"}
+      icon="merchants"
       onClose={onClose}
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
-          {saving ? "Creating…" : "Create Merchant"}
+          {saving ? (editing ? "Saving…" : "Creating…") : (editing ? "Save Changes" : "Create Merchant")}
         </Btn>
       </>}
     >
@@ -98,11 +214,32 @@ export function CreateMerchantModal({ onClose, onCreate, customerId, customerNam
             {BANKS.map((b) => <option key={b}>{b}</option>)}
           </select>
         </Field>
-        <Field label="MDR plan">
-          <select className="input" value={f.mdrPlan} onChange={(e) => set("mdrPlan", e.target.value)}>
-            {MDR_PLANS.map((p) => <option key={p}>{p}</option>)}
-          </select>
-        </Field>
+        <EntitySearchSelect<MdrOut>
+          label="MDR plan"
+          hint="required"
+          placeholder="Search rate type, network, category…"
+          disabled={mdrLoading}
+          disabledHint="Loading MDR rates…"
+          value={selectedMdrRate}
+          onSelect={setSelectedMdrRate}
+          fetchResults={(query) => {
+            const needle = query.trim().toLowerCase();
+            const matches = needle
+              ? mdrRates.filter((rate) =>
+                  `${rate.type} ${rate.network} ${rate.category} ${rate.rate}`
+                    .toLowerCase()
+                    .includes(needle))
+              : mdrRates;
+            return Promise.resolve(matches.slice(0, 8));
+          }}
+          getLabel={(rate) => `${rate.type} · ${rate.rate}%`}
+          renderOption={(rate) => (
+            <div className="cell-2">
+              <span className="td-strong">{rate.type} · {rate.rate}%</span>
+              <span className="c2-sub">{rate.network} · {rate.category}</span>
+            </div>
+          )}
+        />
       </div>
 
       <Field label="Contact person" hint="required">
@@ -180,32 +317,36 @@ export function Merchants({ nav }: { nav: NavFn }) {
         {loading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : filtered.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr>{["Merchant","MID","Bank","Status","Terminals","Finance Readiness","Jobs",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-              <tbody>
-                {filtered.map((m) => (
-                  <tr key={m.id} className="clickable" onClick={() => nav("merchant-detail", m.id)}>
-                    <td><Entity name={m.name} sub={m.id + " · " + m.type} /></td>
-                    <td className="td-mono td-mut">{m.mid}</td>
-                    <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                      <Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}
-                    </span></td>
-                    <td><MerchantStatus status={m.status} /></td>
-                    <td>{m.terminals === 0
-                      ? <span className="td-mut">—</span>
-                      : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}>
-                          <Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{m.terminals}
-                        </span>}
-                    </td>
-                    <td><Readiness value={m.finance} /></td>
-                    <td>{m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : <span className="td-mut">None</span>}</td>
-                    <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveTable
+            rows={filtered}
+            getKey={(m) => m.id}
+            onRowClick={(m) => nav("merchant-detail", m.id)}
+            columns={[
+              { key: "merchant", header: "Merchant", render: (m) => <Entity name={m.name} sub={m.id + " · " + m.type} /> },
+              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{m.mid}</span> },
+              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+              { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
+              { key: "terminals", header: "Terminals", render: (m) => m.terminals === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{m.terminals}</span> },
+              { key: "finance", header: "Finance Readiness", mobileLabel: "Finance", render: (m) => <Readiness value={m.finance} /> },
+              { key: "jobs", header: "Jobs", render: (m) => m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : <span className="td-mut">None</span> },
+            ]}
+            renderMobile={(m) => (
+              <MobileListItem
+                title={m.name}
+                sub={<>{m.id} · {m.type}</>}
+                status={<MerchantStatus status={m.status} />}
+                meta={[
+                  { label: "MID", value: <span className="td-mono">{m.mid}</span> },
+                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+                  { label: "Finance", value: <Readiness value={m.finance} /> },
+                  { label: "Terminals", value: m.terminals === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{m.terminals}</span> },
+                  { label: "Jobs", value: m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : "None" },
+                ]}
+                onClick={() => nav("merchant-detail", m.id)}
+                chevron
+              />
+            )}
+          />
         )}
         <Pagination total={merchantList.length} shown={filtered.length} />
       </Card>
@@ -221,6 +362,8 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [tab, setTab] = useState("overview");
   const [linkedTerminals, setLinkedTerminals] = useState<MerchantTerminalOut[]>([]);
   const [merchantJobs, setMerchantJobs] = useState<MerchantJobOut[]>([]);
+  const [showCreateJob, setShowCreateJob] = useState(false);
+  const [showEditMerchant, setShowEditMerchant] = useState(false);
 
   useEffect(() => {
     api.merchants.get(id)
@@ -251,8 +394,8 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         <Icon name="arrowLeft" size={16} /> Back to Merchants
       </div>
 
-      <div className="page-head">
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+      <div className="page-head merchant-detail-head">
+        <div className="merchant-title-block" style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <div className="ent-ava" style={{ width: 52, height: 52, fontSize: 18, borderRadius: 13 }}>
             {merchant.name.split(" ").map((w) => w[0]).slice(0, 2).join("")}
           </div>
@@ -266,8 +409,8 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
         <div className="page-head-actions">
           <Btn variant="ghost" icon="mail">Contact</Btn>
-          <Btn variant="ghost" icon="edit">Edit</Btn>
-          <Btn variant="primary" icon="plus">New Job</Btn>
+          <Btn variant="ghost" icon="edit" onClick={() => setShowEditMerchant(true)}>Edit</Btn>
+          <Btn variant="primary" icon="plus" onClick={() => setShowCreateJob(true)}>New Job</Btn>
         </div>
       </div>
 
@@ -296,13 +439,52 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       <div style={{ marginTop: 20 }}>
         {tab === "overview" ? <OverviewTab m={merchant} /> : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} /> : <JobsTab rows={merchantJobs} nav={nav} />}
       </div>
+
+      {showCreateJob && (
+        <CreateJobModal
+          onClose={() => setShowCreateJob(false)}
+          onCreate={(job) => {
+            setShowCreateJob(false);
+            nav("job-detail", job.id);
+          }}
+          nav={nav}
+          presetCustomer={{
+            id: merchant.customer_id,
+            name: merchant.customer_name,
+            type: "",
+            reg_no: merchant.customer_id,
+            tin: null,
+            contact: "",
+            phone: "",
+            email: "",
+            address: "",
+            status: "",
+            onboarded_date: "",
+            merchant_count: 0,
+          }}
+          presetMerchant={merchant}
+        />
+      )}
+
+      {showEditMerchant && (
+        <CreateMerchantModal
+          onClose={() => setShowEditMerchant(false)}
+          onSave={(next) => {
+            setMerchant(next);
+            setShowEditMerchant(false);
+          }}
+          customerId={merchant.customer_id}
+          customerName={merchant.customer_name}
+          existingMerchant={merchant}
+        />
+      )}
     </div>
   );
 }
 
 function OverviewTab({ m }: { m: MerchantOut }) {
   return (
-    <div className="detail-grid">
+      <div className="detail-grid merchant-overview-grid">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <Card title="Business Details" icon="building">
           <div className="card-pad">
@@ -375,24 +557,33 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
   if (!rows.length) return <Card><Empty icon="terminal" title="No terminals linked" sub="This merchant has no deployed devices yet" /></Card>;
   return (
     <Card>
-      <div className="tbl-wrap">
-        <table className="tbl">
-          <thead><tr>{["Serial","Device","TID","Status","Location","Rental",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((t) => (
-              <tr key={t.serial} className="clickable" onClick={() => nav("terminal-detail", t.serial)}>
-                <td className="td-mono td-strong">{t.serial}</td>
-                <td><div className="cell-2"><span className="td-strong">{t.brand}</span><span className="c2-sub">{t.model}</span></div></td>
-                <td className="td-mono td-mut">{t.tid || "—"}</td>
-                <td><TerminalStatus status={t.status} /></td>
-                <td className="td-mut">{t.location}</td>
-                <td>RM {t.rental_rate}/mo</td>
-                <td><button className="icon-btn"><Icon name="chevRight" size={15} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ResponsiveTable
+        rows={rows}
+        getKey={(t) => t.serial}
+        onRowClick={(t) => nav("terminal-detail", t.serial)}
+        columns={[
+          { key: "serial", header: "Serial", render: (t) => <span className="td-mono td-strong">{t.serial}</span> },
+          { key: "device", header: "Device", render: (t) => <div className="cell-2"><span className="td-strong">{t.brand}</span><span className="c2-sub">{t.model}</span></div> },
+          { key: "tid", header: "TID", render: (t) => <span className="td-mono td-mut">{t.tid || "—"}</span> },
+          { key: "status", header: "Status", render: (t) => <TerminalStatus status={t.status} /> },
+          { key: "location", header: "Location", render: (t) => <span className="td-mut">{t.location}</span> },
+          { key: "rental", header: "Rental", render: (t) => <>RM {t.rental_rate}/mo</> },
+        ]}
+        renderMobile={(t) => (
+          <MobileListItem
+            title={<span className="td-mono">{t.serial}</span>}
+            sub={`${t.brand} · ${t.model}`}
+            status={<TerminalStatus status={t.status} />}
+            meta={[
+              { label: "TID", value: <span className="td-mono">{t.tid || "—"}</span> },
+              { label: "Location", value: t.location },
+              { label: "Rental", value: <>RM {t.rental_rate}/mo</> },
+            ]}
+            onClick={() => nav("terminal-detail", t.serial)}
+            chevron
+          />
+        )}
+      />
     </Card>
   );
 }
@@ -401,26 +592,35 @@ function JobsTab({ rows, nav }: { rows: MerchantJobOut[]; nav: NavFn }) {
   if (!rows.length) return <Card><Empty icon="jobs" title="No job history" sub="This merchant has no jobs on record yet" /></Card>;
   return (
     <Card>
-      <div className="tbl-wrap">
-        <table className="tbl">
-          <thead><tr>{["Job ID","Type","Status","SLA","Assignee","Created","Due"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((j) => (
-              <tr key={j.id} className="clickable" onClick={() => nav("job-detail", j.id)}>
-                <td className="td-mono td-strong">{j.id}</td>
-                <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                  <Icon name={JOB_TYPES[j.type]?.icon ?? "jobs"} size={15} style={{ color: "var(--ink-3)" }} />{j.type}
-                </span></td>
-                <td><JobStatus status={j.stage} /></td>
-                <td><SlaChip sla={j.sla} /></td>
-                <td className="td-mut">{j.assignee}</td>
-                <td className="td-mut td-mono">{j.created_at.slice(5, 10)}</td>
-                <td className="td-mut td-mono">{j.due_date.slice(5)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ResponsiveTable
+        rows={rows}
+        getKey={(j) => j.id}
+        onRowClick={(j) => nav("job-detail", j.id)}
+        columns={[
+          { key: "id", header: "Job ID", render: (j) => <span className="td-mono td-strong">{j.id}</span> },
+          { key: "type", header: "Type", render: (j) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type]?.icon ?? "jobs"} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
+          { key: "status", header: "Status", render: (j) => <JobStatus status={j.stage} /> },
+          { key: "sla", header: "SLA", render: (j) => <SlaChip sla={j.sla} /> },
+          { key: "assignee", header: "Assignee", render: (j) => <span className="td-mut">{j.assignee}</span> },
+          { key: "created", header: "Created", render: (j) => <span className="td-mut td-mono">{j.created_at.slice(5, 10)}</span> },
+          { key: "due", header: "Due", render: (j) => <span className="td-mut td-mono">{j.due_date.slice(5)}</span> },
+        ]}
+        renderMobile={(j) => (
+          <MobileListItem
+            title={<span className="td-mono">{j.id}</span>}
+            sub={<span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type]?.icon ?? "jobs"} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span>}
+            status={<JobStatus status={j.stage} />}
+            meta={[
+              { label: "SLA", value: <SlaChip sla={j.sla} /> },
+              { label: "Assignee", value: j.assignee },
+              { label: "Created", value: <span className="td-mono">{j.created_at.slice(5, 10)}</span> },
+              { label: "Due", value: <span className="td-mono">{j.due_date.slice(5)}</span> },
+            ]}
+            onClick={() => nav("job-detail", j.id)}
+            chevron
+          />
+        )}
+      />
     </Card>
   );
 }
