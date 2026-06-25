@@ -1,12 +1,13 @@
 /* PaidChain — Customer listing + detail + onboarding */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";
 import { CUSTOMER_TYPES, CUSTOMER_STATUS, BANKS } from "./data";
-import type { Customer, Merchant } from "./data";
-import { useCustomers } from "./customers-context";
+import type { Merchant } from "./data";
 import { useMerchants } from "./merchants-context";
 import { CreateMerchantModal } from "./screen-merchants";
+import { api, ApiError } from "@/lib/api";
+import type { CustomerOut, CustomerCreate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 
 function CustomerStatus({ status }: { status: string }) {
@@ -15,23 +16,29 @@ function CustomerStatus({ status }: { status: string }) {
 }
 
 /* =================== CREATE CUSTOMER MODAL =================== */
-interface CreateCustomerModalProps { onClose: () => void; onCreate: (c: Customer) => void }
-
-function CreateCustomerModal({ onClose, onCreate }: CreateCustomerModalProps) {
+function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCreate: (c: CustomerOut) => void }) {
   const [f, setF] = useState({ name: "", type: CUSTOMER_TYPES[0], regNo: "", tin: "", contact: "", phone: "", email: "", address: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const valid = f.name.trim() && f.contact.trim();
 
-  function submit() {
-    onCreate({
-      id: "CUST-" + String(Date.now()).slice(-3),
-      name: f.name.trim(), type: f.type, regNo: f.regNo, tin: f.tin.trim(),
-      contact: f.contact.trim(), phone: f.phone, email: f.email, address: f.address,
-      status: "Active",
-      onboarded: new Date().toISOString().slice(0, 10),
-      isNew: true,
-    });
-    onClose();
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      const body: CustomerCreate = {
+        name: f.name.trim(), type: f.type,
+        reg_no: f.regNo.trim(), tin: f.tin.trim() || null,
+        contact: f.contact.trim(), phone: f.phone.trim(),
+        email: f.email.trim(), address: f.address.trim(),
+      };
+      const c = await api.customers.create(body);
+      onCreate(c);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to create customer");
+      setSaving(false);
+    }
   }
 
   return (
@@ -41,7 +48,9 @@ function CreateCustomerModal({ onClose, onCreate }: CreateCustomerModalProps) {
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={!valid} onClick={submit}>Create Customer</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+          {saving ? "Creating…" : "Create Customer"}
+        </Btn>
       </>}
     >
       <div className="field-row">
@@ -74,23 +83,17 @@ function CreateCustomerModal({ onClose, onCreate }: CreateCustomerModalProps) {
       <Field label="Address">
         <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
       </Field>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
   );
 }
 
 /* =================== ONBOARDING FLOW MODAL =================== */
-type OnboardingStep = "prompt" | "merchant";
-
-interface OnboardingModalProps {
-  customer: Customer;
-  onFinish: (merchant?: Merchant) => void;
-}
-
-function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
+function CustomerOnboardingModal({ customer, onFinish }: { customer: CustomerOut; onFinish: (merchant?: Merchant) => void }) {
   const MDR_PLANS = ["Standard Retail", "F&B Preferred", "Enterprise", "SME Flat"];
   const MERCHANT_TYPES = ["F&B", "Retail", "Healthcare", "Grocery", "Electronics", "Automotive", "Services", "Fitness", "Fuel", "Entertainment", "Furniture"];
 
-  const [step, setStep] = useState<OnboardingStep>("prompt");
+  const [step, setStep] = useState<"prompt" | "merchant">("prompt");
   const [mForm, setMForm] = useState({
     name: "", type: MERCHANT_TYPES[0], bank: BANKS[0], mdrPlan: MDR_PLANS[0],
     contact: customer.contact, phone: customer.phone, email: "", address: customer.address,
@@ -114,7 +117,6 @@ function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
   }
 
   const merchantValid = mForm.name.trim() && mForm.contact.trim();
-
   const stepIdx = step === "prompt" ? 0 : 1;
   const stepLabels = ["Customer", "Merchant"];
 
@@ -122,8 +124,7 @@ function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
     <Modal
       title="Customer Onboarding"
       sub={step === "prompt" ? "Customer created — set up their merchant account" : "Create the first merchant location"}
-      icon="building"
-      size="wide"
+      icon="building" size="wide"
       foot={
         step === "prompt" ? (
           <>
@@ -144,17 +145,11 @@ function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
       {/* Step indicator */}
       <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 24 }}>
         {stepLabels.map((label, i) => {
-          const done = i < stepIdx;
-          const active = i === stepIdx;
+          const done = i < stepIdx; const active = i === stepIdx;
           return (
             <div key={label} style={{ display: "flex", alignItems: "center", flex: i < stepLabels.length - 1 ? 1 : undefined }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center",
-                  background: done ? "var(--green-700)" : active ? "var(--slate)" : "var(--bg-2, #f0f0f0)",
-                  color: done || active ? "#fff" : "var(--ink-3)",
-                  fontSize: 12, fontWeight: 700,
-                }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: done ? "var(--green-700)" : active ? "var(--slate)" : "var(--bg-2, #f0f0f0)", color: done || active ? "#fff" : "var(--ink-3)", fontSize: 12, fontWeight: 700 }}>
                   {done ? <Icon name="check" size={14} /> : i + 1}
                 </div>
                 <span style={{ fontSize: 11, fontWeight: active ? 600 : 400, color: active ? "var(--ink-1)" : "var(--ink-3)", whiteSpace: "nowrap" }}>{label}</span>
@@ -167,7 +162,6 @@ function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
         })}
       </div>
 
-      {/* Step: prompt */}
       {step === "prompt" && (
         <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--green-050)", color: "var(--green-700)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
@@ -180,7 +174,6 @@ function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
         </div>
       )}
 
-      {/* Step: merchant form */}
       {step === "merchant" && (
         <div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, marginBottom: 16, fontSize: 12.5, color: "var(--ink-2)" }}>
@@ -225,39 +218,56 @@ function CustomerOnboardingModal({ customer, onFinish }: OnboardingModalProps) {
           </Field>
         </div>
       )}
-
     </Modal>
   );
 }
 
+const CUSTOMERS_PAGE_SIZE = 20;
+
 /* =================== LISTING =================== */
 export function Customers({ nav }: { nav: NavFn }) {
-  const { customers, addCustomer } = useCustomers();
-  const { merchants, addMerchant } = useMerchants();
+  const [customers, setCustomers] = useState<CustomerOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const { addMerchant } = useMerchants();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [details, setDetails] = useState<CustomerDetails | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [onboardingCustomer, setOnboardingCustomer] = useState<Customer | null>(null);
+  const [onboardingCustomer, setOnboardingCustomer] = useState<CustomerOut | null>(null);
 
-  const filtered = customers.filter((c) => {
-    const hay = (c.id + " " + c.name + " " + c.regNo + " " + c.contact).toLowerCase();
-    if (q && !hay.includes(q.toLowerCase())) return false;
-    if (status !== "All" && c.status !== status) return false;
-    return true;
-  });
+  useEffect(() => {
+    api.customers.details().then(setDetails).catch(console.error);
+  }, []);
 
-  const getMerchantCount = (id: string) => merchants.filter((m) => m.customerId === id).length;
+  useEffect(() => {
+    setLoading(true);
+    api.customers.list({
+      page,
+      per_page: CUSTOMERS_PAGE_SIZE,
+      query: q || undefined,
+      status: status !== "All" ? status : undefined,
+    })
+      .then((p) => {
+        setCustomers(p.items);
+        setPages(p.pages);
+        setTotal(p.total);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [page, q, status]);
 
-  const stats = {
-    total: customers.length,
-    active: customers.filter((c) => c.status === "Active").length,
-    merchants: merchants.length,
-  };
+  function resetPage() { setPage(1); }
 
-  function handleCreate(c: Customer) {
-    addCustomer(c);
+  function handleCreate(c: CustomerOut) {
+    setCustomers((prev) => [c, ...prev]);
+    setNewIds((prev) => new Set([...prev, c.id]));
     setShowCreate(false);
     setOnboardingCustomer(c);
+    api.customers.details().then(setDetails).catch(console.error);
   }
 
   function finishOnboarding(merchant?: Merchant) {
@@ -280,9 +290,9 @@ export function Customers({ nav }: { nav: NavFn }) {
 
       <div className="stat-grid" style={{ marginBottom: 16 }}>
         {[
-          { l: "Total Customers",   v: stats.total,     ico: "building",  c: "var(--ink-2)",     bg: "var(--bg-2, #f5f5f5)" },
-          { l: "Active",            v: stats.active,    ico: "check",     c: "var(--ok)",        bg: "var(--green-050)" },
-          { l: "Linked Merchants",  v: stats.merchants, ico: "merchants", c: "var(--info)",      bg: "var(--info-bg)" },
+          { l: "Total Customers",  v: details?.total_customers ?? 0,   ico: "building",  c: "var(--ink-2)",  bg: "var(--bg-2, #f5f5f5)" },
+          { l: "Active",           v: details?.total_active ?? 0,      ico: "check",     c: "var(--ok)",     bg: "var(--green-050)" },
+          { l: "Linked Merchants", v: details?.linked_merchants ?? 0,  ico: "merchants", c: "var(--info)",   bg: "var(--info-bg)" },
         ].map((s, i) => (
           <div key={i} className="stat">
             <div className="stat-top">
@@ -296,83 +306,101 @@ export function Customers({ nav }: { nav: NavFn }) {
 
       <Card>
         <Toolbar>
-          <SearchBox value={q} onChange={setQ} placeholder="Search customer name, registration, contact…" />
-          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <SearchBox value={q} onChange={(v) => { setQ(v); resetPage(); }} placeholder="Search customer name, registration, contact…" />
+          <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
             {["All", "Active", "Inactive", "Suspended"].map((s) => (
-              <option key={s}>{s === "All" ? "All Statuses" : s}</option>
+              <option key={s} value={s}>{s === "All" ? "All Statuses" : s}</option>
             ))}
           </select>
-          <span className="tb-meta">{filtered.length} customers</span>
+          <span className="tb-meta">{loading ? "Loading…" : `${total} customers`}</span>
         </Toolbar>
-        {filtered.length === 0 ? <Empty icon="building" title="No customers match" /> : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Customer","Type","Reg No","Merchants","Contact","Onboarded","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {filtered.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          {c.name}{c.isNew && <Chip cls="chip-ok" sq>New</Chip>}
-                        </span>
-                        <span className="c2-sub mono">{c.id}</span>
-                      </div>
-                    </td>
-                    <td><Chip cls="chip-neutral">{c.type}</Chip></td>
-                    <td className="td-mono td-mut">{c.regNo || "—"}</td>
-                    <td>
-                      <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}>
-                        <Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />
-                        {getMerchantCount(c.id)}
-                      </span>
-                    </td>
-                    <td className="td-mut">{c.contact}</td>
-                    <td className="td-mono td-mut">{c.onboarded}</td>
-                    <td><CustomerStatus status={c.status} /></td>
-                    <td>
-                      <Btn variant="ghost" sm icon="eye" onClick={() => nav("customer-detail", c.id)}>View</Btn>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {loading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : customers.length === 0 ? <Empty icon="building" title="No customers match" /> : (
+          <ResponsiveTable
+            rows={customers}
+            getKey={(c) => c.id}
+            onRowClick={(c) => nav("customer-detail", c.id)}
+            columns={[
+              { key: "customer", header: "Customer", render: (c) => <div className="cell-2"><span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</span><span className="c2-sub mono">{c.id}</span></div> },
+              { key: "type", header: "Type", render: (c) => <Chip cls="chip-neutral">{c.type}</Chip> },
+              { key: "reg", header: "Reg No", mobileLabel: "Registration", render: (c) => <span className="td-mono td-mut">{c.reg_no || "—"}</span> },
+              { key: "merchants", header: "Merchants", render: (c) => <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
+              { key: "contact", header: "Contact", render: (c) => <span className="td-mut">{c.contact}</span> },
+              { key: "onboarded", header: "Onboarded", render: (c) => <span className="td-mono td-mut">{c.onboarded_date}</span> },
+              { key: "status", header: "Status", render: (c) => <CustomerStatus status={c.status} /> },
+            ]}
+            renderMobile={(c) => (
+              <MobileListItem
+                title={<>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</>}
+                sub={<span className="mono">{c.id}</span>}
+                status={<CustomerStatus status={c.status} />}
+                meta={[
+                  { label: "Type", value: <Chip cls="chip-neutral">{c.type}</Chip> },
+                  { label: "Merchants", value: <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
+                  { label: "Contact", value: c.contact },
+                  { label: "Registration", value: <span className="td-mono">{c.reg_no || "—"}</span> },
+                ]}
+                onClick={() => nav("customer-detail", c.id)}
+                chevron
+              />
+            )}
+          />
         )}
-        <Pagination total={customers.length} shown={filtered.length} />
+        <Pagination total={total} shown={customers.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
 
       {showCreate && <CreateCustomerModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {onboardingCustomer && <CustomerOnboardingModal customer={onboardingCustomer} onFinish={finishOnboarding} />}
-
     </div>
   );
 }
 
 /* =================== DETAIL =================== */
 export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
-  const { customers } = useCustomers();
-  const { merchants, addMerchant } = useMerchants();
-  const customer = customers.find((c) => c.id === id);
+  const [customer, setCustomer] = useState<CustomerOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [linked, setLinked] = useState<CustomerMerchantOut[]>([]);
+  const [linkedLoading, setLinkedLoading] = useState(true);
   const [showAddMerchant, setShowAddMerchant] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  if (!customer) return (
+  useEffect(() => {
+    api.customers.get(id)
+      .then(setCustomer)
+      .catch((e) => { if (e instanceof ApiError && e.status === 404) setNotFound(true); })
+      .finally(() => setLoading(false));
+    loadLinkedMerchants();
+  }, [id]);
+
+  function loadLinkedMerchants() {
+    setLinkedLoading(true);
+    api.customers.merchants(id)
+      .then(setLinked)
+      .catch(console.error)
+      .finally(() => setLinkedLoading(false));
+  }
+
+  if (loading) return (
+    <div>
+      <PageHead title="Customer" actions={<Btn variant="ghost" icon="arrowLeft" onClick={() => nav("customers")}>Back</Btn>} />
+      <div style={{ padding: "40px 0", fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>Loading…</div>
+    </div>
+  );
+
+  if (notFound || !customer) return (
     <div>
       <PageHead title="Customer not found" actions={<Btn variant="ghost" icon="arrowLeft" onClick={() => nav("customers")}>Back</Btn>} />
       <Empty icon="building" title="Customer not found" sub={"No customer with ID " + id} />
     </div>
   );
 
-  const linked = merchants.filter((m) => m.customerId === id);
-
-  function handleAddMerchant(m: Merchant) {
-    addMerchant(m);
+  function handleAddMerchant(m: MerchantOut) {
     setShowAddMerchant(false);
     setToast("Merchant " + m.name + " added");
     setTimeout(() => setToast(null), 2800);
+    loadLinkedMerchants();
   }
 
   return (
@@ -389,19 +417,18 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
         <CustomerStatus status={customer.status} />
         <Chip cls="chip-neutral">{customer.type}</Chip>
-        {customer.isNew && <Chip cls="chip-ok" sq>New</Chip>}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+      <div className="customer-detail-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <Card title="Company Details" icon="building">
           <div style={{ padding: "4px 20px 16px" }}>
             {[
               ["Customer ID",      customer.id],
               ["Registered Name",  customer.name],
               ["Type",             customer.type],
-              ["Registration No.", customer.regNo || "—"],
+              ["Registration No.", customer.reg_no || "—"],
               ["TIN No.",          customer.tin || "—"],
-              ["Onboarded",        customer.onboarded],
+              ["Onboarded",        customer.onboarded_date],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -423,59 +450,63 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 11, fontSize: 13 }}>
-              {customer.email    && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail"   size={15} style={{ color: "var(--ink-3)" }} />{customer.email}</div>}
-              {customer.phone    && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone"  size={15} style={{ color: "var(--ink-3)" }} />{customer.phone}</div>}
-              {customer.address  && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mapPin" size={15} style={{ color: "var(--ink-3)" }} />{customer.address}</div>}
+              {customer.email   && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail"   size={15} style={{ color: "var(--ink-3)" }} />{customer.email}</div>}
+              {customer.phone   && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone"  size={15} style={{ color: "var(--ink-3)" }} />{customer.phone}</div>}
+              {customer.address && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mapPin" size={15} style={{ color: "var(--ink-3)" }} />{customer.address}</div>}
             </div>
           </div>
         </Card>
       </div>
 
-      {/* Linked merchants */}
       <Card
         title={"Merchants (" + linked.length + ")"}
         icon="merchants"
         actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowAddMerchant(true)}>Add Merchant</Btn>}
       >
-        {linked.length === 0 ? (
+        {linkedLoading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : linked.length === 0 ? (
           <Empty icon="merchants" title="No merchants linked" sub="Add a merchant account to this customer to get started" />
         ) : (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Merchant","MID","Bank","Type","Terminals","Finance","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {linked.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          {m.name}{m.isNew && <Chip cls="chip-ok" sq>New</Chip>}
-                        </span>
-                        <span className="c2-sub mono">{m.id}</span>
-                      </div>
-                    </td>
-                    <td className="td-mono td-mut">{m.mid}</td>
-                    <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span></td>
-                    <td className="td-mut">{m.type}</td>
-                    <td className="td-mut">{m.terminals || "—"}</td>
-                    <td><MerchantStatus status={m.finance} /></td>
-                    <td><MerchantStatus status={m.status} /></td>
-                    <td><Btn variant="ghost" sm icon="eye" onClick={() => nav("merchant-detail", m.id)}>View</Btn></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveTable
+            rows={linked}
+            getKey={(m) => m.id}
+            onRowClick={(m) => nav("merchant-detail", m.id)}
+            columns={[
+              { key: "merchant", header: "Merchant", render: (m) => <div className="cell-2"><span className="td-strong">{m.name}</span><span className="c2-sub mono">{m.id}</span></div> },
+              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{m.mid}</span> },
+              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+              { key: "type", header: "Type", render: (m) => <span className="td-mut">{m.type}</span> },
+              { key: "terminals", header: "Terminals", render: (m) => <span className="td-mut">{m.terminal_count || "—"}</span> },
+              { key: "finance", header: "Finance", render: (m) => <MerchantStatus status={m.finance_status} /> },
+              { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
+            ]}
+            renderMobile={(m) => (
+              <MobileListItem
+                title={m.name}
+                sub={<span className="mono">{m.id}</span>}
+                status={<MerchantStatus status={m.status} />}
+                meta={[
+                  { label: "MID", value: <span className="td-mono">{m.mid}</span> },
+                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+                  { label: "Type", value: m.type },
+                  { label: "Terminals", value: m.terminal_count || "—" },
+                  { label: "Finance", value: <MerchantStatus status={m.finance_status} /> },
+                ]}
+                onClick={() => nav("merchant-detail", m.id)}
+                chevron
+              />
+            )}
+          />
         )}
       </Card>
 
       {showAddMerchant && (
         <CreateMerchantModal
           onClose={() => setShowAddMerchant(false)}
-          onCreate={handleAddMerchant}
-          prefilledCustomerId={customer.id}
+          onSave={handleAddMerchant}
+          customerId={customer.id}
+          customerName={customer.name}
         />
       )}
 

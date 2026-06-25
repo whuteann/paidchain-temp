@@ -229,8 +229,8 @@ A settlement/disbursement record for one merchant covering a defined period.
 | `txns` | `number` | Count of linked transactions |
 | `period` | `string` | Settlement period label e.g. `2026-05-16 – 31` |
 | `status` | `string` | `Pending` · `Paid` |
-| `exception` | `string \| null` | Exception flag description |
-| `checks` | `string` | Validation check summary |
+| `exceptions` | `PayoutException[]` | List of failed exception checks (empty = all passed) |
+| `checks` | `string` | Human-readable summary e.g. `"6 of 8 passed"` |
 | `einvoice` | `boolean` | Whether an eInvoice has been issued |
 | `issued` | `string \| null` | ISO date invoice was issued |
 | `paymentMethod` | `string` | e.g. `Visa` · `DuitNow QR` · `Multi-Method` |
@@ -242,6 +242,31 @@ A settlement/disbursement record for one merchant covering a defined period.
 2. **Batch upload** — a file is uploaded and parsed; payouts are auto-generated grouped by merchant across the file.
 
 **State transition:** `Pending → Paid` requires a proof-of-payment file upload.
+
+---
+
+### PayoutException
+
+A single failed check stored on a `Payout`. Only failures are stored — a passed check has no entry.
+
+| Field | Type | Notes |
+|---|---|---|
+| `code` | `string` | Check identifier — see `ALL_CHECKS` in `payout-exceptions.ts` |
+| `severity` | `"error" \| "warning"` | Error blocks payout creation; warning allows it with a flag |
+| `message` | `string` | Human-readable explanation of the failure |
+
+**The 8 checks (`payout-exceptions.ts`):**
+
+| Code | Label | Severity |
+|---|---|---|
+| `merchant_found` | Merchant found | error |
+| `mid_tid_match` | MID / TID matched | error |
+| `merchant_active` | Merchant active | error |
+| `mdr_setup` | MDR setup complete | error |
+| `commission_rule` | Commission rule exists | warning |
+| `terminal_assigned` | Terminal assigned | warning |
+| `rental_setup` | Rental setup present | warning |
+| `tin_ready` | TIN / eInvoice ready | warning |
 
 ---
 

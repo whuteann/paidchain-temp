@@ -59,23 +59,36 @@ export function Btn({ variant = "ghost", sm, icon, iconRight, children, onClick,
 interface ModalProps {
   title: string; sub?: string; icon?: string; onClose?: () => void;
   children?: ReactNode; foot?: ReactNode; size?: string;
+  mobileMode?: "sheet" | "fullscreen";
+  className?: string;
+  closeOnBackdrop?: boolean;
 }
-export function Modal({ title, sub, icon, onClose, children, foot, size }: ModalProps) {
+export function Modal({ title, sub, icon, onClose, children, foot, size, mobileMode = "sheet", className = "", closeOnBackdrop = true }: ModalProps) {
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose && onClose(); };
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose?.(); };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
   return (
-    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose && onClose(); }}>
-      <div className={"modal" + (size ? " " + size : "")}>
+    <div className="overlay" onMouseDown={(e) => { if (closeOnBackdrop && e.target === e.currentTarget) onClose?.(); }}>
+      <div
+        className={
+          "modal" +
+          (size ? " " + size : "") +
+          (mobileMode === "fullscreen" ? " modal-mobile-fullscreen" : "") +
+          (className ? " " + className : "")
+        }
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
         <div className="modal-head">
           {icon && <div className="mh-ico"><Icon name={icon} size={20} /></div>}
-          <div style={{ flex: 1 }}>
-            <h2>{title}</h2>
+          <div className="modal-title-block">
+            <h2 id="modal-title">{title}</h2>
             {sub && <p>{sub}</p>}
           </div>
-          <button className="modal-close" onClick={onClose}><Icon name="x" size={16} /></button>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><Icon name="x" size={16} /></button>
         </div>
         <div className="modal-body">{children}</div>
         {foot && <div className="modal-foot">{foot}</div>}
@@ -96,9 +109,9 @@ export function Field({ label, hint, children }: FieldProps) {
 }
 
 /* ---------- Searchbox ---------- */
-export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+export function SearchBox({ value, onChange, placeholder, fullWidth }: { value: string; onChange: (v: string) => void; placeholder?: string; fullWidth?: boolean }) {
   return (
-    <div className="search-box">
+    <div className="search-box" style={fullWidth ? { maxWidth: "none" } : undefined}>
       <Icon name="search" size={16} />
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder || "Search…"} />
     </div>
@@ -143,18 +156,27 @@ export function Stepper({ stages, current }: { stages: string[]; current: number
 }
 
 /* ---------- Dropzone ---------- */
-interface DzFile { name: string; size: string }
-export function Dropzone({ files, setFiles, hint }: { files: DzFile[]; setFiles: React.Dispatch<React.SetStateAction<DzFile[]>>; hint?: string }) {
+export interface DropzoneFile {
+  file: File;
+  name: string;
+  sizeLabel: string;
+}
+
+export function Dropzone({ files, setFiles, hint }: { files: DropzoneFile[]; setFiles: React.Dispatch<React.SetStateAction<DropzoneFile[]>>; hint?: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const add = (list: FileList) => {
-    const arr = Array.from(list).map((f) => ({ name: f.name, size: (f.size / 1024).toFixed(0) + " KB" }));
-    setFiles((prev) => [...prev, ...arr]);
+    const next = Array.from(list).map((file) => ({
+      file,
+      name: file.name,
+      sizeLabel: (file.size / 1024).toFixed(0) + " KB",
+    }));
+    setFiles((prev) => [...prev, ...next]);
   };
   return (
     <div>
       <div
         className={"dropzone" + (files.length ? " has" : "")}
-        onClick={() => inputRef.current && inputRef.current.click()}
+        onClick={() => inputRef.current?.click()}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); add(e.dataTransfer.files); }}
       >
@@ -169,8 +191,8 @@ export function Dropzone({ files, setFiles, hint }: { files: DzFile[]; setFiles:
             <div className="dz-file" key={i}>
               <Icon name="fileCheck" size={16} className="dzf-ico" />
               <span className="dzf-name">{f.name}</span>
-              <span className="dzf-size">{f.size}</span>
-              <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}>
+              <span className="dzf-size">{f.sizeLabel}</span>
+              <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); setFiles((prev) => prev.filter((_, j) => j !== i)); }}>
                 <Icon name="x" size={13} />
               </button>
             </div>
@@ -208,15 +230,39 @@ export function Readiness({ value }: { value: string }) {
 }
 
 /* ---------- Pagination ---------- */
-export function Pagination({ total, shown }: { total: number; shown: number }) {
+export function Pagination({ total, shown, page, pages, onPageChange, compact = false }: {
+  total: number;
+  shown: number;
+  page?: number;
+  pages?: number;
+  onPageChange?: (page: number) => void;
+  compact?: boolean;
+}) {
+  if (page === undefined || pages === undefined || !onPageChange) {
+    return (
+      <div className={"pagination" + (compact ? " pagination-compact" : "")}>
+        <span className="tb-meta pagination-meta" style={{ marginRight: "auto" }}>Showing 1–{shown} of {total}</span>
+        <button type="button" className="pg-btn" aria-label="Previous page"><Icon name="chevLeft" size={14} /></button>
+        <button className="pg-btn active">1</button>
+        <button className="pg-btn">2</button>
+        <button className="pg-btn">3</button>
+        <button type="button" className="pg-btn" aria-label="Next page"><Icon name="chevRight" size={14} /></button>
+      </div>
+    );
+  }
+
+  const nums: number[] = [];
+  const pageSpread = compact ? 1 : 2;
+  for (let p = Math.max(1, page - pageSpread); p <= Math.min(pages, page + pageSpread); p++) nums.push(p);
+
   return (
-    <div className="pagination">
-      <span className="tb-meta" style={{ marginRight: "auto" }}>Showing 1–{shown} of {total}</span>
-      <button className="pg-btn"><Icon name="chevLeft" size={14} /></button>
-      <button className="pg-btn active">1</button>
-      <button className="pg-btn">2</button>
-      <button className="pg-btn">3</button>
-      <button className="pg-btn"><Icon name="chevRight" size={14} /></button>
+    <div className={"pagination" + (compact ? " pagination-compact" : "")}>
+      <span className="tb-meta pagination-meta" style={{ marginRight: "auto" }}>Page {page} of {pages} · {shown} shown of {total}</span>
+      <button type="button" className="pg-btn" disabled={page <= 1} onClick={() => onPageChange(page - 1)} aria-label="Previous page"><Icon name="chevLeft" size={14} /></button>
+      {nums.map((n) => (
+        <button type="button" key={n} className={"pg-btn" + (n === page ? " active" : "")} onClick={() => onPageChange(n)} aria-current={n === page ? "page" : undefined}>{n}</button>
+      ))}
+      <button type="button" className="pg-btn" disabled={page >= pages} onClick={() => onPageChange(page + 1)} aria-label="Next page"><Icon name="chevRight" size={14} /></button>
     </div>
   );
 }
@@ -248,18 +294,142 @@ export function Empty({ icon, title, sub }: { icon?: string; title?: string; sub
   );
 }
 
+/* ---------- Mobile list / responsive tables ---------- */
+export interface MobileListMeta {
+  label: string;
+  value: ReactNode;
+}
+
+interface MobileListItemProps {
+  title: ReactNode;
+  sub?: ReactNode;
+  status?: ReactNode;
+  meta?: MobileListMeta[];
+  actions?: ReactNode;
+  onClick?: () => void;
+  chevron?: boolean;
+  className?: string;
+}
+
+export function MobileListItem({ title, sub, status, meta = [], actions, onClick, chevron, className = "" }: MobileListItemProps) {
+  const clickable = Boolean(onClick);
+  const content = (
+    <>
+      <div className="mobile-list-main">
+        <div className="mobile-list-title-block">
+          <div className="mobile-list-title">{title}</div>
+          {sub && <div className="mobile-list-sub">{sub}</div>}
+        </div>
+        {(status || chevron) && (
+          <div className="mobile-list-aside">
+            {status}
+            {chevron && <Icon name="chevRight" size={16} />}
+          </div>
+        )}
+      </div>
+      {meta.length > 0 && (
+        <dl className="mobile-list-meta">
+          {meta.map((item) => (
+            <div key={item.label} className="mobile-list-meta-row">
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {actions && <div className="mobile-list-actions">{actions}</div>}
+    </>
+  );
+
+  if (clickable) {
+    return (
+      <button type="button" className={"mobile-list-item clickable " + className} onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={"mobile-list-item " + className}>{content}</div>;
+}
+
+interface ResponsiveTableColumn<T> {
+  key: string;
+  header: ReactNode;
+  render: (row: T) => ReactNode;
+  mobileLabel?: string;
+  hideOnMobile?: boolean;
+}
+
+interface ResponsiveTableProps<T> {
+  rows: T[];
+  columns: ResponsiveTableColumn<T>[];
+  getKey: (row: T, index: number) => string | number;
+  onRowClick?: (row: T) => void;
+  renderMobile?: (row: T, index: number) => ReactNode;
+  empty?: ReactNode;
+  className?: string;
+}
+
+export function ResponsiveTable<T>({ rows, columns, getKey, onRowClick, renderMobile, empty, className = "" }: ResponsiveTableProps<T>) {
+  if (!rows.length && empty) return <>{empty}</>;
+
+  return (
+    <div className={"responsive-table " + className}>
+      <div className="tbl-wrap responsive-table-desktop">
+        <table className="tbl">
+          <thead>
+            <tr>
+              {columns.map((column) => <th key={column.key}>{column.header}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={getKey(row, index)} className={onRowClick ? "clickable" : ""} onClick={() => onRowClick?.(row)}>
+                {columns.map((column) => (
+                  <td key={column.key} data-label={typeof column.mobileLabel === "string" ? column.mobileLabel : typeof column.header === "string" ? column.header : undefined}>
+                    {column.render(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mobile-list responsive-table-mobile">
+        {rows.map((row, index) => (
+          <div key={getKey(row, index)}>
+            {renderMobile ? renderMobile(row, index) : (
+              <MobileListItem
+                title={columns[0]?.render(row)}
+                meta={columns.slice(1).filter((column) => !column.hideOnMobile).map((column) => ({
+                  label: column.mobileLabel || (typeof column.header === "string" ? column.header : column.key),
+                  value: column.render(row),
+                }))}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                chevron={Boolean(onRowClick)}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Toolbar ---------- */
-export function Toolbar({ children }: { children?: ReactNode }) {
-  return <div className="toolbar">{children}</div>;
+export function Toolbar({ children, className = "", compact = false }: { children?: ReactNode; className?: string; compact?: boolean }) {
+  return <div className={"toolbar" + (compact ? " toolbar-compact" : "") + (className ? " " + className : "")}>{children}</div>;
 }
 
 /* ---------- Page header ---------- */
-export function PageHead({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
+export function PageHead({ title, sub, actions, eyebrow, meta, className = "" }: { title: string; sub?: string; actions?: ReactNode; eyebrow?: ReactNode; meta?: ReactNode; className?: string }) {
   return (
-    <div className="page-head">
-      <div>
+    <div className={"page-head" + (className ? " " + className : "")}>
+      <div className="page-head-copy">
+        {eyebrow && <div className="page-eyebrow">{eyebrow}</div>}
         <h1 className="page-title">{title}</h1>
         {sub && <p className="page-sub">{sub}</p>}
+        {meta && <div className="page-head-meta">{meta}</div>}
       </div>
       {actions && <div className="page-head-actions">{actions}</div>}
     </div>

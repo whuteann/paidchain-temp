@@ -1,10 +1,9 @@
 /* PaidChain — Paper roll inventory */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
-import { STAFF } from "./data";
-import type { PaperRollEntry } from "./data";
-import { usePaperRolls } from "./paper-rolls-context";
+import { api, ApiError } from "@/lib/api";
+import type { PaperRollOut, PaperRollCreate, PaperRollDetails } from "@/lib/api";
 import { NavFn } from "./shell";
 
 const LOW = 100;
@@ -16,25 +15,37 @@ function TypeChip({ type }: { type: string }) {
 }
 
 /* =================== UPDATE STOCK MODAL =================== */
-function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e: PaperRollEntry) => void }) {
+function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e: PaperRollOut) => void }) {
   const [f, setF] = useState({
     direction: "in", subType: "Issued",
     quantity: "", reference: "", note: "",
     date: new Date().toISOString().slice(0, 10),
   });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const qty = parseInt(f.quantity);
   const valid = qty > 0;
 
-  function submit() {
-    const type: PaperRollEntry["type"] = f.direction === "in" ? "Received" : (f.subType as "Issued" | "Adjustment");
-    onSave({
-      id: "PR-" + String(Date.now()).slice(-5),
-      type, quantity: f.direction === "in" ? qty : -qty,
-      reference: f.reference.trim(), note: f.note.trim(),
-      date: f.date, createdBy: STAFF[0], isNew: true,
-    });
-    onClose();
+  async function submit() {
+    if (!valid) return;
+    const type = f.direction === "in" ? "Received" : (f.subType as "Issued" | "Adjustment");
+    const body: PaperRollCreate = {
+      type,
+      quantity: f.direction === "in" ? qty : -qty,
+      reference: f.reference.trim(),
+      note: f.note.trim() || undefined,
+      date: f.date,
+    };
+    setSaving(true); setErr(null);
+    try {
+      const entry = await api.paperRolls.create(body);
+      onSave(entry);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save entry");
+      setSaving(false);
+    }
   }
 
   return (
@@ -44,7 +55,9 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={!valid} onClick={submit}>Save Entry</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+          {saving ? "Saving…" : "Save Entry"}
+        </Btn>
       </>}
     >
       <Field label="Movement direction">
@@ -89,39 +102,52 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
       <Field label="Note">
         <input className="input" placeholder="Optional note" value={f.note} onChange={(e) => set("note", e.target.value)} />
       </Field>
+
+      {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
     </Modal>
   );
 }
 
 /* =================== MAIN =================== */
 export function PaperRolls({ nav: _ }: { nav: NavFn }) {
-  const { entries, addEntry } = usePaperRolls();
+  const [entries, setEntries] = useState<PaperRollOut[]>([]);
+  const [details, setDetails] = useState<PaperRollDetails | null>(null);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [showUpdate, setShowUpdate] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  // Compute running balances (chronological order)
+  useEffect(() => {
+    api.paperRolls.list()
+      .then(setEntries)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+    api.paperRolls.details().then(setDetails).catch(console.error);
+  }, []);
+
+  // Running balance in chronological order
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   const runningMap: Record<string, number> = {};
   let balance = 0;
   sorted.forEach((e) => { balance += e.quantity; runningMap[e.id] = balance; });
-  const currentStock = balance;
 
-  const totalReceived = entries.filter((e) => e.quantity > 0).reduce((a, e) => a + e.quantity, 0);
-  const totalIssued   = entries.filter((e) => e.quantity < 0).reduce((a, e) => a - e.quantity, 0);
+  const currentStock  = details?.current_stock ?? 0;
+  const totalReceived = details?.total_received ?? 0;
+  const totalIssued   = details?.total_issued ?? 0;
 
   // Display newest first
   const displayed = [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   const filtered = displayed.filter((e) => {
-    const hay = (e.id + " " + e.type + " " + e.reference + " " + e.note + " " + e.createdBy).toLowerCase();
+    const hay = (e.id + " " + e.type + " " + e.reference + " " + e.note + " " + e.created_by).toLowerCase();
     if (q && !hay.includes(q.toLowerCase())) return false;
     if (typeFilter !== "All" && e.type !== typeFilter) return false;
     return true;
   });
 
-  function handleSave(e: PaperRollEntry) {
-    addEntry(e);
+  function handleSave(e: PaperRollOut) {
+    setEntries((prev) => [e, ...prev]);
+    api.paperRolls.details().then(setDetails).catch(console.error);
     const sign = e.quantity > 0 ? "+" : "";
     setToast(sign + e.quantity + " rolls recorded");
     setTimeout(() => setToast(null), 2800);
@@ -195,7 +221,9 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
           </select>
           <span className="tb-meta">{filtered.length} entries</span>
         </Toolbar>
-        {filtered.length === 0 ? <Empty icon="receipt" title="No entries match" /> : (
+        {loading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : filtered.length === 0 ? <Empty icon="receipt" title="No entries match" /> : (
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
@@ -207,17 +235,14 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
                     <td className="td-mono td-mut">{e.date}</td>
                     <td><TypeChip type={e.type} /></td>
                     <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontWeight: 700, fontFamily: "var(--mono)", fontSize: 14, color: e.quantity > 0 ? "var(--green-700)" : "var(--bad)" }}>
-                          {e.quantity > 0 ? "+" : ""}{e.quantity}
-                        </span>
-                        {e.isNew && <Chip cls="chip-ok" sq>New</Chip>}
+                      <span style={{ fontWeight: 700, fontFamily: "var(--mono)", fontSize: 14, color: e.quantity > 0 ? "var(--green-700)" : "var(--bad)" }}>
+                        {e.quantity > 0 ? "+" : ""}{e.quantity}
                       </span>
                     </td>
                     <td className="td-mono td-mut">{runningMap[e.id] ?? "—"}</td>
                     <td className="td-mut">{e.reference || "—"}</td>
                     <td className="td-mut">{e.note || "—"}</td>
-                    <td className="td-mut">{e.createdBy}</td>
+                    <td className="td-mut">{e.created_by}</td>
                   </tr>
                 ))}
               </tbody>

@@ -1,12 +1,11 @@
 import { useRouter } from "next/router";
 import { Shell, useNav } from "@/components/shell";
-import { JobDetail } from "@/components/screen-jobs";
+import { ReferralDetail } from "@/components/screen-referrals";
 
-export default function JobDetailPage() {
+export default function ReferralDetailPage() {
   const router = useRouter();
   const nav = useNav();
   const { id } = router.query;
-
   if (!id) return null;
-  return <Shell><JobDetail id={id as string} nav={nav} /></Shell>;
+  return <Shell><ReferralDetail id={id as string} nav={nav} /></Shell>;
 }
