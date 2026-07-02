@@ -4,7 +4,7 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, SlaChip, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
 import { jobs, TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate } from "@/lib/api";
+import type { TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
 import { NavFn } from "./shell";
 
 /* =================== REGISTER DEVICE MODAL =================== */
@@ -15,13 +15,23 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
 }) {
   const [settings, setSettings] = useState<TermSettingOut[]>([]);
   const [storedSims, setStoredSims] = useState<SimCardOut[]>([]);
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [settingId, setSettingId] = useState(initialSettingId ?? "");
   const [serialNo, setSerialNo] = useState("");
+  const [bank, setBank] = useState(BANKS[0]);
   const [location, setLocation] = useState("KL Warehouse");
   const [selectedSimId, setSelectedSimId] = useState("");
   const [registering, setRegistering] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // TID step state
+  const [pendingTids, setPendingTids] = useState<TerminalTidCreate[]>([]);
+  const [tidTid, setTidTid] = useState("");
+  const [tidMid, setTidMid] = useState("");
+  const [tidBank, setTidBank] = useState("");
+  const [tidStatus, setTidStatus] = useState("Active");
+  const [tidEffDate, setTidEffDate] = useState("");
+  const [tidErr, setTidErr] = useState<string | null>(null);
 
   useEffect(() => {
     api.termSettings.list({ active: true }).then(setSettings).catch(console.error);
@@ -31,11 +41,28 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
   const setting = settings.find((s) => s.id === settingId);
   const selectedSim = storedSims.find((s) => s.id === selectedSimId);
 
+  function addTid() {
+    if (!tidTid.trim()) { setTidErr("TID is required"); return; }
+    setPendingTids((prev) => [...prev, {
+      tid: tidTid.trim(),
+      mid: tidMid.trim() || null,
+      bank: tidBank || null,
+      status: tidStatus,
+      effective_date: tidEffDate || null,
+    }]);
+    setTidTid(""); setTidMid(""); setTidBank(""); setTidStatus("Active"); setTidEffDate(""); setTidErr(null);
+  }
+
+  function removeTid(index: number) {
+    setPendingTids((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function register(linkSim: boolean) {
     if (!setting || !serialNo.trim()) return;
     setRegistering(true); setErr(null);
     const body: TerminalCreate = {
       serial_no: serialNo.trim(),
+      bank,
       brand: setting.brand, model: setting.model, location,
       rental_rate: setting.monthly_rental, rental_plan: "Monthly Rental",
       sim: linkSim && selectedSimId ? "4G + WiFi" : "WiFi only",
@@ -43,6 +70,9 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
     };
     try {
       const result = await api.terminals.create(body);
+      if (pendingTids.length > 0) {
+        await Promise.all(pendingTids.map((t) => api.terminals.createTid(terminalSerial(result), t)));
+      }
       if (linkSim && selectedSimId) {
         await api.simCards.update(selectedSimId, { terminal_serial: terminalSerial(result), status: "Active" });
       }
@@ -64,9 +94,16 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
           <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
           <Btn variant="primary" iconRight="chevRight" disabled={!settingId || !serialNo.trim()} onClick={() => setStep(2)}>Create Device</Btn>
         </>
-      ) : (
+      ) : step === 2 ? (
         <>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>
+          <div className="mf-spacer" />
+          <Btn variant="ghost" onClick={() => setStep(3)}>Skip — No TIDs</Btn>
+          <Btn variant="primary" iconRight="chevRight" onClick={() => setStep(3)}>Next</Btn>
+        </>
+      ) : (
+        <>
+          <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(2)}>Back</Btn>
           <div className="mf-spacer" />
           <Btn variant="ghost" disabled={registering} onClick={() => register(false)}>Skip — No SIM</Btn>
           <Btn variant="primary" icon="check" disabled={registering} onClick={() => register(true)}>
@@ -96,11 +133,18 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
               {setting.deposit > 0 && <Chip cls="chip-neutral">Deposit RM {setting.deposit}</Chip>}
             </div>
           )}
-          <Field label="Initial location">
-            <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
-              {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
-            </select>
-          </Field>
+          <div className="field-row">
+            <Field label="Bank">
+              <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
+                {BANKS.map((b) => <option key={b}>{b}</option>)}
+              </select>
+            </Field>
+            <Field label="Initial location">
+              <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
+                {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
+              </select>
+            </Field>
+          </div>
           <Field label="Serial number" hint="required">
             <input
               className="input"
@@ -109,6 +153,67 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
               onChange={(e) => setSerialNo(e.target.value)}
             />
           </Field>
+        </>
+      ) : step === 2 ? (
+        <>
+          <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 14 }}>
+            Optionally add one or more TID mappings for this device. You can also manage TIDs later from the device detail page.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 2 }}>
+              <Field label="TID" hint="required">
+                <input className="input" value={tidTid} onChange={(e) => setTidTid(e.target.value)} placeholder="e.g. 12345678" />
+              </Field>
+            </div>
+            <div style={{ flex: 2 }}>
+              <Field label="MID">
+                <input className="input" value={tidMid} onChange={(e) => setTidMid(e.target.value)} placeholder="Optional" />
+              </Field>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 2 }}>
+              <Field label="Bank">
+                <select className="input" value={tidBank} onChange={(e) => setTidBank(e.target.value)}>
+                  <option value="">— None —</option>
+                  {BANKS.map((b) => <option key={b}>{b}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div style={{ flex: 1 }}>
+              <Field label="Status">
+                <select className="input" value={tidStatus} onChange={(e) => setTidStatus(e.target.value)}>
+                  {["Active", "Inactive", "Terminated"].map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div style={{ flex: 2 }}>
+              <Field label="Effective date">
+                <input className="input" type="date" value={tidEffDate} onChange={(e) => setTidEffDate(e.target.value)} />
+              </Field>
+            </div>
+          </div>
+          {tidErr && <div style={{ fontSize: 12.5, color: "var(--bad)", marginBottom: 6 }}>{tidErr}</div>}
+          <Btn variant="ghost" sm icon="plus" onClick={addTid} style={{ marginBottom: 16 }}>Add TID</Btn>
+          {pendingTids.length === 0 && (
+            <div style={{ padding: "10px 12px", marginBottom: 8, borderRadius: 6, border: "1px dashed var(--line)", fontSize: 12, color: "var(--ink-3)", textAlign: "center" }}>
+              No TIDs added yet — fill in the fields above and click Add TID
+            </div>
+          )}
+          {pendingTids.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {pendingTids.map((t, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 8, fontSize: 13 }}>
+                  <span className="mono" style={{ fontWeight: 600, flex: 1 }}>{t.tid}</span>
+                  {t.mid && <span style={{ color: "var(--ink-2)" }}>{t.mid}</span>}
+                  {t.bank && <Chip cls="chip-neutral">{t.bank}</Chip>}
+                  <Chip cls={t.status === "Active" ? "chip-ok" : "chip-neutral"}>{t.status}</Chip>
+                  {t.effective_date && <span style={{ color: "var(--ink-3)", fontSize: 12 }}>{t.effective_date}</span>}
+                  <Btn variant="ghost" sm icon="x" onClick={() => removeTid(i)} style={{ color: "var(--bad)", padding: "2px 6px" }} />
+                </div>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -761,6 +866,107 @@ export function Terminals({
 }
 
 /* =================== DETAIL =================== */
+/* =================== TID MODAL =================== */
+function TidModal({ serial, existing, onClose, onSaved }: {
+  serial: string;
+  existing?: TerminalTidOut;
+  onClose: () => void;
+  onSaved: (tid: TerminalTidOut) => void;
+}) {
+  const isEdit = !!existing;
+  const [tid, setTid] = useState(existing?.tid ?? "");
+  const [mid, setMid] = useState(existing?.mid ?? "");
+  const [bank, setBank] = useState(existing?.bank ?? "");
+  const [status, setStatus] = useState(existing?.status ?? "Active");
+  const [effectiveDate, setEffectiveDate] = useState(existing?.effective_date ?? "");
+  const [terminationDate, setTerminationDate] = useState(existing?.termination_date ?? "");
+  const [remarks, setRemarks] = useState(existing?.remarks ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!tid.trim()) { setErr("TID is required"); return; }
+    setSaving(true); setErr(null);
+    try {
+      let result: TerminalTidOut;
+      if (isEdit) {
+        const body: TerminalTidUpdate = {
+          tid: tid.trim(),
+          mid: mid.trim() || null,
+          bank: bank || null,
+          status,
+          effective_date: effectiveDate || null,
+          termination_date: terminationDate || null,
+          remarks: remarks.trim() || null,
+        };
+        result = await api.terminals.updateTid(existing!.id, body);
+      } else {
+        const body: TerminalTidCreate = {
+          tid: tid.trim(),
+          mid: mid.trim() || null,
+          bank: bank || null,
+          status,
+          effective_date: effectiveDate || null,
+          remarks: remarks.trim() || null,
+        };
+        result = await api.terminals.createTid(serial, body);
+      }
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save TID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={isEdit ? "Edit TID" : "Add TID"}
+      sub={serial}
+      icon="terminal"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !tid.trim()} onClick={save}>
+          {saving ? "Saving…" : isEdit ? "Save Changes" : "Add TID"}
+        </Btn>
+      </>}
+    >
+      <Field label="TID" hint="required">
+        <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="e.g. 12345678" />
+      </Field>
+      <Field label="MID">
+        <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="Merchant ID (optional)" />
+      </Field>
+      <Field label="Bank">
+        <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
+          <option value="">— None —</option>
+          {BANKS.map((b) => <option key={b}>{b}</option>)}
+        </select>
+      </Field>
+      <Field label="Status">
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          {["Active", "Inactive", "Terminated"].map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
+      <Field label="Effective date">
+        <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+      </Field>
+      {isEdit && (
+        <Field label="Termination date">
+          <input className="input" type="date" value={terminationDate} onChange={(e) => setTerminationDate(e.target.value)} />
+        </Field>
+      )}
+      <Field label="Remarks">
+        <input className="input" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional notes…" />
+      </Field>
+      {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
+    </Modal>
+  );
+}
+
 export function TerminalDetail({
   id,
   nav,
@@ -784,6 +990,12 @@ export function TerminalDetail({
   const [toast, setToast] = useState<string | null>(null);
   const linkedSim = linkedSimOverride === undefined ? initialLinkedSim : linkedSimOverride;
 
+  // TID state
+  const [tids, setTids] = useState<TerminalTidOut[]>([]);
+  const [tidsLoading, setTidsLoading] = useState(true);
+  const [showAddTid, setShowAddTid] = useState(false);
+  const [editingTid, setEditingTid] = useState<TerminalTidOut | null>(null);
+
   useEffect(() => {
     api.terminals.get(id)
       .then((t) => {
@@ -795,6 +1007,11 @@ export function TerminalDetail({
       })
       .catch(console.error)
       .finally(() => setDetailLoading(false));
+
+    api.terminals.listTids(id)
+      .then(setTids)
+      .catch(console.error)
+      .finally(() => setTidsLoading(false));
   }, [id]);
 
   if (detailLoading) return (
@@ -873,7 +1090,6 @@ export function TerminalDetail({
     }
   }
 
-  console.log("details: ", terminal);
 
   return (
     <div>
@@ -941,6 +1157,49 @@ export function TerminalDetail({
               </div>
             )}
           </Card>
+          {/* TID Mappings */}
+          <Card
+            title={"TID Mappings" + (tids.length ? ` (${tids.length})` : "")}
+            icon="terminal"
+            actions={<Btn variant="ghost" sm icon="plus" onClick={() => setShowAddTid(true)}>Add TID</Btn>}
+          >
+            {tidsLoading ? (
+              <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+            ) : tids.length === 0 ? (
+              <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>
+                No TIDs linked to this device.
+                <Btn variant="ghost" sm icon="plus" style={{ marginTop: 10, display: "flex" }} onClick={() => setShowAddTid(true)}>Add TID</Btn>
+              </div>
+            ) : (
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead>
+                    <tr>{["TID", "MID", "Bank", "Status", "Effective", "Termination", ""].map((h) => <th key={h}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {tids.map((t) => (
+                      <tr key={t.id}>
+                        <td className="td-mono td-strong">{t.tid}</td>
+                        <td className="td-mono">{t.mid || "—"}</td>
+                        <td>{t.bank || "—"}</td>
+                        <td>
+                          <Chip cls={t.status === "Active" ? "chip-ok" : t.status === "Terminated" ? "chip-bad" : "chip-neutral"} dot>
+                            {t.status}
+                          </Chip>
+                        </td>
+                        <td className="td-mut">{t.effective_date || "—"}</td>
+                        <td className="td-mut">{t.termination_date || "—"}</td>
+                        <td>
+                          <Btn variant="ghost" sm icon="edit" onClick={() => setEditingTid(t)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
           {/* <Card title="Photos & Inspection Forms" icon="image">
             <div className="card-pad">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
@@ -960,10 +1219,11 @@ export function TerminalDetail({
             <div className="card-pad">
               <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
                 <dt>Serial</dt><dd className="mono">{terminalSerial(terminal)}</dd>
-                <dt>TID</dt><dd className="mono">{terminal.tid || "—"}</dd>
+                {/* <dt>TID</dt><dd className="mono">{terminal.tid || "—"}</dd> */}
                 <dt>Brand</dt><dd>{terminal.brand}</dd>
                 <dt>Model</dt><dd>{terminal.model}</dd>
-                <dt>Connectivity</dt><dd>{terminal.sim}</dd>
+                <dt>Bank</dt><dd>{terminal.bank}</dd>
+                {/* <dt>Connectivity</dt><dd>{terminal.sim}</dd> */}
                 <dt>Location</dt><dd>{terminal.location}</dd>
                 <dt>Condition</dt><dd style={{ fontWeight: 400 }}>{terminal.condition_note}</dd>
               </dl>
@@ -1085,6 +1345,26 @@ export function TerminalDetail({
       )}
 
       {showSimModal && <SimLinkModal terminal={terminal} hasExisting={!!linkedSim} onClose={() => setShowSimModal(false)} onLink={handleLinkSim} />}
+
+      {showAddTid && (
+        <TidModal
+          serial={terminalSerial(terminal)}
+          onClose={() => setShowAddTid(false)}
+          onSaved={(t) => setTids((prev) => [...prev, t])}
+        />
+      )}
+
+      {editingTid && (
+        <TidModal
+          serial={terminalSerial(terminal)}
+          existing={editingTid}
+          onClose={() => setEditingTid(null)}
+          onSaved={(updated) => {
+            setTids((prev) => prev.map((t) => t.id === updated.id ? updated : t));
+            setEditingTid(null);
+          }}
+        />
+      )}
 
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>

@@ -323,29 +323,61 @@ export interface MerchantOut {
   email: string;
   address: string;
   onboarded: string;
-  mdr_plan: string;
   bank_account_name: string;
   bank_account_number: string;
   bank_account_type: string;
   customer_id: string;
   customer_name: string;
+  secondary_mid?: string | null;
+  mids?: MerchantMIDOut[] | null;
+  commercial_profile?: MerchantCommercialProfileOut | null;
+}
+
+export interface MerchantMIDOut {
+  id: string;
+  mid: string;
+  bank: string;
+  status: string;
+  is_primary: boolean;
+}
+
+export interface MerchantMIDIn {
+  mid: string;
+  bank: string;
+  status: string;
+  is_primary?: boolean | null;
+  remarks?: string | null;
+}
+
+
+export interface MerchantCommercialProfileIn {
+  rental_plan_id?: string | null;
+  rental_price?: number | null;
+  plan_period?: string | null;
+  mdr_plan?: string | null;
+  trial_start?: string | null;
+  trial_end?: string | null;
+  discount_type?: string | null;
+  discount_value?: number | null;
+  effective_date?: string | null;
 }
 
 export interface MerchantCreate {
+  customer_id: string;
   name: string;
   type: string;
-  mid: string;
   bank: string;
   contact: string;
   phone: string;
   email: string;
   address: string;
-  mdr_plan: string;
   bank_account_name: string;
   bank_account_number: string;
   bank_account_type: string;
-  customer_id: string;
-  finance?: string;
+  mid?: string | null;
+  secondary_mid?: string | null;
+  mids?: MerchantMIDIn[] | null;
+  commercial_profile?: MerchantCommercialProfileIn | null;
 }
 
 export interface MerchantListParams {
@@ -408,6 +440,20 @@ export interface MerchantJobOut {
   previous_terminal: { serial: string; brand: string; model: string } | null;
 }
 
+export interface MerchantCommercialProfileOut {
+  id: string;
+  merchant_id: string;
+  rental_plan_id: string | null;
+  rental_price: number | null;
+  plan_period: string | null;
+  mdr_plan: string | null;
+  trial_start: string | null;
+  trial_end: string | null;
+  discount_type: string | null;
+  discount_value: number | null;
+  effective_date: string | null;
+}
+
 export const merchants = {
   list: (p?: MerchantListParams) => req<MerchantPage>("GET", "/merchants", { params: p }),
   get: (id: string) => req<MerchantOut>("GET", `/merchants/${id}`),
@@ -419,6 +465,8 @@ export const merchants = {
   terminals: (merchantId: string) => req<MerchantTerminalOut[]>("GET", `/merchants/${merchantId}/terminals`),
   jobs: (merchantId: string, status?: string) =>
     req<MerchantJobOut[]>("GET", `/merchants/${merchantId}/jobs`, { params: { status } }),
+  updateCommercial: (merchantId: string, body: MerchantCommercialProfileIn) =>
+    req<MerchantCommercialProfileOut>("PATCH", `/merchants/${merchantId}/commercial`, { body }),
 };
 
 // ─── Terminal Settings ────────────────────────────────────────────────────────
@@ -464,6 +512,7 @@ export interface TerminalOut {
   serial?: string;
   brand: string;
   model: string;
+  bank: string;
   status: string;
   tid: string | null;
   merchant: { id: string; name: string } | null;
@@ -486,6 +535,7 @@ export interface TerminalCreate {
   brand: string;
   model: string;
   location: string;
+  bank: string;
   rental_rate: number;
   rental_plan: string;
   sim: string;
@@ -532,6 +582,41 @@ export interface TerminalBulkCreate {
   sim_type: string;
 }
 
+export interface TerminalTidOut {
+  id: string;
+  terminal_serial: string;
+  tid: string;
+  mid: string | null;
+  merchant_id: string | null;
+  bank: string | null;
+  status: string;
+  effective_date: string;
+  termination_date: string | null;
+  remarks: string | null;
+}
+
+export interface TerminalTidCreate {
+  tid: string;
+  mid?: string | null;
+  merchant_id?: string | null;
+  bank?: string | null;
+  status?: string;
+  effective_date?: string | null;
+  termination_date?: string | null;
+  remarks?: string | null;
+}
+
+export interface TerminalTidUpdate {
+  tid?: string;
+  mid?: string | null;
+  merchant_id?: string | null;
+  bank?: string | null;
+  status?: string;
+  effective_date?: string | null;
+  termination_date?: string | null;
+  remarks?: string | null;
+}
+
 export const terminals = {
   list: (p?: TerminalListParams) => req<TerminalPage>("GET", "/terminals", { params: p }),
   get: (serial: string) => req<TerminalOut>("GET", `/terminals/${serial}`),
@@ -543,6 +628,11 @@ export const terminals = {
   activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
   linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
   unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
+  createTid: (serial: string, body: TerminalTidCreate) =>
+    req<TerminalTidOut>("POST", `/terminals/${serial}/tids`, { body }),
+  listTids: (serial: string) => req<TerminalTidOut[]>("GET", `/terminals/${serial}/tids`),
+  updateTid: (tidId: string, body: TerminalTidUpdate) =>
+    req<TerminalTidOut>("PATCH", `/terminal-tids/${tidId}`, { body }),
 };
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -599,12 +689,25 @@ export interface JobOut {
   due_date: string;
   priority: string;
   escalated_to: string | null;
+  escalated_from_job_id: string | null;
+  original_type: string | null;
+  escalation_reason: string | null;
+  escalated_by_user_id: string | null;
+  escalated_at: string | null;
   notes: string;
   created_by_role: string;
   created_by_name: string;
   history: JobHistoryEntryOut[];
   notifications: JobNotificationOut[];
-  paper_roll_request: { quantity: number; payment_target: string } | null;
+  paper_roll_request: {
+    quantity: number;
+    payment_target: string;
+    invoice_party: string | null;
+    invoice_required: boolean | null;
+    invoice_status: string | null;
+    accounting_handling: string | null;
+    billing_reference: string | null;
+  } | null;
   sla_leg: JobSlaLeg | null;
   stage_sequence: string[];
   evidence_by_stage: Record<string, JobEvidenceOut[]>;
@@ -615,17 +718,22 @@ export interface JobCreate {
   customer_id: string;
   merchant_id: string;
   assignee: string;
-  priority: string;
+  priority?: string;
   due_date: string;
-  notes: string;
-  term_setting_id: string | null;
-  terminal_replace: string;
-  paper_roll_qty: number;
-  payment_target: string;
-  courier_required: boolean;
-  courier_status: string;
-  courier_name: string;
-  courier_tracking_no: string;
+  notes?: string | null;
+  term_setting_id?: string | null;
+  service_terminal_serial?: string | null;
+  paper_roll_qty?: number | null;
+  payment_target?: string | null;
+  invoice_party?: string | null;
+  invoice_required?: boolean | null;
+  invoice_status?: string | null;
+  accounting_handling?: string | null;
+  billing_reference?: string | null;
+  courier_required?: boolean;
+  courier_status?: string | null;
+  courier_name?: string | null;
+  courier_tracking_no?: string | null;
 }
 
 export interface JobUpdate {
@@ -642,6 +750,21 @@ export interface JobSlaTransition {
 }
 
 export type JobSlaMap = Record<string, JobSlaTransition[]>;
+
+export interface EscalateToReplacementBody {
+  term_setting_id: string;
+  due_date: string;
+  assignee?: string;
+  priority?: string;
+  service_terminal_serial?: string;
+  escalation_reason: string;
+  notes?: string;
+}
+
+export interface EscalateToReplacementResult {
+  repair_job: JobOut;
+  replacement_job: JobOut;
+}
 
 export interface JobListParams {
   page?: number;
@@ -690,6 +813,9 @@ export const jobs = {
 
   assignDevice: (id: string, serial_no: string) =>
     req<JobOut>("POST", `/jobs/${id}/device`, { body: { serial_no } }),
+
+  escalateToReplacement: (id: string, body: EscalateToReplacementBody) =>
+    req<EscalateToReplacementResult>("POST", `/jobs/${id}/escalate-to-replacement`, { body }),
 
   slaList: () => req<JobSlaMap>("GET", "/settings/sla"),
   slaUpdate: (job_type_slug: string, from_stage: string, to_stage: string, body: { warning_days?: number; breach_days?: number }) =>
@@ -784,10 +910,30 @@ export interface PaperRollDetails {
   total_issued: number;
 }
 
+export interface PaperRollBillingRow {
+  job_id: string;
+  stage: string;
+  merchant_id: string;
+  merchant_name: string;
+  bank: string;
+  quantity: number;
+  payment_target: string;
+  invoice_party: string;
+  invoice_required: boolean;
+  invoice_status: string;
+  accounting_handling: string;
+  billing_reference: string;
+  completed_at: string;
+}
+
 export const paperRolls = {
   list: (p?: PaperRollListParams) => req<PaperRollOut[]>("GET", "/paper-rolls", { params: p }),
   create: (body: PaperRollCreate) => req<PaperRollOut>("POST", "/paper-rolls/update", { body }),
   details: () => req<PaperRollDetails>("GET", "/paper-rolls/details"),
+  billingReport: (invoice_status?: string) =>
+    req<PaperRollBillingRow[]>("GET", "/paper-rolls/billing", { params: invoice_status ? { invoice_status } : undefined }),
+  exportBillingReport: (invoice_status?: string) =>
+    reqBlob("GET", "/paper-rolls/billing/export", { params: invoice_status ? { invoice_status } : undefined }),
 };
 
 // ─── Rentals ──────────────────────────────────────────────────────────────────
@@ -798,11 +944,17 @@ export interface RentalOut {
   merchant: { id: string; name: string; mid: string };
   terminal: { serial: string; brand: string; model: string; tid: string | null };
   plan: string;
+  rental_plan_id: string | null;
+  plan_period: string | null;
   monthly_rate: number;
   deposit: number;
   start_date: string;
   end_date: string | null;
   status: string;
+  trial_start: string | null;
+  trial_end: string | null;
+  discount_type: string | null;
+  discount_value: number | null;
   invoice_issued: string | null;
   einvoice_issued: string | null;
 }
@@ -849,6 +1001,13 @@ export interface PayoutException {
   message: string;
 }
 
+export interface PayoutCheck {
+  code: string;
+  severity: "info" | "error" | "warning";
+  passed: boolean;
+  message: string;
+}
+
 export interface PayoutOut {
   id: string;
   merchant: { id: string; name: string };
@@ -860,8 +1019,8 @@ export interface PayoutOut {
   txns: number;
   period: string;
   status: string;
-  exceptions: PayoutException[];
-  checks: string;
+  exceptions?: PayoutException[];
+  checks?: PayoutCheck[];
   einvoice: boolean;
   issued: string | null;
   payment_method: string;
@@ -976,6 +1135,8 @@ export interface ReferralOut {
   lead_type: string;
   merchant_name: string;
   business_reg_no?: string | null;
+  merchant_bank?: string | null;
+  referral_source_bank?: string | null;
   contact_name: string;
   phone: string;
   email: string;
@@ -1011,28 +1172,31 @@ export interface ReferralOut {
 }
 
 export interface ReferralCreate {
-  lead_type: string;
+  lead_type?: string;
   merchant_name: string;
   business_reg_no?: string | null;
-  contact_name: string;
-  phone: string;
-  email: string;
-  address: string;
+  merchant_bank?: string | null;
+  referral_source_bank?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
   notes?: string | null;
 }
 
 export interface ReferralUpdate {
-  lead_type?: string;
-  merchant_name?: string;
+  merchant_name?: string | null;
   business_reg_no?: string | null;
-  contact_name?: string;
-  phone?: string;
-  email?: string;
-  address?: string;
+  merchant_bank?: string | null;
+  referral_source_bank?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
   notes?: string | null;
-  is_bank_referred?: boolean;
-  is_existing_or_former_merchant?: boolean;
-  lead_status?: string;
+  is_bank_referred?: boolean | null;
+  is_existing_or_former_merchant?: boolean | null;
+  lead_status?: string | null;
 }
 
 export interface ReferralProcessingUpdate {
@@ -1105,8 +1269,18 @@ export interface ReferralBonusBatchPage {
   pages: number;
 }
 
+export interface ReferralBankReportRow {
+  bank: string;
+  total: number;
+  linked: number;
+  qualified: number;
+  paid: number;
+  reversed: number;
+}
+
 export const referrals = {
   list: (p?: ReferralListParams) => req<ReferralPage>("GET", "/referrals", { params: p }),
+  bankReport: () => req<ReferralBankReportRow[]>("GET", "/referrals/bank-report"),
   get: (id: string) => req<ReferralOut>("GET", `/referrals/${id}`),
   create: (body: ReferralCreate) => req<ReferralOut>("POST", "/referrals", { body }),
   update: (id: string, body: ReferralUpdate) => req<ReferralOut>("PATCH", `/referrals/${id}`, { body }),
@@ -1141,6 +1315,38 @@ export const referralBonusBatches = {
     form.append("payment_proof", payment_proof);
     return req<ReferralBonusBatchOut>("PATCH", `/referral-bonus-batches/${id}`, { form });
   },
+};
+
+export interface ReferralBonusRuleOut {
+  id: string;
+  name: string;
+  observation_days: number;
+  bonus_amount: number;
+  lead_generator_amount: number;
+  processor_amount: number;
+  min_txn_count: number;
+  min_txn_amount: number;
+  require_active_rental: boolean;
+  require_installed_terminal: boolean;
+  active: boolean;
+}
+
+export interface ReferralBonusRuleUpdate {
+  observation_days?: number | null;
+  bonus_amount?: number | null;
+  lead_generator_amount?: number | null;
+  processor_amount?: number | null;
+  min_txn_count?: number | null;
+  min_txn_amount?: number | null;
+  require_active_rental?: boolean | null;
+  require_installed_terminal?: boolean | null;
+  active?: boolean | null;
+}
+
+export const referralBonusRules = {
+  getActive: () => req<ReferralBonusRuleOut>("GET", "/referral-bonus-rules/active"),
+  updateActive: (body: ReferralBonusRuleUpdate) =>
+    req<ReferralBonusRuleOut>("PATCH", "/referral-bonus-rules/active", { body }),
 };
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -1288,6 +1494,43 @@ export const mdr = {
   update: (rate_id: string, body: MdrUpdate) => req<MdrOut>("PATCH", `/mdr/${rate_id}`, { body }),
 };
 
+// ─── Rental Plans ─────────────────────────────────────────────────────────────
+
+export interface RentalPlanOut {
+  id: string;
+  name: string;
+  plan_period: string;
+  monthly_rate: number;
+  deposit: number;
+  setup_fee: number;
+  active: boolean;
+}
+
+export interface RentalPlanCreate {
+  name: string;
+  plan_period?: string;
+  monthly_rate: number;
+  deposit?: number;
+  setup_fee?: number;
+  active?: boolean;
+}
+
+export interface RentalPlanUpdate {
+  name?: string;
+  plan_period?: string;
+  monthly_rate?: number;
+  deposit?: number;
+  setup_fee?: number;
+  active?: boolean;
+}
+
+export const rentalPlans = {
+  list: (params?: { active?: boolean }) => req<RentalPlanOut[]>("GET", "/settings/rental-plans", { params }),
+  create: (body: RentalPlanCreate) => req<RentalPlanOut>("POST", "/settings/rental-plans", { body }),
+  update: (plan_id: string, body: RentalPlanUpdate) => req<RentalPlanOut>("PATCH", `/settings/rental-plans/${plan_id}`, { body }),
+  deactivate: (plan_id: string) => req<RentalPlanOut>("DELETE", `/settings/rental-plans/${plan_id}`),
+};
+
 // ─── Unified export ───────────────────────────────────────────────────────────
 
 export const api = {
@@ -1304,8 +1547,10 @@ export const api = {
   payouts,
   referrals,
   referralBonusBatches,
+  referralBonusRules,
   users,
   roles,
   auditLogs,
   mdr,
+  rentalPlans,
 };

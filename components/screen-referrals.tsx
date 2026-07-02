@@ -9,6 +9,7 @@ import type {
   ReferralBonusBatchOut,
   ReferralBonusLineOut,
   ReferralOut,
+  ReferralUpdate,
   UserOut,
 } from "@/lib/api";
 import { NavFn } from "./shell";
@@ -196,6 +197,8 @@ function CreateReferralModal({ onClose, onCreate }: { onClose: () => void; onCre
     lead_type: "Merchant",
     merchant_name: "",
     business_reg_no: "",
+    merchant_bank: "",
+    referral_source_bank: "",
     contact_name: "",
     phone: "",
     email: "",
@@ -205,7 +208,7 @@ function CreateReferralModal({ onClose, onCreate }: { onClose: () => void; onCre
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = f.merchant_name.trim() && f.contact_name.trim() && f.phone.trim();
+  const valid = f.merchant_name.trim();
 
   async function submit() {
     if (!valid) return;
@@ -215,10 +218,12 @@ function CreateReferralModal({ onClose, onCreate }: { onClose: () => void; onCre
         lead_type: f.lead_type,
         merchant_name: f.merchant_name.trim(),
         business_reg_no: f.business_reg_no.trim() || null,
-        contact_name: f.contact_name.trim(),
-        phone: f.phone.trim(),
-        email: f.email.trim(),
-        address: f.address.trim(),
+        merchant_bank: f.merchant_bank.trim() || null,
+        referral_source_bank: f.referral_source_bank.trim() || null,
+        contact_name: f.contact_name.trim() || null,
+        phone: f.phone.trim() || null,
+        email: f.email.trim() || null,
+        address: f.address.trim() || null,
         notes: f.notes.trim() || null,
       });
       onCreate(referral);
@@ -254,11 +259,19 @@ function CreateReferralModal({ onClose, onCreate }: { onClose: () => void; onCre
           <input className="input" value={f.business_reg_no} onChange={(e) => set("business_reg_no", e.target.value)} />
         </Field>
       </div>
-      <Field label="Contact name" hint="required">
+      <div className="field-row">
+        <Field label="Merchant bank">
+          <input className="input" value={f.merchant_bank} onChange={(e) => set("merchant_bank", e.target.value)} />
+        </Field>
+        <Field label="Referral source bank">
+          <input className="input" value={f.referral_source_bank} onChange={(e) => set("referral_source_bank", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Contact name">
         <input className="input" value={f.contact_name} onChange={(e) => set("contact_name", e.target.value)} />
       </Field>
       <div className="field-row">
-        <Field label="Phone" hint="required">
+        <Field label="Phone">
           <input className="input" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
         </Field>
         <Field label="Email">
@@ -590,6 +603,135 @@ function CancelReferralModal({ referral, onClose, onSaved }: { referral: Referra
   );
 }
 
+function EditLeadInfoModal({ referral, onClose, onSaved }: { referral: ReferralOut; onClose: () => void; onSaved: (r: ReferralOut) => void }) {
+  const [f, setF] = useState<ReferralUpdate>({
+    merchant_name: referral.merchant_name,
+    business_reg_no: referral.business_reg_no ?? "",
+    merchant_bank: referral.merchant_bank ?? "",
+    referral_source_bank: referral.referral_source_bank ?? "",
+    contact_name: referral.contact_name,
+    phone: referral.phone,
+    email: referral.email,
+    address: referral.address,
+    notes: referral.notes ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof ReferralUpdate, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const valid = String(f.merchant_name ?? "").trim() && String(f.contact_name ?? "").trim();
+
+  async function submit() {
+    if (!valid) return;
+    setSaving(true); setErr(null);
+    try {
+      const next = await api.referrals.update(referral.id, {
+        merchant_name: String(f.merchant_name ?? "").trim(),
+        business_reg_no: String(f.business_reg_no ?? "").trim() || null,
+        merchant_bank: String(f.merchant_bank ?? "").trim() || null,
+        referral_source_bank: String(f.referral_source_bank ?? "").trim() || null,
+        contact_name: String(f.contact_name ?? "").trim(),
+        phone: String(f.phone ?? "").trim(),
+        email: String(f.email ?? "").trim(),
+        address: String(f.address ?? "").trim(),
+        notes: String(f.notes ?? "").trim() || null,
+      });
+      onSaved(next);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to update lead info");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Edit Lead Information"
+      sub={referral.merchant_name}
+      icon="building"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>{saving ? "Saving..." : "Save"}</Btn>
+      </>}
+    >
+      <div className="field-row">
+        <Field label="Merchant name" hint="required">
+          <input className="input" value={String(f.merchant_name ?? "")} onChange={(e) => set("merchant_name", e.target.value)} />
+        </Field>
+        <Field label="Business reg no.">
+          <input className="input" value={String(f.business_reg_no ?? "")} onChange={(e) => set("business_reg_no", e.target.value)} />
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Merchant bank">
+          <input className="input" value={String(f.merchant_bank ?? "")} onChange={(e) => set("merchant_bank", e.target.value)} />
+        </Field>
+        <Field label="Referral source bank">
+          <input className="input" value={String(f.referral_source_bank ?? "")} onChange={(e) => set("referral_source_bank", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Contact name" hint="required">
+        <input className="input" value={String(f.contact_name ?? "")} onChange={(e) => set("contact_name", e.target.value)} />
+      </Field>
+      <div className="field-row">
+        <Field label="Phone">
+          <input className="input" value={String(f.phone ?? "")} onChange={(e) => set("phone", e.target.value)} />
+        </Field>
+        <Field label="Email">
+          <input className="input" type="email" value={String(f.email ?? "")} onChange={(e) => set("email", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Address">
+        <input className="input" value={String(f.address ?? "")} onChange={(e) => set("address", e.target.value)} />
+      </Field>
+      <Field label="Notes">
+        <textarea className="textarea" value={String(f.notes ?? "")} onChange={(e) => set("notes", e.target.value)} />
+      </Field>
+      <ErrorText message={err} />
+    </Modal>
+  );
+}
+
+function EditLeadProgressModal({ referral, onClose, onSaved }: { referral: ReferralOut; onClose: () => void; onSaved: (r: ReferralOut) => void }) {
+  const [leadStatus, setLeadStatus] = useState(referral.lead_status || "New");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      const next = await api.referrals.update(referral.id, { lead_status: leadStatus });
+      onSaved(next);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to update lead progress");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Edit Lead Progress"
+      sub={referral.merchant_name}
+      icon="activity"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving} onClick={submit}>{saving ? "Saving..." : "Save"}</Btn>
+      </>}
+    >
+      <Field label="Lead progress">
+        <select className="input" value={leadStatus} onChange={(e) => setLeadStatus(e.target.value)}>
+          {LEAD_STATUSES.filter((s) => s !== "All").map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
+      <ErrorText message={err} />
+    </Modal>
+  );
+}
+
 function UploadAttachmentModal({ referral, onClose, onUploaded }: { referral: ReferralOut; onClose: () => void; onUploaded: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -849,7 +991,7 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [referral, setReferral] = useState<ReferralOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [modal, setModal] = useState<null | "review" | "assign" | "processing" | "link" | "confirm" | "cancel" | "upload">(null);
+  const [modal, setModal] = useState<null | "review" | "assign" | "processing" | "link" | "confirm" | "cancel" | "upload" | "edit-lead" | "edit-progress">(null);
   const [toast, flash] = useToast();
 
   const load = useCallback(() => {
@@ -925,11 +1067,13 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       <div className="detail-grid">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card title="Lead Information" icon="building">
+          <Card title="Lead Information" icon="building" actions={<Btn sm variant="ghost" icon="edit" onClick={() => setModal("edit-lead")}>Edit</Btn>}>
             <div className="card-pad">
               <dl className="kv">
                 <dt>Merchant name</dt><dd>{referral.merchant_name}</dd>
                 <dt>Business reg no.</dt><dd>{fieldValue(referral.business_reg_no)}</dd>
+                <dt>Merchant bank</dt><dd>{fieldValue(referral.merchant_bank)}</dd>
+                <dt>Referral source bank</dt><dd>{fieldValue(referral.referral_source_bank)}</dd>
                 <dt>Contact</dt><dd>{referral.contact_name}</dd>
                 <dt>Phone</dt><dd>{referral.phone}</dd>
                 <dt>Email</dt><dd>{fieldValue(referral.email)}</dd>
@@ -939,7 +1083,7 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          <Card title="Processing Progress" icon="activity" actions={<Btn sm variant="ghost" icon="edit" onClick={() => setModal("processing")}>Update</Btn>}>
+          <Card title="Processing Progress" icon="activity" actions={<Btn sm variant="ghost" icon="edit" onClick={() => setModal("edit-progress")}>Edit</Btn>}>
             <div className="card-pad">
               <dl className="kv">
                 <dt>Lead progress</dt><dd>{statusChip(referral.lead_status, "lead")}</dd>
@@ -1053,6 +1197,8 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </div>
 
+      {modal === "edit-lead" && <EditLeadInfoModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "edit-progress" && <EditLeadProgressModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
       {modal === "review" && <ValidateReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
       {modal === "assign" && <AssignProcessorModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
       {modal === "processing" && <ProcessingModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
