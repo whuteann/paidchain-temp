@@ -2,9 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";
-import { CUSTOMER_TYPES, CUSTOMER_STATUS, BANKS } from "./data";
-import type { Merchant } from "./data";
-import { useMerchants } from "./merchants-context";
+import { CUSTOMER_TYPES, CUSTOMER_STATUS } from "./data";
 import { CreateMerchantModal } from "./screen-merchants";
 import { api, ApiError } from "@/lib/api";
 import type { CustomerOut, CustomerCreate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
@@ -89,135 +87,33 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
 }
 
 /* =================== ONBOARDING FLOW MODAL =================== */
-function CustomerOnboardingModal({ customer, onFinish }: { customer: CustomerOut; onFinish: (merchant?: Merchant) => void }) {
-  const MDR_PLANS = ["Standard Retail", "F&B Preferred", "Enterprise", "SME Flat"];
-  const MERCHANT_TYPES = ["F&B", "Retail", "Healthcare", "Grocery", "Electronics", "Automotive", "Services", "Fitness", "Fuel", "Entertainment", "Furniture"];
-
-  const [step, setStep] = useState<"prompt" | "merchant">("prompt");
-  const [mForm, setMForm] = useState({
-    name: "", type: MERCHANT_TYPES[0], bank: BANKS[0], mdrPlan: MDR_PLANS[0],
-    contact: customer.contact, phone: customer.phone, email: "", address: customer.address,
-  });
-  const setM = (k: string, v: string) => setMForm((f) => ({ ...f, [k]: v }));
-
-  function buildMerchant(): Merchant {
-    const idx = Date.now();
-    return {
-      id: "M" + String(idx).slice(-4),
-      name: mForm.name.trim(), type: mForm.type,
-      mid: "MID" + String(idx).slice(-8),
-      bank: mForm.bank, status: "Onboarding", finance: "Pending Docs",
-      terminals: 0, openJobs: 0,
-      contact: mForm.contact, phone: mForm.phone, email: mForm.email, address: mForm.address,
-      onboarded: new Date().toISOString().slice(0, 10), mdrPlan: mForm.mdrPlan,
-      bankAccountName: mForm.name.trim(), bankAccountNumber: "", bankAccountType: "Current",
-      customerId: customer.id, customerName: customer.name,
-      isNew: true,
-    };
-  }
-
-  const merchantValid = mForm.name.trim() && mForm.contact.trim();
-  const stepIdx = step === "prompt" ? 0 : 1;
-  const stepLabels = ["Customer", "Merchant"];
-
+function CustomerOnboardingModal({ customer, onSkip, onCreateMerchant }: {
+  customer: CustomerOut;
+  onSkip: () => void;
+  onCreateMerchant: () => void;
+}) {
   return (
     <Modal
       title="Customer Onboarding"
-      sub={step === "prompt" ? "Customer created — set up their merchant account" : "Create the first merchant location"}
-      icon="building" size="wide"
+      sub="Customer created — set up their merchant account"
+      icon="building"
       foot={
-        step === "prompt" ? (
-          <>
-            <div className="mf-spacer" />
-            <Btn variant="ghost" onClick={() => onFinish()}>Skip for now</Btn>
-            <Btn variant="primary" iconRight="chevRight" onClick={() => setStep("merchant")}>Create First Merchant</Btn>
-          </>
-        ) : (
-          <>
-            <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep("prompt")}>Back</Btn>
-            <div className="mf-spacer" />
-            <Btn variant="ghost" onClick={() => onFinish()}>Skip</Btn>
-            <Btn variant="primary" icon="check" disabled={!merchantValid} onClick={() => onFinish(buildMerchant())}>Create Merchant</Btn>
-          </>
-        )
+        <>
+          <div className="mf-spacer" />
+          <Btn variant="ghost" onClick={onSkip}>Skip for now</Btn>
+          <Btn variant="primary" iconRight="chevRight" onClick={onCreateMerchant}>Create First Merchant</Btn>
+        </>
       }
     >
-      {/* Step indicator */}
-      <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 24 }}>
-        {stepLabels.map((label, i) => {
-          const done = i < stepIdx; const active = i === stepIdx;
-          return (
-            <div key={label} style={{ display: "flex", alignItems: "center", flex: i < stepLabels.length - 1 ? 1 : undefined }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: done ? "var(--green-700)" : active ? "var(--slate)" : "var(--bg-2, #f0f0f0)", color: done || active ? "#fff" : "var(--ink-3)", fontSize: 12, fontWeight: 700 }}>
-                  {done ? <Icon name="check" size={14} /> : i + 1}
-                </div>
-                <span style={{ fontSize: 11, fontWeight: active ? 600 : 400, color: active ? "var(--ink-1)" : "var(--ink-3)", whiteSpace: "nowrap" }}>{label}</span>
-              </div>
-              {i < stepLabels.length - 1 && (
-                <div style={{ flex: 1, height: 2, background: done ? "var(--green-700)" : "var(--line)", margin: "0 8px", marginBottom: 18 }} />
-              )}
-            </div>
-          );
-        })}
+      <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+        <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--green-050)", color: "var(--green-700)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <Icon name="checkCircle" size={28} />
+        </div>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Customer Created!</div>
+        <div style={{ color: "var(--ink-2)", fontSize: 14, maxWidth: 400, margin: "0 auto" }}>
+          <strong>{customer.name}</strong> is ready. Would you like to set up their first merchant account?
+        </div>
       </div>
-
-      {step === "prompt" && (
-        <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--green-050)", color: "var(--green-700)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
-            <Icon name="checkCircle" size={28} />
-          </div>
-          <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Customer Created!</div>
-          <div style={{ color: "var(--ink-2)", fontSize: 14, maxWidth: 400, margin: "0 auto" }}>
-            <strong>{customer.name}</strong> is ready. Would you like to set up their first merchant account and link terminal devices?
-          </div>
-        </div>
-      )}
-
-      {step === "merchant" && (
-        <div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, marginBottom: 16, fontSize: 12.5, color: "var(--ink-2)" }}>
-            <Icon name="building" size={14} />
-            <span>Billing customer: <strong>{customer.name}</strong></span>
-          </div>
-          <div className="field-row">
-            <Field label="Merchant name" hint="required">
-              <input className="input" placeholder="e.g. Kopitiam Damansara" value={mForm.name} onChange={(e) => setM("name", e.target.value)} />
-            </Field>
-            <Field label="Business type">
-              <select className="input" value={mForm.type} onChange={(e) => setM("type", e.target.value)}>
-                {MERCHANT_TYPES.map((t) => <option key={t}>{t}</option>)}
-              </select>
-            </Field>
-          </div>
-          <div className="field-row">
-            <Field label="Bank">
-              <select className="input" value={mForm.bank} onChange={(e) => setM("bank", e.target.value)}>
-                {BANKS.map((b) => <option key={b}>{b}</option>)}
-              </select>
-            </Field>
-            <Field label="MDR plan">
-              <select className="input" value={mForm.mdrPlan} onChange={(e) => setM("mdrPlan", e.target.value)}>
-                {MDR_PLANS.map((p) => <option key={p}>{p}</option>)}
-              </select>
-            </Field>
-          </div>
-          <Field label="Contact person" hint="required">
-            <input className="input" placeholder="On-site contact" value={mForm.contact} onChange={(e) => setM("contact", e.target.value)} />
-          </Field>
-          <div className="field-row">
-            <Field label="Phone">
-              <input className="input" placeholder="+60 1X-XXX XXXX" value={mForm.phone} onChange={(e) => setM("phone", e.target.value)} />
-            </Field>
-            <Field label="Email">
-              <input className="input" type="email" placeholder="ops@merchant.com" value={mForm.email} onChange={(e) => setM("email", e.target.value)} />
-            </Field>
-          </div>
-          <Field label="Merchant address">
-            <input className="input" placeholder="Street, City" value={mForm.address} onChange={(e) => setM("address", e.target.value)} />
-          </Field>
-        </div>
-      )}
     </Modal>
   );
 }
@@ -229,7 +125,6 @@ export function Customers({ nav }: { nav: NavFn }) {
   const [customers, setCustomers] = useState<CustomerOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
-  const { addMerchant } = useMerchants();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
@@ -238,6 +133,7 @@ export function Customers({ nav }: { nav: NavFn }) {
   const [details, setDetails] = useState<CustomerDetails | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [onboardingCustomer, setOnboardingCustomer] = useState<CustomerOut | null>(null);
+  const [merchantOnboardingCustomer, setMerchantOnboardingCustomer] = useState<CustomerOut | null>(null);
 
   useEffect(() => {
     api.customers.details().then(setDetails).catch(console.error);
@@ -270,11 +166,16 @@ export function Customers({ nav }: { nav: NavFn }) {
     api.customers.details().then(setDetails).catch(console.error);
   }
 
-  function finishOnboarding(merchant?: Merchant) {
+  function finishOnboarding() {
     const cid = onboardingCustomer?.id;
     setOnboardingCustomer(null);
-    if (merchant) addMerchant(merchant);
     if (cid) nav("customer-detail", cid);
+  }
+
+  function startMerchantOnboarding() {
+    const c = onboardingCustomer;
+    setOnboardingCustomer(null);
+    setMerchantOnboardingCustomer(c);
   }
 
   return (
@@ -351,7 +252,29 @@ export function Customers({ nav }: { nav: NavFn }) {
       </Card>
 
       {showCreate && <CreateCustomerModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
-      {onboardingCustomer && <CustomerOnboardingModal customer={onboardingCustomer} onFinish={finishOnboarding} />}
+      {onboardingCustomer && (
+        <CustomerOnboardingModal
+          customer={onboardingCustomer}
+          onSkip={finishOnboarding}
+          onCreateMerchant={startMerchantOnboarding}
+        />
+      )}
+      {merchantOnboardingCustomer && (
+        <CreateMerchantModal
+          customerId={merchantOnboardingCustomer.id}
+          customerName={merchantOnboardingCustomer.name}
+          onClose={() => {
+            const cid = merchantOnboardingCustomer.id;
+            setMerchantOnboardingCustomer(null);
+            nav("customer-detail", cid);
+          }}
+          onSave={(_m) => {
+            const cid = merchantOnboardingCustomer.id;
+            setMerchantOnboardingCustomer(null);
+            nav("customer-detail", cid);
+          }}
+        />
+      )}
     </div>
   );
 }

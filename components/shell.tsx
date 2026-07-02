@@ -6,7 +6,7 @@ import { Icon } from "./icons";
 import { logout, setDevMode } from "@/store/authSlice";
 import type { AppDispatch } from "@/store";
 
-export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "payouts" | "payout-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "settings" | "users" | "audit-logs";
+export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "payouts" | "payout-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs";
 export type NavFn = (to: Route, param?: string) => void;
 
 const NAV = [
@@ -25,10 +25,12 @@ const NAV = [
     { id: "paper-rolls", label: "Paper Rolls", icon: "receipt" },
   ]},
   { group: "Finance", items: [
-    { id: "rentals",     label: "Rentals",   icon: "calendar" },
-    // { id: "payouts",     label: "Payouts",   icon: "payouts" },
+    { id: "rentals",              label: "Rentals",             icon: "calendar" },
+    { id: "payouts",           label: "Payouts",             icon: "payouts" },
     { id: "referral-bonus-batches", label: "Referral Bonuses", icon: "cash" },
-    { id: "mdr",         label: "MDR Rates", icon: "percent" },
+    { id: "paper-roll-billing",  label: "PR Billing",          icon: "receipt" },
+    { id: "mdr",                 label: "MDR Rates",           icon: "percent" },
+    { id: "rental-plans",       label: "Rental Plans",        icon: "tag" },
   ]},
   { group: "Configuration", items: [
     { id: "settings",    label: "Settings",     icon: "tag" },
@@ -47,9 +49,11 @@ const NAV_PATHS: Record<string, string> = {
   jobs: "/jobs",
   rentals: "/rentals",
   "paper-rolls": "/paper-rolls",
+  "paper-roll-billing": "/paper-roll-billing",
   payouts: "/payouts",
   "referral-bonus-batches": "/referral-bonus-batches",
   mdr: "/mdr",
+  "rental-plans": "/rental-plans",
   settings: "/settings",
   users: "/users",
   "audit-logs": "/audit-logs",
@@ -64,9 +68,11 @@ function getActiveFromPath(pathname: string): string {
   if (pathname.startsWith("/jobs")) return "jobs";
   if (pathname.startsWith("/rentals")) return "rentals";
   if (pathname === "/paper-rolls") return "paper-rolls";
+  if (pathname === "/paper-roll-billing") return "paper-roll-billing";
   if (pathname.startsWith("/payouts")) return "payouts";
   if (pathname.startsWith("/referral-bonus-batches")) return "referral-bonus-batches";
   if (pathname === "/mdr") return "mdr";
+  if (pathname === "/rental-plans") return "rental-plans";
   if (pathname === "/settings") return "settings";
   if (pathname === "/users") return "users";
   if (pathname === "/audit-logs") return "audit-logs";
@@ -99,7 +105,9 @@ function getCrumbsFromPath(pathname: string): Crumb[] {
   if (pathname.startsWith("/payouts/"))    return [{ label: "Finance" }, { label: "Payouts", href: "/payouts" }, { label: "Detail" }];
   if (pathname === "/referral-bonus-batches")          return [{ label: "Finance" }, { label: "Referral Bonuses" }];
   if (pathname.startsWith("/referral-bonus-batches/")) return [{ label: "Finance" }, { label: "Referral Bonuses", href: "/referral-bonus-batches" }, { label: "Detail" }];
+  if (pathname === "/paper-roll-billing")  return [{ label: "Finance" }, { label: "PR Billing" }];
   if (pathname === "/mdr")                 return [{ label: "Finance" }, { label: "MDR Rates" }];
+  if (pathname === "/rental-plans")        return [{ label: "Finance" }, { label: "Rental Plans" }];
   // Configuration
   if (pathname === "/settings")            return [{ label: "Configuration" }, { label: "Settings" }];
   if (pathname === "/users")               return [{ label: "Configuration" }, { label: "Users & Roles" }];

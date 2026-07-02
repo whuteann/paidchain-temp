@@ -7,7 +7,7 @@ import type { DropzoneFile } from "./components";
 import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantTerminalOut, UserOut, JobEvidenceOut } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 
@@ -212,7 +212,12 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
     due: "",
     notes: "",
     paperRollQty: "50",
-    paymentTarget: "",
+    paymentTarget: "Merchant",
+    invoiceParty: "",
+    invoiceRequired: "",
+    invoiceStatus: "",
+    accountingHandling: "",
+    billingReference: "",
   });
 
   useEffect(() => {
@@ -279,13 +284,14 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       due_date: form.due,
       notes: form.notes || TYPE_META[type],
       term_setting_id: requiresTermSpec ? (selectedTermSetting?.id || null) : null,
-      terminal_replace: requiresMerchantDevice ? (selectedMerchantTerminal?.serial ?? "") : "",
-      paper_roll_qty: requiresPaperRollFields ? Number(form.paperRollQty) : 0,
-      payment_target: requiresPaperRollFields ? form.paymentTarget : "",
-      courier_required: false,
-      courier_status: "Not Required",
-      courier_name: "",
-      courier_tracking_no: "",
+      service_terminal_serial: requiresMerchantDevice ? (selectedMerchantTerminal?.serial ?? null) : null,
+      paper_roll_qty: requiresPaperRollFields ? Number(form.paperRollQty) : null,
+      payment_target: requiresPaperRollFields ? form.paymentTarget : null,
+      invoice_party: requiresPaperRollFields ? (form.invoiceParty || null) : null,
+      invoice_required: requiresPaperRollFields && form.invoiceRequired !== "" ? form.invoiceRequired === "Yes" : null,
+      invoice_status: requiresPaperRollFields ? (form.invoiceStatus || null) : null,
+      accounting_handling: requiresPaperRollFields ? (form.accountingHandling || null) : null,
+      billing_reference: requiresPaperRollFields ? (form.billingReference || null) : null,
     };
     try {
       const job = await api.jobs.create(body);
@@ -494,16 +500,41 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
           )}
 
           {type === "Paper Roll Request" && (
-            <div className="field-row">
-              <Field label="Paper roll quantity" hint="required">
-                <input className="input" type="number" min="1" value={form.paperRollQty} onChange={(e) => set("paperRollQty", e.target.value)} />
-              </Field>
-              <Field label="Pay by">
-                <select className="input" value={form.paymentTarget} onChange={(e) => set("paymentTarget", e.target.value)}>
-                  {["Merchant", "Bank"].map((opt) => <option key={opt}>{opt}</option>)}
-                </select>
-              </Field>
-            </div>
+            <>
+              <div className="field-row">
+                <Field label="Paper roll quantity" hint="required">
+                  <input className="input" type="number" min="1" value={form.paperRollQty} onChange={(e) => set("paperRollQty", e.target.value)} />
+                </Field>
+                <Field label="Pay by">
+                  <select className="input" value={form.paymentTarget} onChange={(e) => set("paymentTarget", e.target.value)}>
+                    {["Merchant", "Bank"].map((opt) => <option key={opt}>{opt}</option>)}
+                  </select>
+                </Field>
+                <Field label="Invoice required">
+                  <select className="input" value={form.invoiceRequired} onChange={(e) => set("invoiceRequired", e.target.value)}>
+                    <option value="">Not specified</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="field-row">
+                <Field label="Invoice party">
+                  <input className="input" placeholder="e.g. merchant name or bank…" value={form.invoiceParty} onChange={(e) => set("invoiceParty", e.target.value)} />
+                </Field>
+                <Field label="Invoice status">
+                  <input className="input" placeholder="e.g. Pending, Issued…" value={form.invoiceStatus} onChange={(e) => set("invoiceStatus", e.target.value)} />
+                </Field>
+              </div>
+              <div className="field-row">
+                <Field label="Accounting handling">
+                  <input className="input" placeholder="e.g. Billable, Internal…" value={form.accountingHandling} onChange={(e) => set("accountingHandling", e.target.value)} />
+                </Field>
+                <Field label="Billing reference">
+                  <input className="input" placeholder="PO number or reference…" value={form.billingReference} onChange={(e) => set("billingReference", e.target.value)} />
+                </Field>
+              </div>
+            </>
           )}
 
           <div className="field-row">
@@ -846,6 +877,128 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
   );
 }
 
+/* =================== ESCALATE TO REPLACEMENT MODAL =================== */
+function EscalateToReplacementModal({ job, onClose, onEscalate }: {
+  job: JobOut;
+  onClose: () => void;
+  onEscalate: (replacementJobId: string) => void;
+}) {
+  const [selectedTermSetting, setSelectedTermSetting] = useState<TermSettingOut | null>(null);
+  const [termSettingsList, setTermSettingsList] = useState<TermSettingOut[]>([]);
+  const [adminUsers, setAdminUsers] = useState<UserOut[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    due_date: "",
+    assignee: "",
+    priority: "Normal",
+    service_terminal_serial: job.terminal?.serial ?? "",
+    escalation_reason: "",
+    notes: "",
+  });
+
+  useEffect(() => {
+    api.termSettings.list({ active: true }).then(setTermSettingsList).catch(console.error);
+    api.users.list({ role: "Admin", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
+  }, []);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = !!(selectedTermSetting && form.due_date && form.escalation_reason.trim());
+
+  async function submit() {
+    if (!valid) return;
+    setSaving(true); setErr(null);
+    const body: EscalateToReplacementBody = {
+      term_setting_id: selectedTermSetting!.id,
+      due_date: form.due_date,
+      assignee: form.assignee || undefined,
+      priority: form.priority || undefined,
+      service_terminal_serial: form.service_terminal_serial || undefined,
+      escalation_reason: form.escalation_reason.trim(),
+      notes: form.notes || undefined,
+    };
+    try {
+      const result = await api.jobs.escalateToReplacement(job.id, body);
+      console.log("results: ", result);
+      onEscalate((result as any).id);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to escalate job");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Escalate to Replacement"
+      sub={job.id + " · " + job.type}
+      icon="swap"
+      size="wide"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="swap" disabled={!valid || saving} onClick={submit}>
+          {saving ? "Escalating…" : "Escalate to Replacement"}
+        </Btn>
+      </>}
+    >
+      <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "10px 12px", background: "var(--warn-bg)", borderRadius: 9, marginBottom: 18, fontSize: 12.5 }}>
+        <Icon name="activity" size={15} style={{ color: "var(--warn)" }} />
+        <span>A new Replacement job will be created and linked to this repair. This job will be marked as escalated.</span>
+      </div>
+
+      <EntitySearchSelect<TermSettingOut>
+        label="Replacement terminal model"
+        hint="required · warehouse assigns the actual unit"
+        placeholder="Search brand or model…"
+        value={selectedTermSetting}
+        onSelect={setSelectedTermSetting}
+        fetchResults={(query) => Promise.resolve(
+          termSettingsList.filter((t) => (t.brand + " " + t.model).toLowerCase().includes(query.toLowerCase()))
+        )}
+        getLabel={(t) => t.brand + " " + t.model}
+        renderOption={(t) => (
+          <div className="cell-2">
+            <span className="td-strong">{t.brand} {t.model}</span>
+            <span className="c2-sub">{t.category} · RM {t.monthly_rental}/mo</span>
+          </div>
+        )}
+      />
+
+      <div className="field-row">
+        <Field label="Assigned to">
+          <select className="input" value={form.assignee} onChange={(e) => set("assignee", e.target.value)}>
+            <option value="">Unassigned</option>
+            {adminUsers.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Priority">
+          <select className="input" value={form.priority} onChange={(e) => set("priority", e.target.value)}>
+            {["Low", "Normal", "High", "Urgent"].map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </Field>
+        <Field label="Due date" hint="required">
+          <input className="input" type="date" value={form.due_date} onChange={(e) => set("due_date", e.target.value)} />
+        </Field>
+      </div>
+
+      <Field label="Device to replace" hint="auto-filled from current job">
+        <input className="input" disabled value={form.service_terminal_serial} onChange={(e) => set("service_terminal_serial", e.target.value)} placeholder="Terminal serial number…" />
+      </Field>
+
+      <Field label="Escalation reason" hint="required">
+        <textarea className="textarea" placeholder="Why is this repair being escalated to a replacement?" value={form.escalation_reason} onChange={(e) => set("escalation_reason", e.target.value)} />
+      </Field>
+
+      <Field label="Additional notes">
+        <textarea className="textarea" placeholder="Any further instructions for the replacement job…" value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+      </Field>
+
+      {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
+    </Modal>
+  );
+}
+
 /* =================== JOB DETAIL =================== */
 
 export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
@@ -862,6 +1015,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showSwap, setShowSwap] = useState(false);
   const [showAssignDevice, setShowAssignDevice] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showEscalate, setShowEscalate] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -982,6 +1136,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     }
   }
 
+  console.log("job", job)
+
   return (
     <div>
       <div className="back-link" onClick={() => nav("jobs")}><Icon name="arrowLeft" size={16} /> Back to Jobs</div>
@@ -1001,6 +1157,9 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           </div>
         </div>
         <div className="page-head-actions">
+          {job.type === "Repair/Maintenance" && job.stage === "Pending" && !done && (
+            <Btn variant="ghost" icon="swap" onClick={() => setShowEscalate(true)}>Escalate to Replacement</Btn>
+          )}
           {def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
           <Btn variant="ghost" icon="edit">Edit</Btn>
         </div>
@@ -1159,9 +1318,15 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                 <dt>Assignee</dt><dd>{job.assignee}</dd>
                 <dt>Created</dt><dd className="mono">{formatDateTime(job.created_at)}</dd>
                 <dt>Due</dt><dd className="mono">{job.due_date}</dd>
-                {job.paper_roll_request && (
-                  <><dt>Paper rolls</dt><dd>{job.paper_roll_request.quantity} rolls · pay to {job.paper_roll_request.payment_target}</dd></>
-                )}
+                {job.escalation_reason && (<><dt>Escalation reason</dt><dd>{job.escalation_reason}</dd></>)}
+                {job.paper_roll_request && (<>
+                  <dt>Paper rolls</dt><dd>{job.paper_roll_request.quantity} rolls · pay to {job.paper_roll_request.payment_target}</dd>
+                  {job.paper_roll_request.invoice_party && (<><dt>Invoice party</dt><dd>{job.paper_roll_request.invoice_party}</dd></>)}
+                  {job.paper_roll_request.invoice_required !== null && (<><dt>Invoice req.</dt><dd>{job.paper_roll_request.invoice_required ? "Yes" : "No"}</dd></>)}
+                  {job.paper_roll_request.invoice_status && (<><dt>Invoice status</dt><dd>{job.paper_roll_request.invoice_status}</dd></>)}
+                  {job.paper_roll_request.accounting_handling && (<><dt>Accounting</dt><dd>{job.paper_roll_request.accounting_handling}</dd></>)}
+                  {job.paper_roll_request.billing_reference && (<><dt>Billing ref.</dt><dd className="mono">{job.paper_roll_request.billing_reference}</dd></>)}
+                </>)}
               </dl>
             </div>
           </Card>
@@ -1331,6 +1496,18 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           job={job}
           onClose={() => setShowAssignDevice(false)}
           onAssign={handleAssignDevice}
+        />
+      )}
+
+      {showEscalate && (
+        <EscalateToReplacementModal
+          job={job}
+          onClose={() => setShowEscalate(false)}
+          onEscalate={(replacementJobId) => {
+            setShowEscalate(false);
+            flash("Escalated — Replacement job " + replacementJobId + " created");
+            setTimeout(() => nav("job-detail", replacementJobId), 1200);
+          }}
         />
       )}
 

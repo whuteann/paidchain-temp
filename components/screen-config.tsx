@@ -4,23 +4,212 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pagination } from "./components";
 import { ROLES, PERMISSION_MODULES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate } from "@/lib/api";
+import type { UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
 
-/* =================== SETTINGS (SLA only) =================== */
+/* =================== SETTINGS =================== */
 export function TerminalSettings() {
+  const [tab, setTab] = useState<"sla" | "referral">("sla");
+
   return (
     <div>
-      <PageHead
-        title="Settings"
-        sub="Configure job SLA thresholds by workflow and stage transition"
-      />
-      <JobSlaSettings />
+      <PageHead title="Settings" />
+      <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--line)", paddingBottom: 0 }}>
+        {([["sla", "clock", "Job SLA"], ["referral", "star", "Referral Bonus"]] as const).map(([key, icon, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            style={{
+              padding: "8px 16px", fontSize: 13.5, fontWeight: tab === key ? 600 : 400,
+              color: tab === key ? "var(--slate)" : "var(--ink-2)",
+              background: "none", border: "none", cursor: "pointer",
+              borderBottom: tab === key ? "2px solid var(--slate)" : "2px solid transparent",
+              marginBottom: -1, display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            <Icon name={icon} size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "sla" && <JobSlaSettings />}
+      {tab === "referral" && <ReferralBonusSettings />}
     </div>
   );
 }
 
 function jobTypeSlug(jobType: string): string {
   return jobType.replace(/[ /]/g, "-");
+}
+
+/* =================== REFERRAL BONUS SETTINGS =================== */
+function ReferralBonusSettings() {
+  const [rule, setRule] = useState<ReferralBonusRuleOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ReferralBonusRuleUpdate>({});
+
+  useEffect(() => {
+    api.referralBonusRules.getActive()
+      .then((r) => { setRule(r); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  function showToast(msg: string, ms = 2000) {
+    setToast(msg);
+    setTimeout(() => setToast(null), ms);
+  }
+
+  function startEdit() {
+    if (!rule) return;
+    setDraft({
+      observation_days: rule.observation_days,
+      bonus_amount: rule.bonus_amount,
+      lead_generator_amount: rule.lead_generator_amount,
+      processor_amount: rule.processor_amount,
+      min_txn_count: rule.min_txn_count,
+      min_txn_amount: rule.min_txn_amount,
+      require_active_rental: rule.require_active_rental,
+      require_installed_terminal: rule.require_installed_terminal,
+      active: rule.active,
+    });
+    setEditing(true);
+  }
+
+  function cancelEdit() { setEditing(false); setDraft({}); }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const updated = await api.referralBonusRules.updateActive(draft);
+      setRule(updated);
+      setEditing(false);
+      setDraft({});
+      showToast("Referral bonus rules saved");
+    } catch {
+      showToast("Failed to save — check connection", 2500);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const setN = (k: keyof ReferralBonusRuleUpdate, v: string) =>
+    setDraft((d) => ({ ...d, [k]: Math.max(0, Number(v) || 0) }));
+  const setB = (k: keyof ReferralBonusRuleUpdate, v: boolean) =>
+    setDraft((d) => ({ ...d, [k]: v }));
+
+  function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+        <span style={{ fontSize: 13.5, color: "var(--ink-1)" }}>{label}</span>
+        <button
+          onClick={() => onChange(!checked)}
+          style={{
+            width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer",
+            background: checked ? "var(--slate)" : "var(--line)",
+            position: "relative", transition: "background 0.15s",
+          }}
+        >
+          <span style={{
+            position: "absolute", top: 3, left: checked ? 20 : 3,
+            width: 16, height: 16, borderRadius: "50%", background: "#fff",
+            transition: "left 0.15s",
+          }} />
+        </button>
+      </div>
+    );
+  }
+
+  if (loading) return <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>;
+  if (!rule) return <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>No active referral bonus rule found.</div>;
+
+  console.log(rule);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "relative" }}>
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "var(--slate)", color: "#fff", padding: "9px 20px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>
+          {toast}
+        </div>
+      )}
+
+      <Card
+        title={rule.name || "Active Referral Bonus Rule"}
+        icon="star"
+        actions={
+          editing ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn variant="ghost" sm onClick={cancelEdit}>Cancel</Btn>
+              <Btn variant="primary" sm icon="check" disabled={saving} onClick={save}>Save</Btn>
+            </div>
+          ) : (
+            <Btn variant="ghost" sm icon="edit" onClick={startEdit}>Edit</Btn>
+          )
+        }
+      >
+        <div className="card-pad">
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            {/* Numeric fields */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, paddingBottom: 16, borderBottom: "1px solid var(--line)", marginBottom: 4 }}>
+              <Field label="Observation Window (days)">
+                {editing
+                  ? <input className="input" type="number" min={0} value={draft.observation_days ?? ""} onChange={(e) => setN("observation_days", e.target.value)} />
+                  : <span className="mono">{rule.observation_days}</span>}
+              </Field>
+              <Field label="Min. Transaction Count">
+                {editing
+                  ? <input className="input" type="number" min={0} value={draft.min_txn_count ?? ""} onChange={(e) => setN("min_txn_count", e.target.value)} />
+                  : <span className="mono">{rule.min_txn_count}</span>}
+              </Field>
+              <Field label="Min. Transaction Amount (RM)">
+                {editing
+                  ? <input className="input" type="number" min={0} value={draft.min_txn_amount ?? ""} onChange={(e) => setN("min_txn_amount", e.target.value)} />
+                  : <span className="mono">RM {rule.min_txn_amount.toFixed(2)}</span>}
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, padding: "16px 0", borderBottom: "1px solid var(--line)", marginBottom: 4 }}>
+              <Field label="Total Bonus Amount (RM)">
+                {editing
+                  ? <input className="input" type="number" min={0} value={draft.bonus_amount ?? ""} onChange={(e) => setN("bonus_amount", e.target.value)} />
+                  : <span className="mono">RM {rule.bonus_amount.toFixed(2)}</span>}
+              </Field>
+              <Field label="Lead Generator Share (RM)">
+                {editing
+                  ? <input className="input" type="number" min={0} value={draft.lead_generator_amount ?? ""} onChange={(e) => setN("lead_generator_amount", e.target.value)} />
+                  : <span className="mono">RM {rule.lead_generator_amount.toFixed(2)}</span>}
+              </Field>
+              <Field label="Processor Share (RM)">
+                {editing
+                  ? <input className="input" type="number" min={0} value={draft.processor_amount ?? ""} onChange={(e) => setN("processor_amount", e.target.value)} />
+                  : <span className="mono">RM {rule.processor_amount.toFixed(2)}</span>}
+              </Field>
+            </div>
+            {/* Boolean toggles */}
+            <div style={{ paddingTop: 8 }}>
+              <Toggle
+                label="Require active terminal rental"
+                checked={editing ? (draft.require_active_rental ?? false) : rule.require_active_rental}
+                onChange={editing ? (v) => setB("require_active_rental", v) : () => {}}
+              />
+              <Toggle
+                label="Require installed terminal"
+                checked={editing ? (draft.require_installed_terminal ?? false) : rule.require_installed_terminal}
+                onChange={editing ? (v) => setB("require_installed_terminal", v) : () => {}}
+              />
+              <div style={{ paddingTop: 4 }}>
+                <Toggle
+                  label="Rule active"
+                  checked={editing ? (draft.active ?? false) : rule.active}
+                  onChange={editing ? (v) => setB("active", v) : () => {}}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
 }
 
 function JobSlaSettings() {
@@ -266,6 +455,210 @@ export function MDR() {
         )}
       </Card>
       {modal.open && <MdrModal rate={modal.rate} onClose={() => setModal({ open: false })} onSave={handleSave} />}
+    </div>
+  );
+}
+
+/* =================== RENTAL PLANS =================== */
+const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
+
+function RentalPlanModal({ plan, onClose, onSave }: { plan?: RentalPlanOut; onClose: () => void; onSave: (p: RentalPlanOut) => void }) {
+  const editing = !!plan;
+  const [f, setF] = useState({
+    name: plan?.name ?? "",
+    plan_period: plan?.plan_period ?? "Monthly",
+    monthly_rate: plan ? String(plan.monthly_rate) : "",
+    deposit: plan ? String(plan.deposit) : "0",
+    setup_fee: plan ? String(plan.setup_fee) : "0",
+    active: plan?.active ?? true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
+  const valid = f.name.trim() && parseFloat(f.monthly_rate) >= 0;
+
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      const body: RentalPlanCreate | RentalPlanUpdate = {
+        name: f.name.trim(),
+        plan_period: f.plan_period,
+        monthly_rate: parseFloat(f.monthly_rate),
+        deposit: parseFloat(f.deposit) || 0,
+        setup_fee: parseFloat(f.setup_fee) || 0,
+        active: f.active,
+      };
+      const result = editing
+        ? await api.rentalPlans.update(plan!.id, body as RentalPlanUpdate)
+        : await api.rentalPlans.create(body as RentalPlanCreate);
+      onSave(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Save failed");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit Rental Plan" : "New Rental Plan"} sub="Merchant rental pricing plan" icon="calendar"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+          {saving ? "Saving…" : editing ? "Save Changes" : "Create Plan"}
+        </Btn>
+      </>}
+    >
+      <Field label="Plan name" hint="required">
+        <input className="input" placeholder="e.g. Standard Monthly" value={f.name} onChange={(e) => set("name", e.target.value)} />
+      </Field>
+      <Field label="Billing period">
+        <select className="input" value={f.plan_period} onChange={(e) => set("plan_period", e.target.value)}>
+          {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </Field>
+      <div className="field-row">
+        <Field label="Monthly rate (RM)" hint="required">
+          <input className="input" type="number" min="0" step="0.01" placeholder="e.g. 80.00" value={f.monthly_rate} onChange={(e) => set("monthly_rate", e.target.value)} />
+        </Field>
+        <Field label="Deposit (RM)">
+          <input className="input" type="number" min="0" step="0.01" value={f.deposit} onChange={(e) => set("deposit", e.target.value)} />
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Setup fee (RM)">
+          <input className="input" type="number" min="0" step="0.01" value={f.setup_fee} onChange={(e) => set("setup_fee", e.target.value)} />
+        </Field>
+        <Field label="Status">
+          <select className="input" value={f.active ? "Active" : "Inactive"} onChange={(e) => set("active", e.target.value === "Active")}>
+            <option>Active</option>
+            <option>Inactive</option>
+          </select>
+        </Field>
+      </div>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+export function RentalPlans() {
+  const [plans, setPlans] = useState<RentalPlanOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
+  const [modal, setModal] = useState<{ open: boolean; plan?: RentalPlanOut }>({ open: false });
+  const [deactivating, setDeactivating] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.rentalPlans.list().then(setPlans).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const filtered = plans.filter((p) => {
+    if (filter === "active") return p.active;
+    if (filter === "inactive") return !p.active;
+    return true;
+  });
+
+  function handleSave(p: RentalPlanOut) {
+    setPlans((prev) => prev.some((x) => x.id === p.id) ? prev.map((x) => x.id === p.id ? p : x) : [p, ...prev]);
+    showToast(p.name + " saved");
+  }
+
+  async function handleDeactivate(p: RentalPlanOut) {
+    setDeactivating(p.id);
+    try {
+      const updated = await api.rentalPlans.deactivate(p.id);
+      setPlans((prev) => prev.map((x) => x.id === updated.id ? updated : x));
+      showToast(p.name + " deactivated");
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : "Failed to deactivate");
+    } finally {
+      setDeactivating(null);
+    }
+  }
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2600);
+  }
+
+  const activeCnt = plans.filter((p) => p.active).length;
+
+  return (
+    <div>
+      <PageHead
+        title="Rental Plans"
+        sub="Define pricing plans used for merchant terminal rentals"
+        actions={<Btn variant="primary" icon="plus" onClick={() => setModal({ open: true })}>New Plan</Btn>}
+      />
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        {[
+          { key: "all", label: `All (${plans.length})` },
+          { key: "active", label: `Active (${activeCnt})` },
+          { key: "inactive", label: `Inactive (${plans.length - activeCnt})` },
+        ].map(({ key, label }) => (
+          <Btn key={key} variant={filter === key ? "slate" : "ghost"} sm onClick={() => setFilter(key as typeof filter)}>
+            {label}
+          </Btn>
+        ))}
+      </div>
+
+      <Card>
+        {loading ? (
+          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "32px 20px", textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
+            No rental plans found.
+          </div>
+        ) : (
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>{["Plan Name", "Period", "Monthly Rate", "Deposit", "Setup Fee", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {filtered.map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 600 }}>{p.name}</td>
+                    <td className="td-mut">{p.plan_period}</td>
+                    <td><span style={{ fontWeight: 700, fontFamily: "var(--mono)" }}>RM {p.monthly_rate.toFixed(2)}</span></td>
+                    <td className="td-mut">RM {p.deposit.toFixed(2)}</td>
+                    <td className="td-mut">RM {p.setup_fee.toFixed(2)}</td>
+                    <td><Chip cls={p.active ? "chip-ok" : "chip-neutral"} dot>{p.active ? "Active" : "Inactive"}</Chip></td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="icon-btn" title="Edit" onClick={() => setModal({ open: true, plan: p })}>
+                          <Icon name="edit" size={14} />
+                        </button>
+                        {p.active && (
+                          <button
+                            className="icon-btn"
+                            title="Deactivate"
+                            disabled={deactivating === p.id}
+                            onClick={() => handleDeactivate(p)}
+                            style={{ color: "var(--bad)" }}
+                          >
+                            <Icon name="x" size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {modal.open && (
+        <RentalPlanModal plan={modal.plan} onClose={() => setModal({ open: false })} onSave={handleSave} />
+      )}
+
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
 }

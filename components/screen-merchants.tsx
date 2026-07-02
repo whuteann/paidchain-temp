@@ -4,7 +4,7 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { MerchantOut, MerchantCreate, MerchantTerminalOut, MerchantJobOut, MdrOut } from "@/lib/api";
+import type { MerchantOut, MerchantCreate, MerchantTerminalOut, MerchantJobOut, MdrOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
 
@@ -103,14 +103,13 @@ interface CreateMerchantModalProps {
 }
 
 export function CreateMerchantModal({ onClose, onSave, customerId, customerName, existingMerchant = null }: CreateMerchantModalProps) {
-  const MERCHANT_TYPES = ["F&B", "Retail", "Healthcare", "Grocery", "Electronics", "Automotive", "Services", "Fitness", "Fuel", "Entertainment", "Furniture"];
+  const MERCHANT_TYPES = ['Retail', 'Normal Retail', 'EV', 'F&B', 'Services', 'Other'];
   const ACCOUNT_TYPES = ["Current", "Savings"];
   const editing = Boolean(existingMerchant);
 
   const [f, setF] = useState({
     name: existingMerchant?.name ?? "",
     type: existingMerchant?.type ?? MERCHANT_TYPES[0],
-    mid: existingMerchant?.mid ?? "",
     bank: existingMerchant?.bank ?? BANKS[0],
     contact: existingMerchant?.contact ?? "",
     phone: existingMerchant?.phone ?? "",
@@ -120,158 +119,349 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     bankAccountNumber: existingMerchant?.bank_account_number ?? "",
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
+  const [mid, setMid] = useState(existingMerchant?.mid ?? "");
+  const [secondaryMid, setSecondaryMid] = useState(existingMerchant?.secondary_mid ?? "");
   const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
   const [selectedMdrRate, setSelectedMdrRate] = useState<MdrOut | null>(null);
   const [mdrLoading, setMdrLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = f.name.trim() && f.mid.trim() && f.contact.trim() && selectedMdrRate;
+  const valid = f.name.trim() && f.contact.trim();
+
+  // Commercial profile step (create-only)
+  const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
+  const DISCOUNT_TYPES = ["Percentage", "Fixed Amount"];
+  const [step, setStep] = useState<1 | 2>(1);
+  const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
+  const [rentalPlansLoading, setRentalPlansLoading] = useState(false);
+  const [commercial, setCommercial] = useState({
+    rental_plan_id: "",
+    rental_price: "",
+    plan_period: "Monthly",
+    trial_start: "",
+    trial_end: "",
+    discount_type: "",
+    discount_value: "",
+    effective_date: "",
+  });
+  const setC = (k: string, v: string) => setCommercial((p) => ({ ...p, [k]: v }));
+  const [linkingSaving, setLinkingSaving] = useState(false);
 
   useEffect(() => {
     api.mdr.list()
       .then((rates) => {
         setMdrRates(rates);
         if (!existingMerchant) return;
-        const matchedRate = rates.find((rate) =>
-          rate.id === existingMerchant.mdr_plan ||
-          rate.type === existingMerchant.mdr_plan
-        ) ?? null;
+        const mdrPlan = existingMerchant.commercial_profile?.mdr_plan;
+        const matchedRate = mdrPlan
+          ? rates.find((rate) => rate.id === mdrPlan || rate.type === mdrPlan) ?? null
+          : null;
         setSelectedMdrRate(matchedRate);
       })
       .catch(console.error)
       .finally(() => setMdrLoading(false));
   }, [existingMerchant]);
 
+  function buildBaseBody(): MerchantCreate {
+    return {
+      customer_id: customerId,
+      name: f.name.trim(),
+      type: f.type,
+      mid: mid.trim() || null,
+      secondary_mid: secondaryMid.trim() || null,
+      bank: f.bank,
+      contact: f.contact.trim(),
+      phone: f.phone.trim(),
+      email: f.email.trim(),
+      address: f.address.trim(),
+      bank_account_name: f.bankAccountName.trim() || f.name.trim(),
+      bank_account_number: f.bankAccountNumber.trim(),
+      bank_account_type: f.bankAccountType,
+    };
+  }
+
+  // Edit-only: save changes directly
   async function submit() {
-    if (!valid || !selectedMdrRate) return;
+    if (!valid || !existingMerchant) return;
     setSaving(true); setErr(null);
     try {
-      const body: MerchantCreate = {
-        customer_id: customerId,
-        name: f.name.trim(),
-        type: f.type,
-        mid: f.mid.trim(),
-        bank: f.bank,
-        mdr_plan: selectedMdrRate.id,
-        contact: f.contact.trim(),
-        phone: f.phone.trim(),
-        email: f.email.trim(),
-        address: f.address.trim(),
-        bank_account_name: f.bankAccountName.trim() || f.name.trim(),
-        bank_account_number: f.bankAccountNumber.trim(),
-        bank_account_type: f.bankAccountType,
-      };
-      const m = editing && existingMerchant
-        ? await api.merchants.update(existingMerchant.id, body)
-        : await api.merchants.create(body);
+      const m = await api.merchants.update(existingMerchant.id, buildBaseBody());
       onSave(m);
       onClose();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : `Failed to ${editing ? "update" : "create"} merchant`);
+      setErr(e instanceof ApiError ? e.message : "Failed to update merchant");
       setSaving(false);
     }
   }
 
+  // Create-only: advance to commercial step without API call
+  function goToCommercial() {
+    setRentalPlansLoading(true);
+    api.rentalPlans.list({ active: true })
+      .then(setRentalPlans)
+      .catch(console.error)
+      .finally(() => setRentalPlansLoading(false));
+    setStep(2);
+  }
+
+  // Auto-fill rental_price + plan_period when a rental plan is selected
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!commercial.rental_plan_id) return;
+    const plan = rentalPlans.find((p) => p.id === commercial.rental_plan_id);
+    if (plan) {
+      setCommercial((prev) => ({ ...prev, rental_price: String(plan.monthly_rate), plan_period: plan.plan_period }));
+    }
+  }, [commercial.rental_plan_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveCommercial() {
+    setLinkingSaving(true); setErr(null);
+    try {
+      const body: MerchantCreate = {
+        ...buildBaseBody(),
+        commercial_profile: {
+          mdr_plan: selectedMdrRate?.id ?? null,
+          rental_plan_id: commercial.rental_plan_id || null,
+          rental_price: commercial.rental_price ? parseFloat(commercial.rental_price) : null,
+          plan_period: commercial.plan_period || null,
+          trial_start: commercial.trial_start || null,
+          trial_end: commercial.trial_end || null,
+          discount_type: commercial.discount_type || null,
+          discount_value: commercial.discount_value ? parseFloat(commercial.discount_value) : null,
+          effective_date: commercial.effective_date || null,
+        },
+      };
+      const m = await api.merchants.create(body);
+      onSave(m);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to create merchant");
+      setLinkingSaving(false);
+    }
+  }
+
+  async function skipCommercial() {
+    setLinkingSaving(true); setErr(null);
+    try {
+      const m = await api.merchants.create(buildBaseBody());
+      onSave(m);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to create merchant");
+      setLinkingSaving(false);
+    }
+  }
+
+  const stepLabels = ["Merchant", "Commercial"];
+  const stepIdx = step - 1;
+
   return (
     <Modal
-      title={editing ? "Edit Merchant" : "Create Merchant"}
-      sub={editing ? "Update merchant profile, banking and contact details" : "Add a new merchant under an existing customer"}
+      title={step === 2 ? "Commercial Profile" : (editing ? "Edit Merchant" : "Create Merchant")}
+      sub={step === 2 ? f.name : (editing ? "Update merchant profile, banking and contact details" : "Add a new merchant under an existing customer")}
       icon="merchants"
       onClose={onClose}
-      foot={<>
-        <div className="mf-spacer" />
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
-          {saving ? (editing ? "Saving…" : "Creating…") : (editing ? "Save Changes" : "Create Merchant")}
-        </Btn>
-      </>}
-    >
-      <div className="field-row">
-        <Field label="Merchant name" hint="required">
-          <input className="input" placeholder="e.g. Kopitiam Heritage KL" value={f.name} onChange={(e) => set("name", e.target.value)} />
-        </Field>
-        <Field label="Business type">
-          <select className="input" value={f.type} onChange={(e) => set("type", e.target.value)}>
-            {MERCHANT_TYPES.map((t) => <option key={t}>{t}</option>)}
-          </select>
-        </Field>
-      </div>
-
-      <Field label="Customer (billing entity)">
-        <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-2)", cursor: "not-allowed" }}>
-          {customerName}
-        </div>
-      </Field>
-
-      <Field label="Merchant ID (MID)" hint="required">
-        <input className="input" placeholder="e.g. MID00012345" value={f.mid} onChange={(e) => set("mid", e.target.value)} />
-      </Field>
-
-      <div className="field-row">
-        <Field label="Bank">
-          <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
-            {BANKS.map((b) => <option key={b}>{b}</option>)}
-          </select>
-        </Field>
-        <EntitySearchSelect<MdrOut>
-          label="MDR plan"
-          hint="required"
-          placeholder="Search rate type, network, category…"
-          disabled={mdrLoading}
-          disabledHint="Loading MDR rates…"
-          value={selectedMdrRate}
-          onSelect={setSelectedMdrRate}
-          fetchResults={(query) => {
-            const needle = query.trim().toLowerCase();
-            const matches = needle
-              ? mdrRates.filter((rate) =>
-                  `${rate.type} ${rate.network} ${rate.category} ${rate.rate}`
-                    .toLowerCase()
-                    .includes(needle))
-              : mdrRates;
-            return Promise.resolve(matches.slice(0, 8));
-          }}
-          getLabel={(rate) => `${rate.type} · ${rate.rate}%`}
-          renderOption={(rate) => (
-            <div className="cell-2">
-              <span className="td-strong">{rate.type} · {rate.rate}%</span>
-              <span className="c2-sub">{rate.network} · {rate.category}</span>
-            </div>
+      foot={step === 2 ? (
+        <>
+          <div className="mf-spacer" />
+          <Btn variant="ghost" disabled={linkingSaving} onClick={skipCommercial}>Skip for now</Btn>
+          <Btn variant="primary" icon="check" disabled={linkingSaving} onClick={saveCommercial}>
+            {linkingSaving ? "Saving…" : "Save Commercial Profile"}
+          </Btn>
+        </>
+      ) : (
+        <>
+          <div className="mf-spacer" />
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+          {editing ? (
+            <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+              {saving ? "Saving…" : "Save Changes"}
+            </Btn>
+          ) : (
+            <Btn variant="primary" iconRight="chevRight" disabled={!valid} onClick={goToCommercial}>
+              Create Merchant
+            </Btn>
           )}
-        />
-      </div>
+        </>
+      )}
+    >
+      {/* Step indicator — create flow only */}
+      {!editing && (
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 24 }}>
+          {stepLabels.map((label, i) => {
+            const done = i < stepIdx; const active = i === stepIdx;
+            return (
+              <div key={label} style={{ display: "flex", alignItems: "center", flex: i < stepLabels.length - 1 ? 1 : undefined }}>
+                <div
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, cursor: done ? "pointer" : "default" }}
+                  onClick={done ? () => setStep((i + 1) as 1 | 2) : undefined}
+                >
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: done ? "var(--green-700)" : active ? "var(--slate)" : "var(--bg-2, #f0f0f0)", color: done || active ? "#fff" : "var(--ink-3)", fontSize: 12, fontWeight: 700 }}>
+                    {done ? <Icon name="check" size={14} /> : i + 1}
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: active ? 600 : 400, color: active ? "var(--ink-1)" : "var(--ink-3)", whiteSpace: "nowrap" }}>{label}</span>
+                </div>
+                {i < stepLabels.length - 1 && (
+                  <div style={{ flex: 1, height: 2, background: done ? "var(--green-700)" : "var(--line)", margin: "0 8px", marginBottom: 18 }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      <Field label="Contact person" hint="required">
-        <input className="input" placeholder="e.g. Ahmad bin Razak" value={f.contact} onChange={(e) => set("contact", e.target.value)} />
-      </Field>
-      <div className="field-row">
-        <Field label="Phone">
-          <input className="input" placeholder="+60 1X-XXX XXXX" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
-        </Field>
-        <Field label="Email">
-          <input className="input" type="email" placeholder="ops@merchant.com" value={f.email} onChange={(e) => set("email", e.target.value)} />
-        </Field>
-      </div>
-      <Field label="Address">
-        <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
-      </Field>
+      {/* ── Step 1: Merchant details ── */}
+      {step === 1 && (
+        <>
+          <div className="field-row">
+            <Field label="Merchant name" hint="required">
+              <input className="input" placeholder="e.g. Kopitiam Heritage KL" value={f.name} onChange={(e) => set("name", e.target.value)} />
+            </Field>
+            <Field label="Business type">
+              <select className="input" value={f.type} onChange={(e) => set("type", e.target.value)}>
+                {MERCHANT_TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </Field>
+          </div>
 
-      <div className="field-row">
-        <Field label="Bank account name">
-          <input className="input" placeholder="Defaults to merchant name" value={f.bankAccountName} onChange={(e) => set("bankAccountName", e.target.value)} />
-        </Field>
-        <Field label="Bank account number">
-          <input className="input" placeholder="e.g. 1234567890" value={f.bankAccountNumber} onChange={(e) => set("bankAccountNumber", e.target.value)} />
-        </Field>
-      </div>
-      <Field label="Bank account type">
-        <select className="input" value={f.bankAccountType} onChange={(e) => set("bankAccountType", e.target.value)}>
-          {ACCOUNT_TYPES.map((t) => <option key={t}>{t}</option>)}
-        </select>
-      </Field>
+          <Field label="Customer (billing entity)">
+            <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-2)", cursor: "not-allowed" }}>
+              {customerName}
+            </div>
+          </Field>
 
-      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+          <div className="field-row">
+            <Field label="MID (primary)">
+              <input className="input" placeholder="e.g. MID00012345" value={mid} onChange={(e) => setMid(e.target.value)} />
+            </Field>
+            <Field label="Secondary MID">
+              <input className="input" placeholder="Optional" value={secondaryMid} onChange={(e) => setSecondaryMid(e.target.value)} />
+            </Field>
+          </div>
+
+          <Field label="Bank">
+            <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
+              {BANKS.map((b) => <option key={b}>{b}</option>)}
+            </select>
+          </Field>
+
+          <Field label="Contact person" hint="required">
+            <input className="input" placeholder="e.g. Ahmad bin Razak" value={f.contact} onChange={(e) => set("contact", e.target.value)} />
+          </Field>
+          <div className="field-row">
+            <Field label="Phone">
+              <input className="input" placeholder="+60 1X-XXX XXXX" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
+            </Field>
+            <Field label="Email">
+              <input className="input" type="email" placeholder="ops@merchant.com" value={f.email} onChange={(e) => set("email", e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Address">
+            <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
+          </Field>
+
+          <div className="field-row">
+            <Field label="Bank account name">
+              <input className="input" placeholder="Defaults to merchant name" value={f.bankAccountName} onChange={(e) => set("bankAccountName", e.target.value)} />
+            </Field>
+            <Field label="Bank account number">
+              <input className="input" placeholder="e.g. 1234567890" value={f.bankAccountNumber} onChange={(e) => set("bankAccountNumber", e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Bank account type">
+            <select className="input" value={f.bankAccountType} onChange={(e) => set("bankAccountType", e.target.value)}>
+              {ACCOUNT_TYPES.map((t) => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+
+          {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+        </>
+      )}
+
+      {/* ── Step 2: Commercial profile ── */}
+      {step === 2 && (
+        <>
+          <EntitySearchSelect<MdrOut>
+            label="MDR plan"
+            hint="required"
+            placeholder="Search rate type, network, category…"
+            disabled={mdrLoading}
+            disabledHint="Loading MDR rates…"
+            value={selectedMdrRate}
+            onSelect={setSelectedMdrRate}
+            fetchResults={(query) => {
+              const needle = query.trim().toLowerCase();
+              const matches = needle
+                ? mdrRates.filter((rate) =>
+                    `${rate.type} ${rate.network} ${rate.category} ${rate.rate}`
+                      .toLowerCase()
+                      .includes(needle))
+                : mdrRates;
+              return Promise.resolve(matches.slice(0, 8));
+            }}
+            getLabel={(rate) => `${rate.type} · ${rate.rate}%`}
+            renderOption={(rate) => (
+              <div className="cell-2">
+                <span className="td-strong">{rate.type} · {rate.rate}%</span>
+                <span className="c2-sub">{rate.network} · {rate.category}</span>
+              </div>
+            )}
+          />
+
+          <Field label="Rental plan">
+            {rentalPlansLoading ? (
+              <div className="input" style={{ color: "var(--ink-3)" }}>Loading plans…</div>
+            ) : (
+              <select className="input" value={commercial.rental_plan_id} onChange={(e) => setC("rental_plan_id", e.target.value)}>
+                <option value="">— None —</option>
+                {rentalPlans.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} · RM {p.monthly_rate.toFixed(2)}/{p.plan_period}</option>
+                ))}
+              </select>
+            )}
+          </Field>
+
+          <div className="field-row">
+            <Field label="Rental price (RM)">
+              <input className="input" type="number" min="0" step="0.01" placeholder="Auto-filled from plan" value={commercial.rental_price} onChange={(e) => setC("rental_price", e.target.value)} />
+            </Field>
+            <Field label="Billing period">
+              <select className="input" value={commercial.plan_period} onChange={(e) => setC("plan_period", e.target.value)}>
+                {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Effective date">
+            <input className="input" type="date" value={commercial.effective_date} onChange={(e) => setC("effective_date", e.target.value)} />
+          </Field>
+
+          <div className="field-row">
+            <Field label="Trial start">
+              <input className="input" type="date" value={commercial.trial_start} onChange={(e) => setC("trial_start", e.target.value)} />
+            </Field>
+            <Field label="Trial end">
+              <input className="input" type="date" value={commercial.trial_end} onChange={(e) => setC("trial_end", e.target.value)} />
+            </Field>
+          </div>
+
+          <div className="field-row">
+            <Field label="Discount type">
+              <select className="input" value={commercial.discount_type} onChange={(e) => setC("discount_type", e.target.value)}>
+                <option value="">— None —</option>
+                {DISCOUNT_TYPES.map((d) => <option key={d}>{d}</option>)}
+              </select>
+            </Field>
+            {commercial.discount_type && (
+              <Field label="Discount value">
+                <input className="input" type="number" min="0" step="0.01" placeholder={commercial.discount_type === "Percentage" ? "e.g. 10" : "e.g. 50.00"} value={commercial.discount_value} onChange={(e) => setC("discount_value", e.target.value)} />
+              </Field>
+            )}
+          </div>
+          {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+        </>
+      )}
     </Modal>
   );
 }
@@ -327,7 +517,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
               { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
               { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
               { key: "terminals", header: "Terminals", render: (m) => m.terminals === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{m.terminals}</span> },
-              { key: "finance", header: "Finance Readiness", mobileLabel: "Finance", render: (m) => <Readiness value={m.finance} /> },
+              // { key: "finance", header: "Finance Readiness", mobileLabel: "Finance", render: (m) => <Readiness value={m.finance} /> },
               { key: "jobs", header: "Jobs", render: (m) => m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : <span className="td-mut">None</span> },
             ]}
             renderMobile={(m) => (
@@ -354,6 +544,172 @@ export function Merchants({ nav }: { nav: NavFn }) {
   );
 }
 
+/* =================== COMMERCIAL PROFILE MODAL =================== */
+function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
+  merchantId: string;
+  existing: MerchantCommercialProfileOut;
+  onClose: () => void;
+  onSaved: (cp: MerchantCommercialProfileOut) => void;
+}) {
+  const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
+  const DISCOUNT_TYPES = ["Percentage", "Fixed Amount"];
+
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [mdrLoading, setMdrLoading] = useState(true);
+  const [selectedMdrRate, setSelectedMdrRate] = useState<MdrOut | null>(null);
+  const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
+  const [rentalPlansLoading, setRentalPlansLoading] = useState(true);
+  const [f, setF] = useState({
+    rental_plan_id:  existing.rental_plan_id  ?? "",
+    rental_price:    existing.rental_price != null ? String(existing.rental_price) : "",
+    plan_period:     existing.plan_period    ?? "Monthly",
+    effective_date:  existing.effective_date ?? "",
+    trial_start:     existing.trial_start    ?? "",
+    trial_end:       existing.trial_end      ?? "",
+    discount_type:   existing.discount_type  ?? "",
+    discount_value:  existing.discount_value != null ? String(existing.discount_value) : "",
+  });
+  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.mdr.list()
+      .then((rates) => {
+        setMdrRates(rates);
+        const match = rates.find((r) => r.id === existing.mdr_plan || r.type === existing.mdr_plan) ?? null;
+        setSelectedMdrRate(match);
+      })
+      .catch(console.error)
+      .finally(() => setMdrLoading(false));
+    api.rentalPlans.list({ active: true })
+      .then(setRentalPlans)
+      .catch(console.error)
+      .finally(() => setRentalPlansLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!f.rental_plan_id) return;
+    const plan = rentalPlans.find((p) => p.id === f.rental_plan_id);
+    if (plan) setF((prev) => ({ ...prev, rental_price: String(plan.monthly_rate), plan_period: plan.plan_period }));
+  }, [f.rental_plan_id, rentalPlans]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const body: MerchantCommercialProfileIn = {
+        mdr_plan:        selectedMdrRate?.id ?? "",
+        rental_plan_id:  f.rental_plan_id  || null,
+        rental_price:    f.rental_price    ? parseFloat(f.rental_price)    : null,
+        plan_period:     f.plan_period     || null,
+        effective_date:  f.effective_date  || null,
+        trial_start:     f.trial_start     || null,
+        trial_end:       f.trial_end       || null,
+        discount_type:   f.discount_type   || null,
+        discount_value:  f.discount_value  ? parseFloat(f.discount_value)  : null,
+      };
+      const result = await api.merchants.updateCommercial(merchantId, body);
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save commercial profile");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Edit Commercial Profile"
+      sub="Update MDR plan, rental and billing terms"
+      icon="percent"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving} onClick={save}>
+          {saving ? "Saving…" : "Save Changes"}
+        </Btn>
+      </>}
+    >
+      <EntitySearchSelect<MdrOut>
+        label="MDR plan"
+        placeholder="Search rate type, network, category…"
+        disabled={mdrLoading}
+        disabledHint="Loading MDR rates…"
+        value={selectedMdrRate}
+        onSelect={setSelectedMdrRate}
+        fetchResults={(query) => {
+          const needle = query.trim().toLowerCase();
+          const matches = needle
+            ? mdrRates.filter((r) => `${r.type} ${r.network} ${r.category} ${r.rate}`.toLowerCase().includes(needle))
+            : mdrRates;
+          return Promise.resolve(matches.slice(0, 8));
+        }}
+        getLabel={(r) => `${r.type} · ${r.rate}%`}
+        renderOption={(r) => (
+          <div className="cell-2">
+            <span className="td-strong">{r.type} · {r.rate}%</span>
+            <span className="c2-sub">{r.network} · {r.category}</span>
+          </div>
+        )}
+      />
+
+      <Field label="Rental plan">
+        {rentalPlansLoading ? (
+          <div className="input" style={{ color: "var(--ink-3)" }}>Loading plans…</div>
+        ) : (
+          <select className="input" value={f.rental_plan_id} onChange={(e) => set("rental_plan_id", e.target.value)}>
+            <option value="">— None —</option>
+            {rentalPlans.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} · RM {p.monthly_rate.toFixed(2)}/{p.plan_period}</option>
+            ))}
+          </select>
+        )}
+      </Field>
+
+      <div className="field-row">
+        <Field label="Rental price (RM)">
+          <input className="input" type="number" min="0" step="0.01" placeholder="Auto-filled from plan" value={f.rental_price} onChange={(e) => set("rental_price", e.target.value)} />
+        </Field>
+        <Field label="Billing period">
+          <select className="input" value={f.plan_period} onChange={(e) => set("plan_period", e.target.value)}>
+            {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Effective date">
+        <input className="input" type="date" value={f.effective_date} onChange={(e) => set("effective_date", e.target.value)} />
+      </Field>
+
+      <div className="field-row">
+        <Field label="Trial start">
+          <input className="input" type="date" value={f.trial_start} onChange={(e) => set("trial_start", e.target.value)} />
+        </Field>
+        <Field label="Trial end">
+          <input className="input" type="date" value={f.trial_end} onChange={(e) => set("trial_end", e.target.value)} />
+        </Field>
+      </div>
+
+      <div className="field-row">
+        <Field label="Discount type">
+          <select className="input" value={f.discount_type} onChange={(e) => set("discount_type", e.target.value)}>
+            <option value="">— None —</option>
+            {DISCOUNT_TYPES.map((d) => <option key={d}>{d}</option>)}
+          </select>
+        </Field>
+        {f.discount_type && (
+          <Field label="Discount value">
+            <input className="input" type="number" min="0" step="0.01" placeholder={f.discount_type === "Percentage" ? "e.g. 10" : "e.g. 50.00"} value={f.discount_value} onChange={(e) => set("discount_value", e.target.value)} />
+          </Field>
+        )}
+      </div>
+
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
 /* =================== DETAIL =================== */
 export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [merchant, setMerchant] = useState<MerchantOut | null>(null);
@@ -364,7 +720,9 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [merchantJobs, setMerchantJobs] = useState<MerchantJobOut[]>([]);
   const [showCreateJob, setShowCreateJob] = useState(false);
   const [showEditMerchant, setShowEditMerchant] = useState(false);
+  const [showEditCommercial, setShowEditCommercial] = useState(false);
 
+  // console.log("details: ", merchant);
   useEffect(() => {
     api.merchants.get(id)
       .then(setMerchant)
@@ -418,15 +776,15 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         {[
           { l: "Merchant Terminals", v: linkedTerminals.length,    ico: "terminal", c: "var(--info)" },
           { l: "Open Jobs",          v: merchantJobs.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
-          { l: "Finance Readiness",  v: merchant.finance,           ico: "shield",   c: merchant.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
-          { l: "MDR Plan",           v: merchant.mdr_plan,          ico: "percent",  c: "var(--indigo)", small: true },
+          // { l: "Finance Readiness",  v: merchant.finance,           ico: "shield",   c: merchant.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
+          // { l: "MDR Plan",           v: merchant.mdr_plan,          ico: "percent",  c: "var(--indigo)", small: true },
         ].map((s, i) => (
           <div key={i} className="stat">
             <div className="stat-top">
               <div className="stat-ico" style={{ background: "var(--bg)", color: s.c }}><Icon name={s.ico} size={17} /></div>
               <div className="stat-label">{s.l}</div>
             </div>
-            <div className="stat-val" style={{ fontSize: s.small ? 18 : 28 }}>{s.v}</div>
+            <div className="stat-val" style={{ fontSize: 28 }}>{s.v}</div>
           </div>
         ))}
       </div>
@@ -437,7 +795,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview" ? <OverviewTab m={merchant} /> : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} /> : <JobsTab rows={merchantJobs} nav={nav} />}
+        {tab === "overview" ? <OverviewTab m={merchant} onEditCommercial={() => setShowEditCommercial(true)} nav={nav} /> : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} /> : <JobsTab rows={merchantJobs} nav={nav} />}
       </div>
 
       {showCreateJob && (
@@ -478,11 +836,22 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
           existingMerchant={merchant}
         />
       )}
+      {showEditCommercial && merchant.commercial_profile && (
+        <CommercialProfileModal
+          merchantId={merchant.id}
+          existing={merchant.commercial_profile}
+          onClose={() => setShowEditCommercial(false)}
+          onSaved={(cp) => {
+            setMerchant((prev) => prev ? { ...prev, commercial_profile: cp } : prev);
+            setShowEditCommercial(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function OverviewTab({ m }: { m: MerchantOut }) {
+function OverviewTab({ m, onEditCommercial, nav }: { m: MerchantOut; onEditCommercial: () => void; nav: NavFn }) {
   return (
       <div className="detail-grid merchant-overview-grid">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -491,15 +860,13 @@ function OverviewTab({ m }: { m: MerchantOut }) {
             <dl className="kv">
               <dt>Legal name</dt><dd>{m.name}</dd>
               <dt>Merchant ID</dt><dd className="mono">{m.id}</dd>
-              <dt>MID</dt><dd className="mono">{m.mid}</dd>
               <dt>Category</dt><dd>{m.type}</dd>
               <dt>Bank</dt><dd>{m.bank}</dd>
-              <dt>MDR plan</dt><dd>{m.mdr_plan}</dd>
               <dt>Address</dt><dd style={{ fontWeight: 400 }}>{m.address}</dd>
             </dl>
           </div>
         </Card>
-        <Card title="Finance Readiness" icon="shield">
+        {/* <Card title="Finance Readiness" icon="shield">
           <div className="card-pad">
             <div style={{ marginBottom: 16 }}><Readiness value={m.finance} /></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -519,8 +886,33 @@ function OverviewTab({ m }: { m: MerchantOut }) {
               ))}
             </div>
           </div>
+        </Card> */}
+        <Card title="Merchant IDs (MIDs)" icon="tag">
+          <div className="card-pad">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
+                <span className="mono" style={{ flex: 1 }}>{m.mid || "—"}</span>
+                <Chip cls="green">Primary</Chip>
+              </div>
+              {m.secondary_mid && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
+                  <span className="mono" style={{ flex: 1 }}>{m.secondary_mid}</span>
+                  <Chip cls="chip-neutral">Secondary</Chip>
+                </div>
+              )}
+            </div>
+          </div>
         </Card>
       </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card title="Billing Customer" icon="building" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("customer-detail", m.customer_id)}>View</Btn>}>
+        <div className="card-pad">
+          <dl className="kv">
+            <dt>Customer</dt><dd>{m.customer_name}</dd>
+            <dt>ID</dt><dd className="mono">{m.customer_id}</dd>
+          </dl>
+        </div>
+      </Card>
       <Card title="Bank Details" icon="bank">
         <div className="card-pad">
           <dl className="kv">
@@ -549,6 +941,27 @@ function OverviewTab({ m }: { m: MerchantOut }) {
           </div>
         </div>
       </Card>
+      {m.commercial_profile && (() => {
+        const cp: MerchantCommercialProfileOut = m.commercial_profile;
+        return (
+          <Card title="Commercial Profile" icon="percent" actions={<Btn variant="ghost" sm icon="edit" onClick={onEditCommercial}>Edit</Btn>}>
+            <div className="card-pad">
+              <dl className="kv">
+                {cp.mdr_plan        && <><dt>MDR plan</dt><dd>{cp.mdr_plan}</dd></>}
+                {cp.rental_plan_id  && <><dt>Rental plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
+                {cp.rental_price != null && <><dt>Rental price</dt><dd>RM {cp.rental_price.toFixed(2)}</dd></>}
+                {cp.plan_period     && <><dt>Billing period</dt><dd>{cp.plan_period}</dd></>}
+                {cp.effective_date  && <><dt>Effective date</dt><dd>{cp.effective_date}</dd></>}
+                {cp.trial_start     && <><dt>Trial start</dt><dd>{cp.trial_start}</dd></>}
+                {cp.trial_end       && <><dt>Trial end</dt><dd>{cp.trial_end}</dd></>}
+                {cp.discount_type   && <><dt>Discount type</dt><dd>{cp.discount_type}</dd></>}
+                {cp.discount_value != null && <><dt>Discount value</dt><dd>{cp.discount_value}</dd></>}
+              </dl>
+            </div>
+          </Card>
+        );
+      })()}
+      </div>
     </div>
   );
 }

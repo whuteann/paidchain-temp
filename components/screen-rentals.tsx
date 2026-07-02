@@ -408,15 +408,62 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <Card title="Customer" icon="building">
-          <div style={{ padding: "4px 20px 16px" }}>
+        {/* Left column: Terminal + Billing Documents stacked */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card title="Terminal" icon="terminal">
+            <div style={{ padding: "4px 20px 16px" }}>
+              {[
+                ["Serial", rental.terminal.serial],
+                ["Brand",  rental.terminal.brand],
+                ["Model",  rental.terminal.model],
+                ["TID",    rental.terminal.tid || "—"],
+              ].map(([l, v]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ color: "var(--ink-2)" }}>{l}</span>
+                  <span style={{ fontWeight: 500 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card title="Billing Documents" icon="invoice" style={{ flex: 1 }} actions={<>
+            <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
+              {docBusy === "invoice" ? "Generating…" : rental.invoice_issued ? "Regenerate Invoice" : "Generate Invoice"}
+            </Btn>
+            <Btn variant="ghost" sm icon="invoice" disabled={!canGenerateEinvoice || docBusy !== null} title={canGenerateEinvoice ? "Generate eInvoice" : "Customer TIN number required"} onClick={generateEinvoice}>
+              {docBusy === "einvoice" ? "Generating…" : rental.einvoice_issued ? "Regenerate eInvoice" : "Generate eInvoice"}
+            </Btn>
+          </>}>
+            <div style={{ padding: "4px 20px 16px" }}>
+              {[
+                ["Invoice",  rental.invoice_issued  ? "Last generated on " + rental.invoice_issued  : "Not generated"],
+                ["eInvoice", rental.einvoice_issued ? "Last generated on " + rental.einvoice_issued : (canGenerateEinvoice ? "Ready to generate" : "Customer TIN number required")],
+              ].map(([l, v]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ color: "var(--ink-2)" }}>{l}</span>
+                  <span style={{ fontWeight: 500, textAlign: "right", maxWidth: "60%" }}>{v}</span>
+                </div>
+              ))}
+              {!canGenerateEinvoice && (
+                <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--ink-3)" }}>
+                  Add a TIN number to the customer profile before generating an eInvoice for this rental.
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* Right column: Customer + Merchant in one card */}
+        <Card title="Customer & Merchant" icon="building">
+          <div style={{ padding: "4px 20px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--ink-3)" }}>Customer</span>
+              <Btn variant="ghost" sm icon="chevRight" onClick={() => nav("customer-detail", rental.customer.id)}>View</Btn>
+            </div>
             {[
-              ["Name",            rental.customer.name],
-              ["Customer ID",     rental.customer.id],
-              ["Registration No.", "—"],
-              ["TIN No.",         customerTin || "—"],
-              ["Contact",         "—"],
-              ["Email",           "—"],
+              ["Name",        rental.customer.name],
+              ["Customer ID", rental.customer.id],
+              ["TIN No.",     customerTin || "—"],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
@@ -424,67 +471,21 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
               </div>
             ))}
           </div>
-        </Card>
-
-        <Card title="Merchant" icon="merchants">
-          <div style={{ padding: "4px 20px 16px" }}>
+          <div style={{ padding: "12px 20px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--ink-3)" }}>Merchant</span>
+              <Btn variant="ghost" sm icon="chevRight" onClick={() => nav("merchant-detail", rental.merchant.id)}>View</Btn>
+            </div>
             {[
-              ["Name",    rental.merchant.name],
-              ["MID",     rental.merchant.mid],
-              ["Bank",    "—"],
-              ["Type",    "—"],
-              ["Contact", "—"],
-              ["Phone",   "—"],
+              ["Name", rental.merchant.name],
+              ["MID",  rental.merchant.mid],
+              ["ID",   rental.merchant.id],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                 <span style={{ color: "var(--ink-2)" }}>{l}</span>
                 <span style={{ fontWeight: 500, textAlign: "right", maxWidth: "60%" }}>{v}</span>
               </div>
             ))}
-          </div>
-        </Card>
-
-        <Card title="Terminal" icon="terminal">
-          <div style={{ padding: "4px 20px 16px" }}>
-            {[
-              ["Serial",    rental.terminal.serial],
-              ["Brand",     rental.terminal.brand],
-              ["Model",     rental.terminal.model],
-              ["TID",       rental.terminal.tid || "—"],
-              ["SIM",       "—"],
-              ["Condition", "—"],
-            ].map(([l, v]) => (
-              <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
-                <span style={{ color: "var(--ink-2)" }}>{l}</span>
-                <span style={{ fontWeight: 500 }}>{v}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card title="Billing Documents" icon="invoice" actions={<>
-          <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
-            {docBusy === "invoice" ? "Generating…" : rental.invoice_issued ? "Regenerate Invoice" : "Generate Invoice"}
-          </Btn>
-          <Btn variant="ghost" sm icon="invoice" disabled={!canGenerateEinvoice || docBusy !== null} title={canGenerateEinvoice ? "Generate eInvoice" : "Customer TIN number required"} onClick={generateEinvoice}>
-            {docBusy === "einvoice" ? "Generating…" : rental.einvoice_issued ? "Regenerate eInvoice" : "Generate eInvoice"}
-          </Btn>
-        </>}>
-          <div style={{ padding: "4px 20px 16px" }}>
-            {[
-              ["Invoice",  rental.invoice_issued  ? "Last generated on " + rental.invoice_issued  : "Not generated"],
-              ["eInvoice", rental.einvoice_issued ? "Last generated on " + rental.einvoice_issued : (canGenerateEinvoice ? "Ready to generate" : "Customer TIN number required")],
-            ].map(([l, v]) => (
-              <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
-                <span style={{ color: "var(--ink-2)" }}>{l}</span>
-                <span style={{ fontWeight: 500, textAlign: "right", maxWidth: "60%" }}>{v}</span>
-              </div>
-            ))}
-            {!canGenerateEinvoice && (
-              <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--ink-3)" }}>
-                Add a TIN number to the customer profile before generating an eInvoice for this rental.
-              </div>
-            )}
           </div>
         </Card>
       </div>
@@ -492,14 +493,20 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       {/* Rental terms card */}
       <Card title="Rental Terms" icon="receipt">
         <div style={{ padding: "4px 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
-          {[
+          {([
             ["Plan",         rental.plan],
+            rental.rental_plan_id ? ["Plan ID",      rental.rental_plan_id] : null,
+            rental.plan_period    ? ["Period",        rental.plan_period]    : null,
             ["Monthly Rate", money(rental.monthly_rate)],
             ["Deposit Paid", money(rental.deposit)],
             ["Start Date",   rental.start_date],
             ["End Date",     rental.end_date || "Ongoing"],
             ["Duration",     months > 0 ? months + " month" + (months !== 1 ? "s" : "") : "< 1 month"],
-          ].map(([l, v]) => (
+            rental.trial_start    ? ["Trial Start",   rental.trial_start]   : null,
+            rental.trial_end      ? ["Trial End",     rental.trial_end]     : null,
+            rental.discount_type  ? ["Discount Type", rental.discount_type] : null,
+            rental.discount_value != null ? ["Discount Value", String(rental.discount_value)] : null,
+          ] as ([string, string] | null)[]).filter((x): x is [string, string] => x !== null).map(([l, v]) => (
             <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
               <span style={{ color: "var(--ink-2)" }}>{l}</span>
               <span style={{ fontWeight: 500 }}>{v}</span>

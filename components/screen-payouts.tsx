@@ -3,9 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, PayoutStatus, Pagination, Empty, Chip, Modal, Field } from "./components";
 import { PAYOUT_METHODS } from "./data";
-import { checksPassedSummary, ALL_CHECKS } from "./payout-exceptions";
 import { api, ApiError } from "@/lib/api";
-import type { PayoutOut, PayoutTransaction, BulkCreateResult, PayoutException, PayoutDetails, CustomerOut, MerchantOut } from "@/lib/api";
+import type { PayoutOut, PayoutTransaction, BulkCreateResult, PayoutCheck, PayoutDetails, CustomerOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 
 const money = (n: number) => "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -97,41 +96,46 @@ function EntitySearchSelect<T extends { id: string }>({
 }
 
 /* =================== SHARED EXCEPTION UI =================== */
-function ExceptionBadge({ exceptions }: { exceptions: PayoutException[] }) {
-  const errors = exceptions.filter((e) => e.severity === "error").length;
-  const warns  = exceptions.filter((e) => e.severity === "warning").length;
+function ExceptionBadge({ checks }: { checks?: PayoutCheck[] }) {
+  const list   = checks ?? [];
+  const failed = list.filter((c) => !c.passed);
+  const errors = failed.filter((c) => c.severity === "error").length;
+  const warns  = failed.filter((c) => c.severity === "warning").length;
   if (errors > 0) return <Chip cls="chip-bad"><Icon name="x" size={12} />{errors} error{errors > 1 ? "s" : ""}{warns > 0 ? ` · ${warns} warn` : ""}</Chip>;
   if (warns  > 0) return <Chip cls="chip-warn"><Icon name="alert" size={12} />{warns} warning{warns > 1 ? "s" : ""}</Chip>;
+  if (list.length === 0) return null;
   return <Chip cls="chip-ok"><Icon name="check" size={12} />All clear</Chip>;
 }
 
-function ExceptionChecksPanel({ exceptions }: { exceptions: PayoutException[] }) {
-  const errors = exceptions.filter((e) => e.severity === "error").length;
-  const warns  = exceptions.filter((e) => e.severity === "warning").length;
+function ExceptionChecksPanel({ checks }: { checks?: PayoutCheck[] }) {
+  const list   = checks ?? [];
+  const failed = list.filter((c) => !c.passed);
+  const errors = failed.filter((c) => c.severity === "error").length;
+  const warns  = failed.filter((c) => c.severity === "warning").length;
+  const passed = list.filter((c) => c.passed).length;
   const summaryColor = errors > 0 ? "var(--bad)" : warns > 0 ? "var(--warn)" : "var(--ok)";
+  if (list.length === 0) return <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>No checks available.</div>;
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
-      <div style={{ padding: "9px 14px", background: "var(--bg-2)", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>Exception Checks</span>
-        <span style={{ fontSize: 12, color: summaryColor, fontWeight: 600 }}>{checksPassedSummary(exceptions)}</span>
-      </div>
-      <div style={{ padding: "6px 0" }}>
-        {ALL_CHECKS.map((check) => {
-          const exc = exceptions.find((e) => e.code === check.code);
-          const passed = !exc;
-          const color = passed ? "var(--ok)" : exc.severity === "error" ? "var(--bad)" : "var(--warn)";
-          return (
-            <div key={check.code} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "5px 14px" }}>
-              <div style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, marginTop: 1, background: color, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon name={passed ? "check" : exc.severity === "error" ? "x" : "alert"} size={9} style={{ color: "#fff" }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 12.5, color: passed ? "var(--ink-2)" : "var(--ink-1)", fontWeight: passed ? 400 : 500 }}>{check.label}</div>
-                {exc && <div style={{ fontSize: 11.5, color, marginTop: 1 }}>{exc.message}</div>}
-              </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {list.map((check) => {
+        const color = check.passed ? "var(--ok)" : check.severity === "error" ? "var(--bad)" : "var(--warn)";
+        return (
+          <div key={check.code} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "6px 0" }}>
+            <div style={{ width: 18, height: 18, borderRadius: "50%", flexShrink: 0, marginTop: 1, background: color, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon name={check.passed ? "check" : check.severity === "error" ? "x" : "alert"} size={10} style={{ color: "#fff" }} />
             </div>
-          );
-        })}
+            <div>
+              <div style={{ fontSize: 12.5, color: check.passed ? "var(--ink-2)" : "var(--ink-1)", fontWeight: check.passed ? 400 : 500 }}>{check.message}</div>
+              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}>{check.code}</div>
+            </div>
+            <div style={{ marginLeft: "auto", fontSize: 11, color, fontWeight: 600, whiteSpace: "nowrap" }}>
+              {check.passed ? "Passed" : check.severity === "error" ? "Failed" : "Warning"}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8, marginTop: 4, fontSize: 12, color: summaryColor, fontWeight: 600, textAlign: "right" }}>
+        {passed} of {list.length} passed
       </div>
     </div>
   );
@@ -546,7 +550,7 @@ export function Payouts({ nav }: { nav: NavFn }) {
                     <td className="td-mono td-mut">{money(p.gross)}</td>
                     <td className="td-mono td-strong">{money(p.net)}</td>
                     <td><PayoutStatus status={p.status} /></td>
-                    <td><ExceptionBadge exceptions={p.exceptions} /></td>
+                    <td><ExceptionBadge checks={p.checks} /></td>
                     <td>
                       {p.einvoice
                         ? <Chip cls="chip-indigo"><Icon name="invoice" size={13} />Issued</Chip>
@@ -761,11 +765,13 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       {/* Exception Checks */}
-      <Card title={"Exception Checks · " + payout.checks} icon="alert">
+      <Card title="Exception Checks" icon="alert">
         <div style={{ padding: "8px 20px 16px" }}>
-          <ExceptionChecksPanel exceptions={payout.exceptions} />
+          <ExceptionChecksPanel checks={payout.checks} />
         </div>
       </Card>
+
+      <div style={{ marginTop: 24 }} />
 
       {/* Transactions table */}
       <Card title={`Transactions (${txns.length})`} icon="receipt">

@@ -119,10 +119,10 @@ export function SearchBox({ value, onChange, placeholder, fullWidth }: { value: 
 }
 
 /* ---------- Card ---------- */
-interface CardProps { title?: string; actions?: ReactNode; children?: ReactNode; pad?: boolean; className?: string; icon?: string }
-export function Card({ title, actions, children, pad, className = "", icon }: CardProps) {
+interface CardProps { title?: string; actions?: ReactNode; children?: ReactNode; pad?: boolean; className?: string; icon?: string; style?: React.CSSProperties }
+export function Card({ title, actions, children, pad, className = "", icon, style }: CardProps) {
   return (
-    <div className={"card " + className}>
+    <div className={"card " + className} style={style}>
       {title && (
         <div className="card-head">
           {icon && <Icon name={icon} size={17} style={{ color: "var(--ink-2)" }} />}
@@ -204,8 +204,8 @@ export function Dropzone({ files, setFiles, hint }: { files: DropzoneFile[]; set
 }
 
 /* ---------- Entity cell ---------- */
-export function Entity({ name, sub, slate, ava }: { name: string; sub?: string; slate?: boolean; ava?: string }) {
-  const initials = ava || name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+export function Entity({ name, sub, slate, ava }: { name?: string | null; sub?: string; slate?: boolean; ava?: string }) {
+  const initials = ava || (name ?? "").split(" ").filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
   return (
     <div className="ent">
       <div className={"ent-ava" + (slate ? " slate" : "")}>{initials}</div>
