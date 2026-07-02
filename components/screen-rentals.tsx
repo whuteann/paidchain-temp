@@ -54,11 +54,17 @@ function CreateRentalModal({ onClose, onCreate }: { onClose: () => void; onCreat
       merchant: { id: m.id, name: m.name, mid: m.mid },
       terminal: { serial: t.serial, brand: t.brand, model: t.model, tid: t.tid || null },
       plan: form.plan,
+      rental_plan_id: null,
+      plan_period: null,
       monthly_rate: parseFloat(form.monthlyRate) || t.rentalRate,
       deposit: parseFloat(form.deposit) || 0,
       start_date: form.startDate,
       end_date: null,
       status: "Active",
+      trial_start: null,
+      trial_end: null,
+      discount_type: null,
+      discount_value: null,
       invoice_issued: null,
       einvoice_issued: null,
     };
@@ -210,8 +216,8 @@ export function Rentals({ nav }: { nav: NavFn }) {
         title="Rentals"
         sub="Terminal rental agreements · customer, merchant and device billing relationships"
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Rental</Btn>
+          {/* <Btn variant="ghost" icon="download">Export</Btn> */}
+          {/* <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Rental</Btn> */}
         </>}
       />
 
