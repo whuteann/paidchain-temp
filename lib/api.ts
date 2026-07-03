@@ -216,10 +216,28 @@ export interface DashboardAlert {
   entity_type: string | null;
 }
 
+export interface DashboardActivityItem {
+  id: number;
+  action_at: string;
+  user: { id: string; name: string; role: string };
+  description: string;
+  type: string;
+  entity_type: string;
+  entity_id: string;
+}
+
+export interface DashboardOut {
+  total_active_merchants: number;
+  open_jobs_count: number;
+  open_jobs_by_type: Record<string, number>;
+  terminal_status_breakdown: Record<string, number>;
+  pending_payouts_count: number;
+  pending_payouts_net: number;
+  recent_activity: DashboardActivityItem[];
+}
+
 export const dashboard = {
-  summary: () => req<DashboardSummary>("GET", "/dashboard/summary"),
-  recentJobs: (limit = 10) => req<DashboardJobRef[]>("GET", "/dashboard/recent-jobs", { params: { limit } }),
-  alerts: () => req<DashboardAlert[]>("GET", "/dashboard/alerts"),
+  get: (is_month = false) => req<DashboardOut>("GET", "/dashboard", { params: { is_month } }),
 };
 
 // ─── Customers ────────────────────────────────────────────────────────────────
@@ -248,6 +266,18 @@ export interface CustomerCreate {
   phone: string;
   email: string;
   address: string;
+}
+
+export interface CustomerUpdate {
+  name?: string | null;
+  type?: string | null;
+  reg_no?: string | null;
+  tin?: string | null;
+  contact?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  status?: string | null;
 }
 
 export interface CustomerListParams {
@@ -298,7 +328,7 @@ export const customers = {
   list: (p?: CustomerListParams) => req<CustomerPage>("GET", "/customers", { params: p }),
   get: (id: string) => req<CustomerOut>("GET", `/customers/${id}`),
   create: (body: CustomerCreate) => req<CustomerOut>("POST", "/customers/create", { body }),
-  update: (id: string, body: Partial<CustomerCreate>) =>
+  update: (id: string, body: CustomerUpdate) =>
     req<CustomerOut>("PATCH", `/customers/${id}`, { body }),
   remove: (id: string) => req<void>("DELETE", `/customers/${id}`),
   details: () => req<CustomerDetails>("GET", "/customers/details"),
@@ -524,6 +554,7 @@ export interface TerminalOut {
   condition_note: string;
   term_setting_id: string;
   activity_log?: ActivityOut[];
+  open_jobs?: { id: string; type: string; stage: string }[];
 }
 
 export function terminalSerial(t: TerminalOut): string {

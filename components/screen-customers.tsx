@@ -5,7 +5,7 @@ import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal
 import { CUSTOMER_TYPES, CUSTOMER_STATUS } from "./data";
 import { CreateMerchantModal } from "./screen-merchants";
 import { api, ApiError } from "@/lib/api";
-import type { CustomerOut, CustomerCreate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
+import type { CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 
 function CustomerStatus({ status }: { status: string }) {
@@ -80,6 +80,88 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
       </div>
       <Field label="Address">
         <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
+      </Field>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+/* =================== EDIT CUSTOMER MODAL =================== */
+function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOut; onClose: () => void; onSave: (c: CustomerOut) => void }) {
+  const [f, setF] = useState<CustomerUpdate>({
+    name: customer.name,
+    type: customer.type,
+    reg_no: customer.reg_no || "",
+    tin: customer.tin || "",
+    contact: customer.contact || "",
+    phone: customer.phone || "",
+    email: customer.email || "",
+    address: customer.address || "",
+    status: customer.status,
+  });
+  const set = (k: keyof CustomerUpdate, v: string) => setF((prev) => ({ ...prev, [k]: v }));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true);
+    setErr(null);
+    try {
+      const updated = await api.customers.update(customer.id, f);
+      onSave(updated);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Edit Customer" sub={customer.id} icon="building"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving} onClick={submit}>{saving ? "Saving…" : "Save Changes"}</Btn>
+      </>}
+    >
+      <Field label="Registered Name" hint="required">
+        <input className="input" value={f.name ?? ""} onChange={(e) => set("name", e.target.value)} />
+      </Field>
+      <div className="field-row">
+        <Field label="Type">
+          <select className="input" value={f.type ?? ""} onChange={(e) => set("type", e.target.value)}>
+            {CUSTOMER_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Status">
+          <select className="input" value={f.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+            {Object.keys(CUSTOMER_STATUS).map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Registration No.">
+          <input className="input" value={f.reg_no ?? ""} onChange={(e) => set("reg_no", e.target.value)} />
+        </Field>
+        <Field label="TIN No.">
+          <input className="input" value={f.tin ?? ""} onChange={(e) => set("tin", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Contact Person">
+        <input className="input" value={f.contact ?? ""} onChange={(e) => set("contact", e.target.value)} />
+      </Field>
+      <div className="field-row">
+        <Field label="Phone">
+          <input className="input" value={f.phone ?? ""} onChange={(e) => set("phone", e.target.value)} />
+        </Field>
+        <Field label="Email">
+          <input className="input" type="email" value={f.email ?? ""} onChange={(e) => set("email", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Address">
+        <textarea className="textarea" value={f.address ?? ""} onChange={(e) => set("address", e.target.value)} />
       </Field>
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
@@ -287,6 +369,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [linked, setLinked] = useState<CustomerMerchantOut[]>([]);
   const [linkedLoading, setLinkedLoading] = useState(true);
   const [showAddMerchant, setShowAddMerchant] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -333,7 +416,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={customer.id + " · " + customer.type}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("customers")}>Back</Btn>
-          <Btn variant="ghost" icon="edit">Edit</Btn>
+          <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>
         </>}
       />
 
@@ -423,6 +506,14 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
           />
         )}
       </Card>
+
+      {showEdit && (
+        <EditCustomerModal
+          customer={customer}
+          onClose={() => setShowEdit(false)}
+          onSave={(updated) => { setCustomer(updated); setShowEdit(false); setToast("Customer updated"); setTimeout(() => setToast(null), 2800); }}
+        />
+      )}
 
       {showAddMerchant && (
         <CreateMerchantModal

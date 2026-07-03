@@ -1,8 +1,8 @@
 /* PaidChain — Terminal inventory + detail */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, SlaChip, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
-import { jobs, TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
+import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
+import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import type { TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
 import { NavFn } from "./shell";
@@ -1028,7 +1028,7 @@ export function TerminalDetail({
     </div>
   );
 
-  const linkedJobs = jobs.filter((j) => j.terminal && j.terminal.serial === terminalSerial(terminal)).slice(0, 4);
+  const openJobs = terminal.open_jobs ?? [];
 
   async function applyStatus() {
     if (!terminal) return;
@@ -1090,6 +1090,8 @@ export function TerminalDetail({
     }
   }
 
+  console.log("details: ", terminal);
+
 
   return (
     <div>
@@ -1135,21 +1137,19 @@ export function TerminalDetail({
               )}
             </div>
           </Card>
-          <Card title={"Linked Jobs" + (linkedJobs.length ? " (" + linkedJobs.length + ")" : "")} icon="jobs" actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>All jobs</Btn>}>
-            {linkedJobs.length === 0 ? (
-              <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--ink-3)" }}>No jobs linked to this device yet.</div>
+          <Card title={"Open Jobs" + (openJobs.length ? " (" + openJobs.length + ")" : "")} icon="jobs" actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>All jobs</Btn>}>
+            {openJobs.length === 0 ? (
+              <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--ink-3)" }}>No open jobs for this device.</div>
             ) : (
               <div className="tbl-wrap">
                 <table className="tbl">
-                  <thead><tr>{["Job ID","Type","Status","SLA","Due"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                  <thead><tr>{["Job ID", "Type", "Status"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {linkedJobs.map((j) => (
+                    {openJobs.map((j) => (
                       <tr key={j.id} className="clickable" onClick={() => nav("job-detail", j.id)}>
                         <td className="td-mono td-strong">{j.id}</td>
                         <td>{j.type}</td>
                         <td><JobStatus status={j.stage} /></td>
-                        <td><SlaChip sla={j.sla} /></td>
-                        <td className="td-mut td-mono">{j.due.slice(5)}</td>
                       </tr>
                     ))}
                   </tbody>
