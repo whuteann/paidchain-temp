@@ -681,8 +681,9 @@ export const PERMISSION_MODULES: { module: string; actions: string[] }[] = [
   { module: "SIM Cards",   actions: ["View", "Create", "Edit", "Delete"] },
   { module: "Paper Rolls", actions: ["View", "Record", "Adjust", "Export"] },
   { module: "Users",       actions: ["View", "Invite", "Edit", "Suspend"] },
-  { module: "Settings",    actions: ["View", "Edit"] },
-  { module: "Audit Logs",  actions: ["View", "Export"] },
+  { module: "Settings",          actions: ["View", "Edit"] },
+  { module: "Audit Logs",        actions: ["View", "Export"] },
+  { module: "Referral Bonuses",  actions: ["View", "Create", "Edit", "Confirm", "Process", "Export"] },
 ];
 
 const _allPerms = PERMISSION_MODULES.flatMap((m) => m.actions.map((a) => `${m.module}.${a}`));

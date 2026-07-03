@@ -1,12 +1,37 @@
 /* PaidChain — Dashboard */
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, JobStatus, SlaChip, PageHead, MobileListItem, ResponsiveTable } from "./components";
-import { terminals, jobs, merchants, payouts, TERMINAL_STATUS_ORDER, TERMINAL_STATUS, JOB_TYPES } from "./data";
+import { Card, Btn, PageHead, MobileListItem } from "./components";
+import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, JOB_TYPES } from "./data";
+import { api } from "@/lib/api";
+import type { DashboardOut } from "@/lib/api";
 import { NavFn } from "./shell";
+import type { Route } from "./shell";
 
-function Stat({ icon, color, bg, label, value, deltaDir, delta, foot }: {
-  icon: string; color: string; bg: string; label: string; value: string | number;
-  deltaDir?: string; delta?: string; foot: string;
+const money = (n: number) =>
+  "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + "m ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h ago";
+  return Math.floor(hrs / 24) + "d ago";
+}
+
+function activityNav(entityType: string, entityId: string, nav: NavFn) {
+  const map: Record<string, string> = {
+    job: "job-detail", merchant: "merchant-detail", customer: "customer-detail",
+    terminal: "terminal-detail", rental: "rental-detail", payout: "payout-detail",
+  };
+  const screen = map[entityType?.toLowerCase()];
+  if (screen) nav(screen as Route, entityId);
+}
+
+function Stat({ icon, color, bg, label, value, foot }: {
+  icon: string; color: string; bg: string; label: string; value: string | number; foot: string;
 }) {
   return (
     <div className="stat">
@@ -15,15 +40,7 @@ function Stat({ icon, color, bg, label, value, deltaDir, delta, foot }: {
         <div className="stat-label">{label}</div>
       </div>
       <div className="stat-val">{value}</div>
-      <div className="stat-foot">
-        {delta && (
-          <span className={"delta " + (deltaDir || "up")}>
-            <Icon name={deltaDir === "up" ? "arrowUpRight" : "arrowDownRight"} size={13} />
-            {delta}
-          </span>
-        )}
-        <span className="delta-mut">{foot}</span>
-      </div>
+      <div className="stat-foot"><span className="delta-mut">{foot}</span></div>
     </div>
   );
 }
@@ -33,152 +50,171 @@ function BarRow({ label, value, max, color }: { label: string; value: number; ma
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 11 }}>
       <div style={{ width: 150, fontSize: 12.5, color: "var(--ink-2)", fontWeight: 500, flexShrink: 0 }}>{label}</div>
       <div style={{ flex: 1, height: 22, background: "var(--bg)", borderRadius: 5, overflow: "hidden" }}>
-        <div style={{ width: (value / max * 100) + "%", height: "100%", background: color, borderRadius: 5, transition: "width .5s" }} />
+        <div style={{ width: (max > 0 ? (value / max * 100) : 0) + "%", height: "100%", background: color, borderRadius: 5, transition: "width .5s" }} />
       </div>
       <div style={{ width: 30, textAlign: "right", fontWeight: 600, fontSize: 13 }}>{value}</div>
     </div>
   );
 }
 
+const JT_COLORS: Record<string, string> = {
+  "Installation": "var(--ok)", "Repair/Maintenance": "var(--warn)",
+  "Replacement": "var(--orange)", "Paper Roll Request": "var(--info)", "Remote Support": "var(--indigo)",
+};
+
 export function Dashboard({ nav }: { nav: NavFn }) {
-  const tCounts: Record<string, number> = {};
-  TERMINAL_STATUS_ORDER.forEach((s) => (tCounts[s] = 0));
-  terminals.forEach((t) => tCounts[t.status]++);
+  const [data, setData] = useState<DashboardOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isMonth, setIsMonth] = useState(false);
 
-  const installed = tCounts["Installed"];
-  const openJobs = jobs.filter((j) => j.stage !== "Completed" && j.stage !== "Cancelled");
-  const breaches = jobs.filter((j) => j.sla === "Breached").length;
-  const activeMerch = merchants.filter((m) => m.status === "Active").length;
-  const cycleTotal = payouts.reduce((a, p) => a + p.net, 0);
-  const exceptions = payouts.filter((p) => p.exceptions.length > 0).length;
+  useEffect(() => {
+    setLoading(true);
+    api.dashboard.get(isMonth)
+      .then(setData)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [isMonth]);
 
-  const jobTypeCounts: Record<string, number> = {};
-  Object.keys(JOB_TYPES).forEach((t) => (jobTypeCounts[t] = 0));
-  jobs.forEach((j) => jobTypeCounts[j.type]++);
-  const jtMax = Math.max(...Object.values(jobTypeCounts));
-  const jtColors: Record<string, string> = {
-    "Installation": "var(--ok)", "Repair/Maintenance": "var(--warn)",
-    "Replacement": "var(--orange)", "Paper Roll Request": "var(--info)", "Remote Support": "var(--indigo)",
-  };
+  const termBreakdown = data?.terminal_status_breakdown ?? {};
+  const tMax = Math.max(...Object.values(termBreakdown), 1);
 
-  const recent = jobs.slice(0, 6);
-  const tMax = Math.max(...Object.values(tCounts));
+  const jobsByType = data?.open_jobs_by_type ?? {};
+  const jtMax = Math.max(...Object.values(jobsByType), 1);
+
+  const faultyCount = termBreakdown["Faulty"] ?? 0;
 
   return (
     <div>
       <PageHead
         title="Operations Dashboard"
-        sub="Tuesday, 3 June 2026 · Live overview of devices, jobs and payouts"
+        sub={isMonth ? "Monthly overview" : "Live overview of devices, jobs and payouts"}
         actions={<>
-          <Btn variant="ghost" icon="calendar">This Month</Btn>
-          <Btn variant="primary" icon="download">Export Report</Btn>
+          <Btn variant={isMonth ? "primary" : "ghost"} icon="calendar" onClick={() => setIsMonth((v) => !v)}>
+            {isMonth ? "Month View" : "This Month"}
+          </Btn>
         </>}
       />
 
-      {/* Stat cards */}
-      <div className="stat-grid" style={{ marginBottom: 16 }}>
-        <Stat icon="merchants" color="var(--green-700)" bg="var(--green-050)" label="Active Merchants" value={activeMerch} deltaDir="up" delta="+3" foot="vs last month" />
-        <Stat icon="terminal" color="var(--info)" bg="var(--info-bg)" label="Terminals Deployed" value={installed + " / " + terminals.length} deltaDir="up" delta="94%" foot="fleet utilisation" />
-        <Stat icon="jobs" color="var(--warn)" bg="var(--warn-bg)" label="Open Jobs" value={openJobs.length} deltaDir="down" delta={breaches + " SLA"} foot="breached" />
-        <Stat icon="payouts" color="var(--indigo)" bg="var(--indigo-bg)" label="Net Payouts · Cycle" value={"RM " + (cycleTotal / 1000).toFixed(1) + "k"} deltaDir="up" delta={exceptions + " flags"} foot="need review" />
-      </div>
+      {loading && !data ? (
+        <div style={{ padding: "60px 0", textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+      ) : data && <>
 
-      {/* Terminal breakdown + jobs by type */}
-      <div className="dashboard-split-grid" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
-        <Card title="Terminal Inventory by Status" icon="terminal"
-          actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("terminals")}>Inventory</Btn>}
-        >
-          <div className="card-pad">
-            {TERMINAL_STATUS_ORDER.map((s) => (
-              <BarRow key={s} label={TERMINAL_STATUS[s].label!} value={tCounts[s]} max={tMax} color={TERMINAL_STATUS[s].dot!} />
-            ))}
-          </div>
-        </Card>
-        <Card title="Open Jobs by Type" icon="jobs"
-          actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>All Jobs</Btn>}
-        >
-          <div className="card-pad">
-            {Object.keys(jobTypeCounts).map((t) => (
-              <div key={t} style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12.5 }}>
-                  <span style={{ fontWeight: 500, display: "flex", gap: 7, alignItems: "center", whiteSpace: "nowrap" }}>
-                    <Icon name={JOB_TYPES[t].icon} size={15} style={{ color: jtColors[t] }} />
-                    {t}
-                  </span>
-                  <span style={{ fontWeight: 600 }}>{jobTypeCounts[t]}</span>
-                </div>
-                <div className="progress-mini">
-                  <span style={{ width: (jobTypeCounts[t] / jtMax * 100) + "%", background: jtColors[t] }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+        {/* Stat cards */}
+        <div className="stat-grid" style={{ marginBottom: 16 }}>
+          <Stat icon="merchants" color="var(--green-700)" bg="var(--green-050)"
+            label="Active Merchants" value={data.total_active_merchants} foot="currently active" />
+          <Stat icon="jobs" color="var(--warn)" bg="var(--warn-bg)"
+            label="Open Jobs" value={data.open_jobs_count} foot="across all types" />
+          <Stat icon="payouts" color="var(--indigo)" bg="var(--indigo-bg)"
+            label="Pending Payouts" value={data.pending_payouts_count}
+            foot={"Net " + money(data.pending_payouts_net)} />
+          <Stat icon="terminal" color="var(--bad)" bg="var(--bad-bg)"
+            label="Faulty Terminals" value={faultyCount} foot="awaiting repair" />
+        </div>
 
-      {/* Recent jobs + side column */}
-      <div className="dashboard-lower-grid" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
-        <Card title="Recent Jobs" icon="clock"
-          actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>View all</Btn>}
-        >
-          <ResponsiveTable
-            rows={recent}
-            getKey={(j) => j.id}
-            onRowClick={(j) => nav("job-detail", j.id)}
-            columns={[
-              { key: "id", header: "Job ID", render: (j) => <span className="td-mono td-strong">{j.id}</span> },
-              { key: "type", header: "Type", render: (j) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type].icon} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
-              { key: "merchant", header: "Merchant", render: (j) => <span className="td-mut">{j.merchant.name}</span> },
-              { key: "status", header: "Status", render: (j) => <JobStatus status={j.stage} /> },
-              { key: "sla", header: "SLA", render: (j) => <SlaChip sla={j.sla} /> },
-              { key: "due", header: "Due", render: (j) => <span className="td-mut td-mono">{j.due.slice(5)}</span> },
-            ]}
-            renderMobile={(j) => (
-              <MobileListItem
-                title={<span className="td-mono">{j.id}</span>}
-                sub={j.merchant.name}
-                status={<JobStatus status={j.stage} />}
-                meta={[
-                  { label: "Type", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type].icon} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
-                  { label: "SLA", value: <SlaChip sla={j.sla} /> },
-                  { label: "Due", value: <span className="td-mono">{j.due.slice(5)}</span> },
-                ]}
-                onClick={() => nav("job-detail", j.id)}
-                chevron
-              />
-            )}
-          />
-        </Card>
+        {/* Terminal breakdown + jobs by type */}
+        <div className="dashboard-split-grid" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
+          <Card title="Terminal Inventory by Status" icon="terminal"
+            actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("terminals")}>Inventory</Btn>}
+          >
+            <div className="card-pad">
+              {TERMINAL_STATUS_ORDER.filter((s) => termBreakdown[s] !== undefined).map((s) => (
+                <BarRow key={s} label={TERMINAL_STATUS[s]?.label ?? s} value={termBreakdown[s] ?? 0} max={tMax} color={TERMINAL_STATUS[s]?.dot ?? "var(--ink-3)"} />
+              ))}
+              {Object.keys(termBreakdown).filter((s) => !TERMINAL_STATUS_ORDER.includes(s)).map((s) => (
+                <BarRow key={s} label={s} value={termBreakdown[s]} max={tMax} color="var(--ink-3)" />
+              ))}
+              {Object.keys(termBreakdown).length === 0 && (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No terminal data.</div>
+              )}
+            </div>
+          </Card>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card title="Needs Attention" icon="alert">
-            <div className="attention-list">
-              {[
-                { ico: "alert",    c: "var(--bad)",    bg: "var(--bad-bg)",    t: breaches + " jobs breached SLA",                      s: "Review and reassign",        go: () => nav("jobs") },
-                { ico: "payouts",  c: "var(--warn)",   bg: "var(--warn-bg)",   t: exceptions + " payouts flagged",                       s: "Exception checks pending",   go: () => nav("payouts") },
-                { ico: "wrench",   c: "var(--orange)", bg: "var(--orange-bg)", t: tCounts["Faulty"] + " faulty terminals",               s: "Awaiting repair routing",     go: () => nav("terminals") },
-                { ico: "merchants",c: "var(--info)",   bg: "var(--info-bg)",   t: merchants.filter((m) => m.finance !== "Ready").length + " merchants not finance-ready", s: "Documents outstanding", go: () => nav("merchants") },
-              ].map((a, i) => (
-                <MobileListItem
-                  key={i}
-                  className="attention-item"
-                  title={
-                    <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-                      <span style={{ width: 32, height: 32, borderRadius: 8, background: a.bg, color: a.c, display: "grid", placeItems: "center", flexShrink: 0 }}>
-                        <Icon name={a.ico} size={16} />
-                      </span>
-                      {a.t}
+          <Card title="Open Jobs by Type" icon="jobs"
+            actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>All Jobs</Btn>}
+          >
+            <div className="card-pad">
+              {Object.keys(jobsByType).length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No open jobs.</div>
+              ) : Object.entries(jobsByType).map(([type, count]) => (
+                <div key={type} style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12.5 }}>
+                    <span style={{ fontWeight: 500, display: "flex", gap: 7, alignItems: "center", whiteSpace: "nowrap" }}>
+                      {JOB_TYPES[type] && <Icon name={JOB_TYPES[type].icon} size={15} style={{ color: JT_COLORS[type] ?? "var(--ink-3)" }} />}
+                      {type}
                     </span>
-                  }
-                  sub={a.s}
-                  onClick={a.go}
-                  chevron
-                />
+                    <span style={{ fontWeight: 600 }}>{count}</span>
+                  </div>
+                  <div className="progress-mini">
+                    <span style={{ width: (count / jtMax * 100) + "%", background: JT_COLORS[type] ?? "var(--ink-3)" }} />
+                  </div>
+                </div>
               ))}
             </div>
           </Card>
         </div>
-      </div>
+
+        {/* Recent Activity + Needs Attention */}
+        <div className="dashboard-lower-grid" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
+          <Card title="Recent Activity" icon="clock"
+            actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>View all</Btn>}
+          >
+            {data.recent_activity.length === 0 ? (
+              <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>No recent activity.</div>
+            ) : (
+              <div>
+                {data.recent_activity.map((a) => (
+                  <div
+                    key={a.id}
+                    className="clickable"
+                    onClick={() => activityNav(a.entity_type, a.entity_id, nav)}
+                    style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "11px 20px", borderBottom: "1px solid var(--line)", fontSize: 13 }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.description}</div>
+                      <div style={{ fontSize: 12, color: "var(--ink-3)", display: "flex", gap: 8 }}>
+                        <span>{a.user.name}</span>
+                        <span>·</span>
+                        <span>{a.user.role}</span>
+                        {a.entity_id && <><span>·</span><span className="mono">{a.entity_id}</span></>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--ink-3)", whiteSpace: "nowrap", flexShrink: 0 }}>{relativeTime(a.action_at)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Card title="Needs Attention" icon="alert">
+              <div className="attention-list">
+                {[
+                  { ico: "jobs",    c: "var(--warn)",   bg: "var(--warn-bg)",   t: data.open_jobs_count + " open jobs",              s: "Pending across all types",       go: () => nav("jobs") },
+                  { ico: "payouts", c: "var(--indigo)",  bg: "var(--indigo-bg)", t: data.pending_payouts_count + " pending payouts",   s: money(data.pending_payouts_net) + " net",  go: () => nav("payouts") },
+                  { ico: "wrench",  c: "var(--bad)",    bg: "var(--bad-bg)",    t: faultyCount + " faulty terminals",                 s: "Awaiting repair routing",        go: () => nav("terminals") },
+                ].map((a, i) => (
+                  <MobileListItem
+                    key={i}
+                    className="attention-item"
+                    title={
+                      <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+                        <span style={{ width: 32, height: 32, borderRadius: 8, background: a.bg, color: a.c, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                          <Icon name={a.ico} size={16} />
+                        </span>
+                        {a.t}
+                      </span>
+                    }
+                    sub={a.s}
+                    onClick={a.go}
+                    chevron
+                  />
+                ))}
+              </div>
+            </Card>
+          </div>
+        </div>
+      </>}
     </div>
   );
 }
