@@ -109,6 +109,17 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
 }
 
 /* =================== MAIN =================== */
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function PaperRolls({ nav: _ }: { nav: NavFn }) {
   const [entries, setEntries] = useState<PaperRollOut[]>([]);
   const [details, setDetails] = useState<PaperRollDetails | null>(null);
@@ -117,6 +128,7 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
   const [typeFilter, setTypeFilter] = useState("All");
   const [showUpdate, setShowUpdate] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     api.paperRolls.list()
@@ -145,6 +157,18 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
     return true;
   });
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const blob = await api.paperRolls.exportBillingReport();
+      downloadBlob(blob, "paper-roll-billing.csv");
+    } catch {
+      /* errors surface in the listing */
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function handleSave(e: PaperRollOut) {
     setEntries((prev) => [e, ...prev]);
     api.paperRolls.details().then(setDetails).catch(console.error);
@@ -161,7 +185,9 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
         title="Paper Rolls"
         sub="Thermal paper roll inventory · track stock received and issued to merchants"
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
+          <Btn variant="ghost" icon="download" disabled={exporting} onClick={handleExport}>
+            {exporting ? "Exporting…" : "Export"}
+          </Btn>
           <Btn variant="primary" icon="plus" onClick={() => setShowUpdate(true)}>Update Stock</Btn>
         </>}
       />

@@ -4,7 +4,7 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { MerchantOut, MerchantCreate, MerchantTerminalOut, MerchantJobOut, MdrOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut } from "@/lib/api";
+import type { MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, MdrOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
 
@@ -186,7 +186,17 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     if (!valid || !existingMerchant) return;
     setSaving(true); setErr(null);
     try {
-      const m = await api.merchants.update(existingMerchant.id, buildBaseBody());
+      const updateBody: MerchantUpdate = {
+        name: f.name.trim(), type: f.type, bank: f.bank,
+        contact: f.contact.trim(), phone: f.phone.trim(),
+        email: f.email.trim(), address: f.address.trim(),
+        bank_account_name: f.bankAccountName.trim() || f.name.trim(),
+        bank_account_number: f.bankAccountNumber.trim(),
+        bank_account_type: f.bankAccountType,
+        mid: mid.trim() || null,
+        secondary_mid: secondaryMid.trim() || null,
+      };
+      const m = await api.merchants.update(existingMerchant.id, updateBody);
       onSave(m);
       onClose();
     } catch (e) {
@@ -474,6 +484,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [bank, setBank] = useState("All");
   const [status, setStatus] = useState("All");
 
+  console.log("list: ", merchantList);
   useEffect(() => {
     api.merchants.list().then((p) => setMerchantList(p.items)).catch(console.error).finally(() => setLoading(false));
   }, []);
@@ -491,7 +502,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
       <PageHead
         title="Merchants"
         sub={merchantList.length + " merchants · search by name, MID, bank or merchant ID"}
-        actions={<Btn variant="ghost" icon="download">Export</Btn>}
+        // actions={<Btn variant="ghost" icon="download">Export</Btn>}
       />
       <Card>
         <Toolbar>
@@ -516,7 +527,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
               { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{m.mid}</span> },
               { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
               { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
-              { key: "terminals", header: "Terminals", render: (m) => m.terminals === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{m.terminals}</span> },
+              { key: "terminals", header: "Terminals", render: (m) => { const n = m.terminal_count ?? m.terminals; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
               // { key: "finance", header: "Finance Readiness", mobileLabel: "Finance", render: (m) => <Readiness value={m.finance} /> },
               { key: "jobs", header: "Jobs", render: (m) => m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : <span className="td-mut">None</span> },
             ]}
@@ -529,7 +540,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
                   { label: "MID", value: <span className="td-mono">{m.mid}</span> },
                   { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
                   { label: "Finance", value: <Readiness value={m.finance} /> },
-                  { label: "Terminals", value: m.terminals === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{m.terminals}</span> },
+                  { label: "Terminals", value: (() => { const n = m.terminal_count ?? m.terminals; return n === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; })() },
                   { label: "Jobs", value: m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : "None" },
                 ]}
                 onClick={() => nav("merchant-detail", m.id)}
@@ -721,8 +732,9 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showCreateJob, setShowCreateJob] = useState(false);
   const [showEditMerchant, setShowEditMerchant] = useState(false);
   const [showEditCommercial, setShowEditCommercial] = useState(false);
+  const [showUpdateStatus, setShowUpdateStatus] = useState(false);
 
-  // console.log("details: ", merchant);
+  console.log("details: ", merchant);
   useEffect(() => {
     api.merchants.get(id)
       .then(setMerchant)
@@ -767,6 +779,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
         <div className="page-head-actions">
           <Btn variant="ghost" icon="mail">Contact</Btn>
+          <Btn variant="ghost" icon="tag" onClick={() => setShowUpdateStatus(true)}>Update Status</Btn>
           <Btn variant="ghost" icon="edit" onClick={() => setShowEditMerchant(true)}>Edit</Btn>
           <Btn variant="primary" icon="plus" onClick={() => setShowCreateJob(true)}>New Job</Btn>
         </div>
@@ -790,12 +803,15 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       <div className="tabs">
-        {[["overview","Overview"],["terminals","Linked Terminals (" + linkedTerminals.length + ")"],["jobs","Job History (" + merchantJobs.length + ")"]].map(([k,lbl]) => (
+        {[["overview","Overview"],["commercial","Commercial Profile"],["terminals","Linked Terminals (" + linkedTerminals.length + ")"],["jobs","Job History (" + merchantJobs.length + ")"]].map(([k,lbl]) => (
           <div key={k} className={"tab" + (tab === k ? " active" : "")} onClick={() => setTab(k)}>{lbl}</div>
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview" ? <OverviewTab m={merchant} onEditCommercial={() => setShowEditCommercial(true)} nav={nav} /> : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} /> : <JobsTab rows={merchantJobs} nav={nav} />}
+        {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} />
+          : tab === "commercial" ? <CommercialTab m={merchant} onEdit={() => setShowEditCommercial(true)} />
+          : tab === "terminals"  ? <TerminalsTab rows={linkedTerminals} nav={nav} />
+          : <JobsTab rows={merchantJobs} nav={nav} />}
       </div>
 
       {showCreateJob && (
@@ -836,6 +852,14 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
           existingMerchant={merchant}
         />
       )}
+      {showUpdateStatus && (
+        <UpdateMerchantStatusModal
+          merchant={merchant}
+          onClose={() => setShowUpdateStatus(false)}
+          onSaved={(updated) => { setMerchant(updated); setShowUpdateStatus(false); }}
+        />
+      )}
+
       {showEditCommercial && merchant.commercial_profile && (
         <CommercialProfileModal
           merchantId={merchant.id}
@@ -851,7 +875,46 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   );
 }
 
-function OverviewTab({ m, onEditCommercial, nav }: { m: MerchantOut; onEditCommercial: () => void; nav: NavFn }) {
+function UpdateMerchantStatusModal({ merchant, onClose, onSaved }: { merchant: MerchantOut; onClose: () => void; onSaved: (m: MerchantOut) => void }) {
+  const MERCHANT_STATUSES = ["Active", "Onboarding", "Suspended", "Inactive"];
+  const [status, setStatus] = useState(merchant.status);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      const updated = await api.merchants.update(merchant.id, { status });
+      onSaved(updated);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to update status");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Update Status" sub={merchant.name} icon="merchants"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || status === merchant.status} onClick={submit}>
+          {saving ? "Saving…" : "Update Status"}
+        </Btn>
+      </>}
+    >
+      <Field label="Status">
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          {MERCHANT_STATUSES.map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function OverviewTab({ m, nav }: { m: MerchantOut; nav: NavFn }) {
   return (
       <div className="detail-grid merchant-overview-grid">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -941,28 +1004,39 @@ function OverviewTab({ m, onEditCommercial, nav }: { m: MerchantOut; onEditComme
           </div>
         </div>
       </Card>
-      {m.commercial_profile && (() => {
-        const cp: MerchantCommercialProfileOut = m.commercial_profile;
-        return (
-          <Card title="Commercial Profile" icon="percent" actions={<Btn variant="ghost" sm icon="edit" onClick={onEditCommercial}>Edit</Btn>}>
-            <div className="card-pad">
-              <dl className="kv">
-                {cp.mdr_plan        && <><dt>MDR plan</dt><dd>{cp.mdr_plan}</dd></>}
-                {cp.rental_plan_id  && <><dt>Rental plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
-                {cp.rental_price != null && <><dt>Rental price</dt><dd>RM {cp.rental_price.toFixed(2)}</dd></>}
-                {cp.plan_period     && <><dt>Billing period</dt><dd>{cp.plan_period}</dd></>}
-                {cp.effective_date  && <><dt>Effective date</dt><dd>{cp.effective_date}</dd></>}
-                {cp.trial_start     && <><dt>Trial start</dt><dd>{cp.trial_start}</dd></>}
-                {cp.trial_end       && <><dt>Trial end</dt><dd>{cp.trial_end}</dd></>}
-                {cp.discount_type   && <><dt>Discount type</dt><dd>{cp.discount_type}</dd></>}
-                {cp.discount_value != null && <><dt>Discount value</dt><dd>{cp.discount_value}</dd></>}
-              </dl>
-            </div>
-          </Card>
-        );
-      })()}
       </div>
     </div>
+  );
+}
+
+function CommercialTab({ m, onEdit }: { m: MerchantOut; onEdit: () => void }) {
+  if (!m.commercial_profile) {
+    return (
+      <Card>
+        <Empty icon="percent" title="No commercial profile" sub="Set up a commercial profile to configure MDR, rental plan and billing terms" />
+        <div style={{ display: "flex", justifyContent: "center", paddingBottom: 20 }}>
+          <Btn variant="primary" icon="plus" onClick={onEdit}>Set Up Commercial Profile</Btn>
+        </div>
+      </Card>
+    );
+  }
+  const cp: MerchantCommercialProfileOut = m.commercial_profile;
+  return (
+    <Card title="Commercial Profile" icon="percent" actions={<Btn variant="ghost" sm icon="edit" onClick={onEdit}>Edit</Btn>}>
+      <div className="card-pad">
+        <dl className="kv">
+          {cp.mdr_plan            && <><dt>MDR Plan</dt><dd>{cp.mdr_plan}</dd></>}
+          {cp.rental_plan_id      && <><dt>Rental Plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
+          {cp.rental_price != null && <><dt>Rental Price</dt><dd>RM {cp.rental_price.toFixed(2)}</dd></>}
+          {cp.plan_period         && <><dt>Billing Period</dt><dd>{cp.plan_period}</dd></>}
+          {cp.effective_date      && <><dt>Effective Date</dt><dd>{cp.effective_date}</dd></>}
+          {cp.trial_start         && <><dt>Trial Start</dt><dd>{cp.trial_start}</dd></>}
+          {cp.trial_end           && <><dt>Trial End</dt><dd>{cp.trial_end}</dd></>}
+          {cp.discount_type       && <><dt>Discount Type</dt><dd>{cp.discount_type}</dd></>}
+          {cp.discount_value != null && <><dt>Discount Value</dt><dd>{cp.discount_value}</dd></>}
+        </dl>
+      </div>
+    </Card>
   );
 }
 

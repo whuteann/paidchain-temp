@@ -75,6 +75,8 @@ export function Dashboard({ nav }: { nav: NavFn }) {
       .finally(() => setLoading(false));
   }, [isMonth]);
 
+  console.log("data", data);
+
   const termBreakdown = data?.terminal_status_breakdown ?? {};
   const tMax = Math.max(...Object.values(termBreakdown), 1);
 

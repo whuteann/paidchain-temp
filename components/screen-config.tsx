@@ -413,7 +413,7 @@ export function MDR() {
         title="MDR Rates"
         sub="Merchant Discount Rate schedule by payment type"
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
+          {/* <Btn variant="ghost" icon="download">Export</Btn> */}
           <Btn variant="primary" icon="plus" onClick={() => setModal({ open: true })}>Add Rate</Btn>
         </>}
       />
