@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
-import { RENTAL_PLANS, RENTAL_STATUS } from "./data";
+import { RENTAL_PLANS, RENTAL_STATUS, BANKS } from "./data";
 import { useCustomers } from "./customers-context";
 import { useMerchants } from "./merchants-context";
 import { useTerminals } from "./terminals-context";
@@ -146,6 +146,88 @@ function CreateRentalModal({ onClose, onCreate }: { onClose: () => void; onCreat
   );
 }
 
+/* =================== EXPORT MODAL =================== */
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function ExportRentalsModal({ onClose }: { onClose: () => void }) {
+  const [form, setForm] = useState({ query: "", status: "", bank: "", date_from: "", date_to: "", date_field: "start_date" });
+  const [exporting, setExporting] = useState(false);
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function submit() {
+    setExporting(true);
+    try {
+      const blob = await api.rentals.export({
+        query:      form.query      || undefined,
+        status:     form.status     || undefined,
+        bank:       form.bank       || undefined,
+        date_from:  form.date_from  || undefined,
+        date_to:    form.date_to    || undefined,
+        date_field: form.date_field || undefined,
+      });
+      downloadBlob(blob, "rentals-export.csv");
+      onClose();
+    } catch {
+      /* errors will be visible to the user */
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Export Rentals" sub="Download a CSV of rentals matching the filters below" icon="download"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="download" disabled={exporting} onClick={submit}>
+          {exporting ? "Exporting…" : "Export CSV"}
+        </Btn>
+      </>}
+    >
+      <Field label="Search query">
+        <input className="input" placeholder="Rental ID, customer, merchant…" value={form.query} onChange={(e) => set("query", e.target.value)} />
+      </Field>
+      <div className="field-row">
+        <Field label="Status">
+          <select className="input" value={form.status} onChange={(e) => set("status", e.target.value)}>
+            <option value="">All Statuses</option>
+            {Object.keys(RENTAL_STATUS).map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Bank">
+          <select className="input" value={form.bank} onChange={(e) => set("bank", e.target.value)}>
+            <option value="">All Banks</option>
+            {BANKS.map((b) => <option key={b}>{b}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Date from">
+          <input className="input" type="date" value={form.date_from} onChange={(e) => set("date_from", e.target.value)} />
+        </Field>
+        <Field label="Date to">
+          <input className="input" type="date" value={form.date_to} onChange={(e) => set("date_to", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Date field">
+        <select className="input" value={form.date_field} onChange={(e) => set("date_field", e.target.value)}>
+          <option value="start_date">Start Date</option>
+          <option value="end_date">End Date</option>
+          <option value="created_at">Created At</option>
+        </select>
+      </Field>
+    </Modal>
+  );
+}
+
 /* =================== LISTING =================== */
 const RENTALS_PAGE_SIZE = 20;
 
@@ -159,6 +241,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -216,7 +299,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
         title="Rentals"
         sub="Terminal rental agreements · customer, merchant and device billing relationships"
         actions={<>
-          {/* <Btn variant="ghost" icon="download">Export</Btn> */}
+          <Btn variant="ghost" icon="download" onClick={() => setShowExport(true)}>Export</Btn>
           {/* <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Rental</Btn> */}
         </>}
       />
@@ -299,9 +382,86 @@ export function Rentals({ nav }: { nav: NavFn }) {
         <Pagination total={total} shown={rentals.length} page={page} pages={pages} onPageChange={changePage} />
       </Card>
 
+      {showExport && <ExportRentalsModal onClose={() => setShowExport(false)} />}
       {showCreate && <CreateRentalModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
+  );
+}
+
+/* =================== EDIT RENTAL MODAL =================== */
+function EditRentalModal({ rental, onClose, onSave }: {
+  rental: RentalOut;
+  onClose: () => void;
+  onSave: (r: RentalOut) => void;
+}) {
+  const [form, setForm] = useState({
+    status:       rental.status,
+    plan:         rental.plan,
+    monthly_rate: String(rental.monthly_rate),
+    end_date:     rental.end_date || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      const result = await api.rentals.update(rental.id, {
+        status:       form.status       || undefined,
+        plan:         form.plan         || undefined,
+        monthly_rate: form.monthly_rate ? parseFloat(form.monthly_rate) : undefined,
+        end_date:     form.end_date     || null,
+      });
+      onSave(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Save failed");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Edit Rental" sub={"Update rental " + rental.id} icon="edit"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving} onClick={submit}>
+          {saving ? "Saving…" : "Save Changes"}
+        </Btn>
+      </>}
+    >
+      <div className="field-row">
+        <Field label="Status">
+          <select className="input" value={form.status} onChange={(e) => set("status", e.target.value)}>
+            {Object.keys(RENTAL_STATUS).map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Plan">
+          <select className="input" value={form.plan} onChange={(e) => set("plan", e.target.value)}>
+            {RENTAL_PLANS.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Monthly Rate (RM)">
+          <input className="input" type="number" min="0" step="0.01" value={form.monthly_rate}
+            onChange={(e) => set("monthly_rate", e.target.value)} />
+        </Field>
+        <Field label="End Date">
+          <input className="input" type="date" value={form.end_date}
+            onChange={(e) => set("end_date", e.target.value)} />
+        </Field>
+      </div>
+      {err && (
+        <div style={{ padding: "8px 12px", background: "var(--bad-bg)", border: "1px solid var(--bad)", borderRadius: 7, fontSize: 13, color: "var(--bad)" }}>
+          {err}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -311,6 +471,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
   const [docBusy, setDocBusy] = useState<"invoice" | "einvoice" | null>(null);
 
   useEffect(() => {
@@ -401,6 +562,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={rental.customer.name + " · " + rental.merchant.name + " · " + rental.terminal.brand + " " + rental.terminal.model}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back</Btn>
+          <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>
           <Btn variant="ghost" icon="download">Export</Btn>
         </>}
       />
@@ -521,6 +683,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </Card>
 
+      {showEdit && <EditRentalModal rental={rental} onClose={() => setShowEdit(false)} onSave={(r) => { setRental(r); showToast("Rental updated"); }} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );

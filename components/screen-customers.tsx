@@ -266,7 +266,7 @@ export function Customers({ nav }: { nav: NavFn }) {
         title="Customers"
         sub="Billing entities · parent organisations that own one or more merchants"
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
+          {/* <Btn variant="ghost" icon="download">Export</Btn> */}
           <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Customer</Btn>
         </>}
       />

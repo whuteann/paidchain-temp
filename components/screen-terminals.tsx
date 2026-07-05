@@ -74,7 +74,7 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
         await Promise.all(pendingTids.map((t) => api.terminals.createTid(terminalSerial(result), t)));
       }
       if (linkSim && selectedSimId) {
-        await api.simCards.update(selectedSimId, { terminal_serial: terminalSerial(result), status: "Active" });
+        await api.terminals.linkSim(terminalSerial(result), { simcard_id: selectedSimId });
       }
       onRegister(result);
       onClose();
@@ -282,6 +282,7 @@ function BulkUploadModal({ onClose, onComplete }: {
 }) {
   const [settings, setSettings] = useState<TermSettingOut[]>([]);
   const [settingId, setSettingId] = useState("");
+  const [bank, setBulkBank] = useState(BANKS[0]);
   const [location, setLocation] = useState("KL Warehouse");
   const [file, setFile] = useState<File | null>(null);
   const [serialCount, setSerialCount] = useState(0);
@@ -325,6 +326,7 @@ function BulkUploadModal({ onClose, onComplete }: {
       const body: TerminalBulkCreate = {
         term_setting_id: settingId,
         serial_numbers: serialNumbers,
+        bank: bank || null,
         initial_location: location,
         sim_type: "WiFi only",
       };
@@ -370,11 +372,18 @@ function BulkUploadModal({ onClose, onComplete }: {
           {setting.deposit > 0 && <Chip cls="chip-neutral">Deposit RM {setting.deposit}</Chip>}
         </div>
       )}
-      <Field label="Initial location">
-        <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
-          {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
-        </select>
-      </Field>
+      <div className="field-row">
+        <Field label="Bank">
+          <select className="input" value={bank} onChange={(e) => setBulkBank(e.target.value)}>
+            {BANKS.map((b) => <option key={b}>{b}</option>)}
+          </select>
+        </Field>
+        <Field label="Initial location">
+          <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
+            {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
+          </select>
+        </Field>
+      </div>
       <Field label="Serial number CSV" hint="required">
         <input
           className="input"
@@ -513,7 +522,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
         </Field>
         <Field label="Category">
           <select className="input" value={f.category} onChange={(e) => set("category", e.target.value)}>
-            {["Countertop","Portable","Mobile (mPOS)","SoftPOS"].map((c) => <option key={c}>{c}</option>)}
+            {["Countertop", "Portable", "Mobile (mPOS)", "SoftPOS"].map((c) => <option key={c}>{c}</option>)}
           </select>
         </Field>
       </div>
@@ -538,10 +547,17 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
           <input className="input" type="number" placeholder="0.00" value={f.setup_fee} onChange={(e) => set("setup_fee", e.target.value)} />
         </Field>
       </div>
-      <label style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13, fontWeight: 500 }}>
-        <input type="checkbox" checked={f.active} onChange={(e) => set("active", e.target.checked)} />
-        Active — available for new rentals
-      </label>
+      {
+        existing
+          ?
+          <label style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13, fontWeight: 500 }}>
+            <input type="checkbox" checked={f.active} onChange={(e) => set("active", e.target.checked)} />
+            Active — available for new rentals
+          </label>
+          :
+          <></>
+      }
+
       {err && (
         <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--bad-bg, #fef2f2)", border: "1px solid var(--bad)", borderRadius: 7, fontSize: 13, color: "var(--bad)" }}>
           {err}
@@ -555,18 +571,22 @@ function TerminalSettingsTab() {
   const [rows, setRows] = useState<TermSettingOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [brand, setBrand] = useState("");
+  const [active, setActive] = useState<"" | "true" | "false">("");
   const [editRow, setEditRow] = useState<TermSettingOut | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    api.termSettings.list()
+    setLoading(true);
+    api.termSettings.list({
+      brand: brand || undefined,
+      active: active === "" ? undefined : active === "true",
+    })
       .then(setRows)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [brand, active]);
 
   function handleSave(r: TermSettingOut) {
     if (editRow) {
@@ -581,21 +601,6 @@ function TerminalSettingsTab() {
     setTimeout(() => setToast(null), 2400);
   }
 
-  async function handleDelete(id: string) {
-    setDeleting(true);
-    try {
-      await api.termSettings.remove(id);
-      setRows((prev) => prev.filter((x) => x.id !== id));
-      setDeleteId(null);
-      setToast("Terminal setting removed");
-      setTimeout(() => setToast(null), 2400);
-    } catch (e) {
-      setToast(e instanceof ApiError ? e.message : "Delete failed");
-      setTimeout(() => setToast(null), 3000);
-    } finally {
-      setDeleting(false);
-    }
-  }
 
   const filtered = rows.filter((r) =>
     (r.brand + " " + r.model + " " + r.category).toLowerCase().includes(q.toLowerCase())
@@ -607,13 +612,22 @@ function TerminalSettingsTab() {
       <Card>
         <Toolbar>
           <SearchBox value={q} onChange={setQ} placeholder="Search brand or model…" />
+          <select className="input" style={{ width: 140 }} value={brand} onChange={(e) => setBrand(e.target.value)}>
+            <option value="">All Brands</option>
+            {Object.keys(BRANDS).map((b) => <option key={b}>{b}</option>)}
+          </select>
+          <select className="input" style={{ width: 120 }} value={active} onChange={(e) => setActive(e.target.value as "" | "true" | "false")}>
+            <option value="">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
           <Btn variant="primary" icon="plus" onClick={() => { setShowCreate(true); setEditRow(null); }}>New Terminal Setting</Btn>
           <span className="tb-meta">{loading ? "Loading…" : `${filtered.length} rate cards`}</span>
         </Toolbar>
         <div className="tbl-wrap">
           <table className="tbl">
             <thead>
-              <tr>{["Brand / Model","Bank","Category","Monthly Rental","Deposit","Setup Fee","Units","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
+              <tr>{["Brand / Model", "Bank", "Category", "Monthly Rental", "Deposit", "Setup Fee", "Units", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {!loading && filtered.map((r) => (
@@ -634,19 +648,17 @@ function TerminalSettingsTab() {
                   <td className="td-mut">{r.units}</td>
                   <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
                   <td>
-                    {deleteId === r.id ? (
-                      <div className="row-actions">
-                        <Btn variant="ghost" sm style={{ color: "var(--bad)", fontSize: 12 }} disabled={deleting} onClick={() => handleDelete(r.id)}>
-                          {deleting ? "…" : "Confirm"}
-                        </Btn>
-                        <Btn variant="ghost" sm onClick={() => setDeleteId(null)}>Cancel</Btn>
-                      </div>
-                    ) : (
-                      <div className="row-actions">
-                        <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>
-                        <button className="icon-btn" title="Remove" style={{ color: "var(--bad)" }} onClick={() => setDeleteId(r.id)}><Icon name="trash" size={14} /></button>
-                      </div>
-                    )}
+                    <div className="row-actions">
+                      <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>
+                      <button
+                        className="icon-btn"
+                        title={r.active ? "Deactivate" : "Activate"}
+                        style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
+                        onClick={() => api.termSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
+                      >
+                        <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -716,11 +728,11 @@ export function Terminals({
   function resetPage() { setPage(1); }
 
   const quick = [
-    { id: "All",         label: "All" },
-    { id: "Rented",      label: "Rented" },
-    { id: "In Stock",    label: "In Stock" },
+    { id: "All", label: "All" },
+    { id: "Rented", label: "Rented" },
+    { id: "In Stock", label: "In Stock" },
     { id: "Maintenance", label: "Maintenance" },
-    { id: "Faulty",      label: "Faulty" },
+    { id: "Faulty", label: "Faulty" },
   ];
 
   function handleRegister(t: TerminalOut) {
@@ -769,7 +781,7 @@ export function Terminals({
           : "Device model templates · rental rates, deposit and setup fees"}
         actions={tab === "inventory" ? (
           <>
-            <Btn variant="ghost" icon="download">Export</Btn>
+            {/* <Btn variant="ghost" icon="download">Export</Btn> */}
             <Btn variant="ghost" icon="upload" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Btn>
             <Btn variant="primary" icon="plus" onClick={() => setShowRegister(true)}>Register Device</Btn>
           </>
@@ -985,6 +997,7 @@ export function TerminalDetail({
 
   const [showStatus, setShowStatus] = useState(false);
   const [pendingStatus, setPendingStatus] = useState("");
+  const [pendingLocation, setPendingLocation] = useState("");
   const [statusSaving, setStatusSaving] = useState(false);
   const [showSimModal, setShowSimModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -1034,11 +1047,13 @@ export function TerminalDetail({
     if (!terminal) return;
     setStatusSaving(true);
     try {
-      const updated = await api.terminals.update(terminalSerial(terminal), { status: pendingStatus });
-      setTerminal(prev => {return {
-        ...prev,
-        ...updated
-      }});
+      const updated = await api.terminals.update(terminalSerial(terminal), { status: pendingStatus, location: pendingLocation || undefined });
+      setTerminal(prev => {
+        return {
+          ...prev,
+          ...updated
+        }
+      });
       setShowStatus(false);
       setToast(`Status updated to "${TERMINAL_STATUS[pendingStatus]?.label || pendingStatus}"`);
       setTimeout(() => setToast(null), 2600);
@@ -1054,16 +1069,10 @@ export function TerminalDetail({
     if (!terminal) return;
     try {
       const serial = terminalSerial(terminal);
-      if (linkedSim) {
-        await api.terminals.unlinkSim(serial);
-      }
-      const updated = await api.terminals.linkSim({ terminal_serial: serial, simcard_id: simId });
+      const updated = await api.terminals.linkSim(serial, { simcard_id: simId });
       const newSim = await api.terminals.simCard(serial);
       setLinkedSimOverride(newSim);
-      setTerminal(prev => {return {
-        ...prev,
-        ...updated
-      }});
+      setTerminal((prev) => ({ ...prev, ...updated }));
       setShowSimModal(false);
       setToast(linkedSim ? "SIM card replaced" : "SIM card linked");
       setTimeout(() => setToast(null), 2600);
@@ -1078,10 +1087,12 @@ export function TerminalDetail({
     try {
       const updated = await api.terminals.unlinkSim(terminalSerial(terminal));
       setLinkedSimOverride(null);
-      setTerminal(prev => {return {
-        ...prev,
-        ...updated
-      }});
+      setTerminal(prev => {
+        return {
+          ...prev,
+          ...updated
+        }
+      });
       setToast("SIM card unlinked — moved to storage");
       setTimeout(() => setToast(null), 2600);
     } catch {
@@ -1112,7 +1123,7 @@ export function TerminalDetail({
         </div>
         <div className="page-head-actions">
           <Btn variant="ghost" icon="edit">Edit</Btn>
-          <Btn variant="slate" icon="refresh" onClick={() => { setPendingStatus(terminal.status); setShowStatus(true); }}>Update Status</Btn>
+          <Btn variant="slate" icon="refresh" onClick={() => { setPendingStatus(terminal.status); setPendingLocation(terminal.location); setShowStatus(true); }}>Update Status</Btn>
         </div>
       </div>
 
@@ -1249,9 +1260,14 @@ export function TerminalDetail({
 
           {/* SIM Card */}
           <Card title="SIM Card" icon="phone" actions={
-            <Btn variant="ghost" sm icon="phone" onClick={() => setShowSimModal(true)}>
-              {linkedSim ? "Replace SIM Card" : "Link SIM Card"}
-            </Btn>
+            <>
+              {linkedSim && (
+                <Btn variant="ghost" sm icon="chevRight" onClick={() => nav("simcard-detail", linkedSim.id)}>View</Btn>
+              )}
+              <Btn variant="ghost" sm icon="phone" onClick={() => setShowSimModal(true)}>
+                {linkedSim ? "Replace SIM Card" : "Link SIM Card"}
+              </Btn>
+            </>
           }>
             <div className="card-pad">
               {!simLoaded ? (
@@ -1325,7 +1341,7 @@ export function TerminalDetail({
           foot={<>
             <div className="mf-spacer" />
             <Btn variant="ghost" onClick={() => setShowStatus(false)}>Cancel</Btn>
-            <Btn variant="primary" icon="check" onClick={applyStatus} disabled={statusSaving || pendingStatus === terminal.status}>
+            <Btn variant="primary" icon="check" onClick={applyStatus} disabled={statusSaving || (pendingStatus === terminal.status && pendingLocation === terminal.location)}>
               {statusSaving ? "Saving…" : "Apply Status"}
             </Btn>
           </>}
@@ -1336,6 +1352,11 @@ export function TerminalDetail({
           <Field label="Change to" hint="movement will be logged to timeline">
             <select className="input" value={pendingStatus} onChange={(e) => setPendingStatus(e.target.value)}>
               {TERMINAL_STATUS_ORDER.map((s) => <option key={s} value={s}>{TERMINAL_STATUS[s].label}</option>)}
+            </select>
+          </Field>
+          <Field label="Location">
+            <select className="input" value={pendingLocation} onChange={(e) => setPendingLocation(e.target.value)}>
+              {["KL Warehouse", "Repair Center", "In Transit", "Merchant Site"].map((l) => <option key={l}>{l}</option>)}
             </select>
           </Field>
           <Field label="Note (optional)">

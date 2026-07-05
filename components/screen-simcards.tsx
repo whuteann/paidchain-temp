@@ -143,7 +143,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
         title="SIM Cards"
         sub="SIM card inventory · manage carrier assignments and terminal links"
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
+          {/* <Btn variant="ghost" icon="download">Export</Btn> */}
           <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Add SIM Card</Btn>
         </>}
       />
@@ -185,7 +185,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
                 {!loading && simCards.map((s) => {
                   const t = s.terminal_serial ? terminals.find((t) => t.serial === s.terminal_serial) : null;
                   return (
-                    <tr key={s.id}>
+                    <tr key={s.id} onClick={() => nav("simcard-detail", s.id)}>
                       <td><span className="td-mono td-strong">{s.id}</span></td>
                       <td className="td-mono td-mut" style={{ fontSize: 12 }}>{s.iccid}</td>
                       <td className="td-mono">{s.msisdn || <span className="td-mut">—</span>}</td>
@@ -221,7 +221,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
 
 /* =================== DETAIL =================== */
 export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
-  const { terminals, updateTerminal } = useTerminals();
+  const { updateTerminal } = useTerminals();
   const [sim, setSim] = useState<SimCardOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -229,7 +229,7 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
+  
   useEffect(() => {
     api.simCards.get(id)
       .then(setSim)
@@ -249,9 +249,7 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
     </div>
   );
 
-  const linkedTerminal = sim.terminal_serial ? terminals.find((t) => t.serial === sim.terminal_serial) : null;
   const d = draft ?? sim;
-  const draftLinkedTerminal = d.terminal_serial ? terminals.find((t) => t.serial === d.terminal_serial) : null;
 
   function startEdit() { setDraft(sim); setEditing(true); }
   function cancelEdit() { setDraft(null); setEditing(false); }
@@ -276,51 +274,21 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
     if (!draft || !sim) return;
     setSaving(true);
     try {
-      const nextStatus = draft.terminal_serial
-        ? (draft.status === "In Storage" ? "Active" : draft.status)
-        : (draft.status === "Active" ? "In Storage" : draft.status);
-
-      if (sim.terminal_serial && sim.terminal_serial !== draft.terminal_serial) {
-        updateTerminal(sim.terminal_serial, { sim: "WiFi only" });
-      }
-      if (draft.terminal_serial && draft.terminal_serial !== sim.terminal_serial) {
-        updateTerminal(draft.terminal_serial, { sim: "4G + WiFi" });
-      }
-
       const result = await api.simCards.update(id, {
-        iccid: draft.iccid, msisdn: draft.msisdn,
-        carrier: draft.carrier, plan: draft.plan,
+        msisdn: draft.msisdn,
+        carrier: draft.carrier,
+        plan: draft.plan,
         data_allowance: draft.data_allowance,
-        status: nextStatus, terminal_serial: draft.terminal_serial,
+        status: draft.status,
       });
       setSim(result);
       setEditing(false);
       setDraft(null);
-      showToast(draft.terminal_serial !== sim.terminal_serial
-        ? (draft.terminal_serial ? "SIM card linked to " + draft.terminal_serial : "SIM card moved to storage")
-        : "SIM card updated");
+      showToast("SIM card updated");
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : "Save failed", 3500);
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function quickLink(serial: string | null) {
-    if (!sim) return;
-    try {
-      if (sim.terminal_serial && sim.terminal_serial !== serial) {
-        updateTerminal(sim.terminal_serial, { sim: "WiFi only" });
-      }
-      if (serial) updateTerminal(serial, { sim: "4G + WiFi" });
-      const result = await api.simCards.update(id, {
-        terminal_serial: serial,
-        status: serial ? "Active" : "In Storage",
-      });
-      setSim(result);
-      showToast(serial ? "Linked to " + serial : "Unlinked — moved to storage");
-    } catch (e) {
-      showToast(e instanceof ApiError ? e.message : "Link failed", 3500);
     }
   }
 
@@ -387,9 +355,6 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           ) : (
             <div style={{ padding: "4px 20px 16px" }}>
-              <Field label="ICCID" hint="required">
-                <input className="input" value={d.iccid} onChange={(e) => setDraftField("iccid", e.target.value)} />
-              </Field>
               <Field label="MSISDN">
                 <input className="input" placeholder="012-3456789" value={d.msisdn} onChange={(e) => setDraftField("msisdn", e.target.value)} />
               </Field>
@@ -419,74 +384,23 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
           )}
         </Card>
 
-        {/* Linked Terminal */}
-        <Card title="Linked Terminal" icon="terminal">
-          <div style={{ padding: "4px 20px 16px" }}>
-            {!editing ? (
-              linkedTerminal ? (
-                <>
-                  {[
-                    ["Serial",   linkedTerminal.serial],
-                    ["Brand",    linkedTerminal.brand],
-                    ["Model",    linkedTerminal.model],
-                    ["TID",      linkedTerminal.tid || "—"],
-                    ["Status",   linkedTerminal.status],
-                    ["Location", linkedTerminal.location],
-                  ].map(([l, v]) => (
-                    <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
-                      <span style={{ color: "var(--ink-2)" }}>{l}</span>
-                      <span style={{ fontWeight: 500 }}>{v}</span>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: 14 }}>
-                    <Btn variant="ghost" sm icon="x" onClick={() => quickLink(null)}>Unlink Terminal</Btn>
-                  </div>
-                </>
-              ) : (
-                <div style={{ padding: "16px 0" }}>
-                  <div style={{ color: "var(--ink-3)", fontSize: 13, marginBottom: 14 }}>
-                    This SIM is currently in storage and not linked to any terminal.
-                  </div>
-                  <Field label="Link to terminal">
-                    <select className="input" defaultValue=""
-                      onChange={(e) => { if (e.target.value) quickLink(e.target.value); }}>
-                      <option value="">Select terminal to link…</option>
-                      {terminals.map((t) => (
-                        <option key={t.serial} value={t.serial}>
-                          {t.brand} {t.model} · {t.serial} · {t.status}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+        {/* Terminal */}
+        {sim.terminal && (
+          <Card title="Terminal" icon="terminal" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("terminal-detail", sim.terminal!.serial)}>View</Btn>}>
+            <div style={{ padding: "4px 20px 16px" }}>
+              {[
+                ["Serial", sim.terminal.serial],
+                ["Brand",  sim.terminal.brand],
+                ["Model",  sim.terminal.model],
+              ].map(([l, v]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ color: "var(--ink-2)" }}>{l}</span>
+                  <span style={{ fontWeight: 500, fontFamily: l === "Serial" ? "var(--mono)" : undefined }}>{v}</span>
                 </div>
-              )
-            ) : (
-              <>
-                <Field label="Terminal">
-                  <select className="input" value={d.terminal_serial || ""}
-                    onChange={(e) => setDraftField("terminal_serial", e.target.value || null)}>
-                    <option value="">None — in storage</option>
-                    {terminals.map((t) => (
-                      <option key={t.serial} value={t.serial}>
-                        {t.brand} {t.model} · {t.serial} · {t.status}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                {draftLinkedTerminal && (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                    <Chip cls="chip-neutral">{draftLinkedTerminal.brand} {draftLinkedTerminal.model}</Chip>
-                    <Chip cls="chip-info">{draftLinkedTerminal.status}</Chip>
-                    {draftLinkedTerminal.merchant && <Chip cls="chip-neutral">{draftLinkedTerminal.merchant.name}</Chip>}
-                  </div>
-                )}
-                <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>
-                  Selecting a terminal sets status to Active. Clearing it moves the SIM to In Storage.
-                </p>
-              </>
-            )}
-          </div>
-        </Card>
+              ))}
+            </div>
+          </Card>
+        )}
       </div>
 
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}

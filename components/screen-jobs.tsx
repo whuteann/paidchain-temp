@@ -629,7 +629,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
             {["All", ...Object.keys(JOB_TYPES)].map((option) => <option key={option} value={option}>{option === "All" ? "All Types" : option}</option>)}
           </select>
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
-            {["All", "Open", "Completed"].map((option) => <option key={option} value={option}>{option === "All" ? "All Statuses" : option}</option>)}
+            {["All", "Pending", "Device Prepared", "Stock Prepared", "Job Done", "Completed"].map((option) => <option key={option} value={option}>{option === "All" ? "All Statuses" : option}</option>)}
           </select>
           <select className="select" value={sla} onChange={(e) => { setSla(e.target.value); resetPage(); }}>
             {["All", "On Track", "Due Soon", "Breached", "Met"].map((option) => <option key={option} value={option}>{option === "All" ? "All SLA" : option}</option>)}

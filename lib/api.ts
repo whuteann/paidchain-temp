@@ -347,6 +347,7 @@ export interface MerchantOut {
   status: string;
   finance: string;
   terminals: number;
+  terminal_count?: number;
   open_jobs: number;
   contact: string;
   phone: string;
@@ -408,6 +409,23 @@ export interface MerchantCreate {
   secondary_mid?: string | null;
   mids?: MerchantMIDIn[] | null;
   commercial_profile?: MerchantCommercialProfileIn | null;
+}
+
+export interface MerchantUpdate {
+  name?: string | null;
+  type?: string | null;
+  bank?: string | null;
+  contact?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  bank_account_name?: string | null;
+  bank_account_number?: string | null;
+  bank_account_type?: string | null;
+  mid?: string | null;
+  secondary_mid?: string | null;
+  status?: string | null;
+  finance_status?: string | null;
 }
 
 export interface MerchantListParams {
@@ -488,7 +506,7 @@ export const merchants = {
   list: (p?: MerchantListParams) => req<MerchantPage>("GET", "/merchants", { params: p }),
   get: (id: string) => req<MerchantOut>("GET", `/merchants/${id}`),
   create: (body: MerchantCreate) => req<MerchantOut>("POST", "/merchants/create", { body }),
-  update: (id: string, body: Partial<MerchantCreate>) =>
+  update: (id: string, body: MerchantUpdate) =>
     req<MerchantOut>("PATCH", `/merchants/${id}`, { body }),
   remove: (id: string) => req<CustomerMerchantOut>("DELETE", `/merchants/${id}`),
   details: () => req<MerchantDetails>("GET", "/merchants/details"),
@@ -526,7 +544,7 @@ export interface TermSettingCreate {
 }
 
 export const termSettings = {
-  list: (params?: { bank?: string; active?: boolean }) =>
+  list: (params?: { active?: boolean; brand?: string }) =>
     req<TermSettingOut[]>("GET", "/terminals/settings", { params }),
   get: (id: string) => req<TermSettingOut>("GET", `/terminals/settings/${id}`),
   create: (body: TermSettingCreate) => req<TermSettingOut>("POST", "/terminals/settings", { body }),
@@ -602,15 +620,22 @@ export interface TerminalPage {
 }
 
 export interface SimCardLinkBody {
-  terminal_serial: string;
   simcard_id: string;
+}
+
+export interface TerminalBulkItem {
+  serial_no: string;
+  tid?: string | null;
 }
 
 export interface TerminalBulkCreate {
   term_setting_id: string;
-  serial_numbers: string[];
-  initial_location: string;
-  sim_type: string;
+  serial_numbers?: string[] | null;
+  terminals?: TerminalBulkItem[] | null;
+  tids?: string[] | null;
+  bank?: string | null;
+  initial_location?: string;
+  sim_type?: string | null;
 }
 
 export interface TerminalTidOut {
@@ -657,7 +682,7 @@ export const terminals = {
   update: (serial: string, body: TerminalUpdate) =>
     req<TerminalOut>("PATCH", `/terminals/${serial}`, { body }),
   activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
-  linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
+  linkSim: (serial: string, body: SimCardLinkBody) => req<TerminalOut>("POST", `/terminals/${serial}/simcard`, { body }),
   unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
   createTid: (serial: string, body: TerminalTidCreate) =>
     req<TerminalTidOut>("POST", `/terminals/${serial}/tids`, { body }),
@@ -848,6 +873,9 @@ export const jobs = {
   escalateToReplacement: (id: string, body: EscalateToReplacementBody) =>
     req<EscalateToReplacementResult>("POST", `/jobs/${id}/escalate-to-replacement`, { body }),
 
+  export: (p?: { query?: string; type?: string; status?: string; bank?: string; date_from?: string; date_to?: string; date_field?: string }) =>
+    reqBlob("GET", "/jobs/export", { params: p }),
+
   slaList: () => req<JobSlaMap>("GET", "/settings/sla"),
   slaUpdate: (job_type_slug: string, from_stage: string, to_stage: string, body: { warning_days?: number; breach_days?: number }) =>
     req<JobSlaTransition>("PATCH", `/jobs/sla/${job_type_slug}`, { body: { from_stage, to_stage, ...body } }),
@@ -864,6 +892,7 @@ export interface SimCardOut {
   data_allowance: string;
   status: string;
   terminal_serial: string | null;
+  terminal: { serial: string; brand: string; model: string } | null;
 }
 
 export interface SimCardCreate {
@@ -872,6 +901,15 @@ export interface SimCardCreate {
   carrier: string;
   plan: string;
   data_allowance: string;
+}
+
+export interface SimCardUpdate {
+  msisdn?: string | null;
+  carrier?: string | null;
+  plan?: string | null;
+  data_allowance?: string | null;
+  terminal_serial?: string;
+  status?: string | null;
 }
 
 export interface SimCardListParams {
@@ -901,7 +939,7 @@ export const simCards = {
   list: (p?: SimCardListParams) => req<SimCardPage>("GET", "/simcards", { params: p }),
   get: (id: string) => req<SimCardOut>("GET", `/simcards/${id}`),
   create: (body: SimCardCreate) => req<SimCardOut>("POST", "/simcards", { body }),
-  update: (id: string, body: Partial<SimCardCreate> & { status?: string; terminal_serial?: string | null }) =>
+  update: (id: string, body: SimCardUpdate) =>
     req<SimCardOut>("PATCH", `/simcards/${id}`, { body }),
   remove: (id: string) => req<void>("DELETE", `/simcards/${id}`),
   details: () => req<SimCardDetails>("GET", "/simcards/details"),
@@ -1002,11 +1040,13 @@ export interface RentalCreate {
 }
 
 export interface RentalUpdate {
-  status?: string;
+  status?: string | null;
+  plan?: string | null;
+  monthly_rate?: number | null;
   end_date?: string | null;
-  invoice_issued?: string | null;
-  einvoice_issued?: string | null;
 }
+
+
 
 export interface RentalListParams {
   page?: number;
@@ -1022,6 +1062,8 @@ export const rentals = {
   update: (id: string, body: RentalUpdate) => req<RentalOut>("PATCH", `/rentals/${id}`, { body }),
   invoice: (id: string) => reqBlob("GET", `/rentals/${id}/invoice`),
   einvoice: (id: string) => reqBlob("GET", `/rentals/${id}/einvoice`),
+  export: (p?: { query?: string; status?: string; bank?: string; date_from?: string; date_to?: string; date_field?: string }) =>
+    reqBlob("GET", "/rentals/export", { params: p }),
 };
 
 // ─── Payouts ──────────────────────────────────────────────────────────────────

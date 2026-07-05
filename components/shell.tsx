@@ -1,10 +1,10 @@
 /* PaidChain — app shell: sidebar + topbar */
 import { useEffect, useState, ReactNode } from "react";
 import { useRouter } from "next/router";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { Icon } from "./icons";
 import { logout, setDevMode } from "@/store/authSlice";
-import type { AppDispatch } from "@/store";
+import type { AppDispatch, RootState } from "@/store";
 
 export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "payouts" | "payout-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs";
 export type NavFn = (to: Route, param?: string) => void;
@@ -138,6 +138,7 @@ export function Shell({ children }: ShellProps) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
+  const authUser = useSelector((s: RootState) => s.auth.user);
   const activeParent = getActiveFromPath(router.pathname);
   const crumbs = getCrumbsFromPath(router.pathname);
   const mobileTitle = crumbs[crumbs.length - 1]?.label || "PaidChain";
@@ -218,10 +219,10 @@ export function Shell({ children }: ShellProps) {
         </div>
         <div className="sb-footer">
           <div className="sb-mobile-user">
-            <div className="avatar">AR</div>
+            <div className="avatar">{authUser ? authUser.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase() : "?"}</div>
             <div>
-              <div className="u-name">Arif Rahman</div>
-              <div className="u-role">Administrator</div>
+              <div className="u-name">{authUser?.name ?? "—"}</div>
+              <div className="u-role">{authUser?.role ?? "—"}</div>
             </div>
           </div>
           <button type="button" className="sb-logout" onClick={handleLogout} title="Log out">
@@ -250,8 +251,8 @@ export function Shell({ children }: ShellProps) {
             ))}
           </nav>
           <div className="topbar-search">
-            <Icon name="search" size={16} />
-            <input placeholder="Search merchants, terminals, jobs…" />
+            {/* <Icon name="search" size={16} />
+            <input placeholder="Search merchants, terminals, jobs…" /> */}
           </div>
           <div className="topbar-icons">
             <button className="topbar-icon" title="Activity"><Icon name="activity" size={17} /></button>
@@ -261,10 +262,10 @@ export function Shell({ children }: ShellProps) {
             </button>
           </div>
           <div className="topbar-user">
-            <div className="avatar">AR</div>
+            <div className="avatar">{authUser ? authUser.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase() : "?"}</div>
             <div>
-              <div className="u-name">Arif Rahman</div>
-              <div className="u-role">Administrator</div>
+              <div className="u-name">{authUser?.name ?? "—"}</div>
+              <div className="u-role">{authUser?.role ?? "—"}</div>
             </div>
             <Icon name="chevDown" size={14} style={{ color: "var(--ink-3)" }} />
           </div>
