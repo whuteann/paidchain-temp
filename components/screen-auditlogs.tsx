@@ -4,6 +4,7 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Pagination, Empty } from "./components";
 import { api } from "@/lib/api";
 import type { AuditLogOut } from "@/lib/api";
+import { useCan } from "@/lib/use-permissions";
 
 const TYPE_META: Record<string, { cls: string; icon: string }> = {
   Create: { cls: "chip-ok",      icon: "plus" },
@@ -25,6 +26,7 @@ const ROLE_CLS: Record<string, string> = {
 const PAGE_SIZE = 15;
 
 export function AuditLogs() {
+  const can = useCan();
   const [logs, setLogs]       = useState<AuditLogOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ]             = useState("");
@@ -59,7 +61,7 @@ export function AuditLogs() {
       <PageHead
         title="Audit Logs"
         sub={total + " events · full activity trail across all modules"}
-        actions={<Btn variant="ghost" icon="download">Export</Btn>}
+        actions={can("Audit Logs.Export") ? <Btn variant="ghost" icon="download">Export</Btn> : undefined}
       />
 
       <Card>

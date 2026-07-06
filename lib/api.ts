@@ -171,9 +171,12 @@ export interface MeOut {
   name: string;
   email: string;
   role: string;
+  role_id?: string;
   status: string;
   last_active: string | null;
   jobs: number;
+  open_jobs_count?: number;
+  permissions: string[];
 }
 
 export const auth = {

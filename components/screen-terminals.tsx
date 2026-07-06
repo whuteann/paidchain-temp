@@ -6,6 +6,7 @@ import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import type { TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 /* =================== REGISTER DEVICE MODAL =================== */
 function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
@@ -568,6 +569,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
 }
 
 function TerminalSettingsTab() {
+  const can = useCan();
   const [rows, setRows] = useState<TermSettingOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -621,7 +623,7 @@ function TerminalSettingsTab() {
             <option value="true">Active</option>
             <option value="false">Inactive</option>
           </select>
-          <Btn variant="primary" icon="plus" onClick={() => { setShowCreate(true); setEditRow(null); }}>New Terminal Setting</Btn>
+          {can("Terminals.Edit") && <Btn variant="primary" icon="plus" onClick={() => { setShowCreate(true); setEditRow(null); }}>New Terminal Setting</Btn>}
           <span className="tb-meta">{loading ? "Loading…" : `${filtered.length} rate cards`}</span>
         </Toolbar>
         <div className="tbl-wrap">
@@ -649,15 +651,17 @@ function TerminalSettingsTab() {
                   <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
                   <td>
                     <div className="row-actions">
-                      <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>
-                      <button
-                        className="icon-btn"
-                        title={r.active ? "Deactivate" : "Activate"}
-                        style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
-                        onClick={() => api.termSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
-                      >
-                        <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
-                      </button>
+                      {can("Terminals.Edit") && <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>}
+                      {can("Terminals.Edit") && (
+                        <button
+                          className="icon-btn"
+                          title={r.active ? "Deactivate" : "Activate"}
+                          style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
+                          onClick={() => api.termSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
+                        >
+                          <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -666,7 +670,7 @@ function TerminalSettingsTab() {
           </table>
         </div>
       </Card>
-      {isModalOpen && (
+      {isModalOpen && can("Terminals.Edit") && (
         <TerminalSettingModal
           onClose={() => { setShowCreate(false); setEditRow(null); }}
           onSave={handleSave}
@@ -693,6 +697,7 @@ export function Terminals({
   initialRegister?: boolean;
   initialTermSettingId?: string;
 }) {
+  const can = useCan();
   const [terminalList, setTerminalList] = useState<TerminalOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"inventory" | "settings">("inventory");
@@ -782,8 +787,8 @@ export function Terminals({
         actions={tab === "inventory" ? (
           <>
             {/* <Btn variant="ghost" icon="download">Export</Btn> */}
-            <Btn variant="ghost" icon="upload" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Btn>
-            <Btn variant="primary" icon="plus" onClick={() => setShowRegister(true)}>Register Device</Btn>
+            {can("Terminals.Create") && <Btn variant="ghost" icon="upload" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Btn>}
+            {can("Terminals.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowRegister(true)}>Register Device</Btn>}
           </>
         ) : undefined}
       />
@@ -860,14 +865,14 @@ export function Terminals({
             <Pagination total={total} shown={terminalList.length} page={page} pages={pages} onPageChange={setPage} />
           </Card>
 
-          {showRegister && (
+          {showRegister && can("Terminals.Create") && (
             <RegisterDeviceModal
               onClose={() => setShowRegister(false)}
               onRegister={handleRegister}
               initialSettingId={initialTermSettingId}
             />
           )}
-          {showBulkUpload && <BulkUploadModal onClose={() => setShowBulkUpload(false)} onComplete={handleBulkUpload} />}
+          {showBulkUpload && can("Terminals.Create") && <BulkUploadModal onClose={() => setShowBulkUpload(false)} onComplete={handleBulkUpload} />}
           {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
         </>
       ) : (
@@ -990,6 +995,7 @@ export function TerminalDetail({
   initialLinkedSim: SimCardOut | null;
   simLoaded: boolean;
 }) {
+  const can = useCan();
   const [terminal, setTerminal] = useState<TerminalOut | null>(null);
   const [termSetting, setTermSetting] = useState<TermSettingOut | null>(null);
   const [linkedSimOverride, setLinkedSimOverride] = useState<SimCardOut | null | undefined>(undefined);
@@ -1045,6 +1051,7 @@ export function TerminalDetail({
 
   async function applyStatus() {
     if (!terminal) return;
+    if (!can("Terminals.Edit")) return;
     setStatusSaving(true);
     try {
       const updated = await api.terminals.update(terminalSerial(terminal), { status: pendingStatus, location: pendingLocation || undefined });
@@ -1067,6 +1074,7 @@ export function TerminalDetail({
 
   async function handleLinkSim(simId: string) {
     if (!terminal) return;
+    if (!can("Terminals.Edit")) return;
     try {
       const serial = terminalSerial(terminal);
       const updated = await api.terminals.linkSim(serial, { simcard_id: simId });
@@ -1084,6 +1092,7 @@ export function TerminalDetail({
 
   async function handleUnlinkSim() {
     if (!linkedSim || !terminal) return;
+    if (!can("Terminals.Edit")) return;
     try {
       const updated = await api.terminals.unlinkSim(terminalSerial(terminal));
       setLinkedSimOverride(null);
@@ -1100,9 +1109,6 @@ export function TerminalDetail({
       setTimeout(() => setToast(null), 2600);
     }
   }
-
-  console.log("details: ", terminal);
-
 
   return (
     <div>
@@ -1122,8 +1128,8 @@ export function TerminalDetail({
           </div>
         </div>
         <div className="page-head-actions">
-          <Btn variant="ghost" icon="edit">Edit</Btn>
-          <Btn variant="slate" icon="refresh" onClick={() => { setPendingStatus(terminal.status); setPendingLocation(terminal.location); setShowStatus(true); }}>Update Status</Btn>
+          {can("Terminals.Edit") && <Btn variant="ghost" icon="edit">Edit</Btn>}
+          {can("Terminals.Edit") && <Btn variant="slate" icon="refresh" onClick={() => { setPendingStatus(terminal.status); setPendingLocation(terminal.location); setShowStatus(true); }}>Update Status</Btn>}
         </div>
       </div>
 
@@ -1172,14 +1178,14 @@ export function TerminalDetail({
           <Card
             title={"TID Mappings" + (tids.length ? ` (${tids.length})` : "")}
             icon="terminal"
-            actions={<Btn variant="ghost" sm icon="plus" onClick={() => setShowAddTid(true)}>Add TID</Btn>}
+            actions={can("Terminals.Edit") ? <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddTid(true)}>Add TID</Btn> : undefined}
           >
             {tidsLoading ? (
               <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
             ) : tids.length === 0 ? (
               <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>
                 No TIDs linked to this device.
-                <Btn variant="ghost" sm icon="plus" style={{ marginTop: 10, display: "flex" }} onClick={() => setShowAddTid(true)}>Add TID</Btn>
+                {can("Terminals.Edit") && <Btn variant="ghost" sm icon="plus" style={{ marginTop: 10, display: "flex" }} onClick={() => setShowAddTid(true)}>Add TID</Btn>}
               </div>
             ) : (
               <div className="tbl-wrap">
@@ -1201,7 +1207,7 @@ export function TerminalDetail({
                         <td className="td-mut">{t.effective_date || "—"}</td>
                         <td className="td-mut">{t.termination_date || "—"}</td>
                         <td>
-                          <Btn variant="ghost" sm icon="edit" onClick={() => setEditingTid(t)} />
+                          {can("Terminals.Edit") && <Btn variant="ghost" sm icon="edit" onClick={() => setEditingTid(t)} />}
                         </td>
                       </tr>
                     ))}
@@ -1264,9 +1270,11 @@ export function TerminalDetail({
               {linkedSim && (
                 <Btn variant="ghost" sm icon="chevRight" onClick={() => nav("simcard-detail", linkedSim.id)}>View</Btn>
               )}
-              <Btn variant="ghost" sm icon="phone" onClick={() => setShowSimModal(true)}>
-                {linkedSim ? "Replace SIM Card" : "Link SIM Card"}
-              </Btn>
+              {can("Terminals.Edit") && (
+                <Btn variant="ghost" sm icon="phone" onClick={() => setShowSimModal(true)}>
+                  {linkedSim ? "Replace SIM Card" : "Link SIM Card"}
+                </Btn>
+              )}
             </>
           }>
             <div className="card-pad">
@@ -1282,18 +1290,20 @@ export function TerminalDetail({
                     <dt>Data</dt><dd>{linkedSim.data_allowance}</dd>
                     <dt>Status</dt><dd><Chip cls="chip-ok" dot>{linkedSim.status}</Chip></dd>
                   </dl>
-                  <Btn
-                    variant="ghost" sm icon="x"
-                    style={{ marginTop: 12, color: "var(--bad)" }}
-                    onClick={handleUnlinkSim}
-                  >
-                    Unlink SIM
-                  </Btn>
+                  {can("Terminals.Edit") && (
+                    <Btn
+                      variant="ghost" sm icon="x"
+                      style={{ marginTop: 12, color: "var(--bad)" }}
+                      onClick={handleUnlinkSim}
+                    >
+                      Unlink SIM
+                    </Btn>
+                  )}
                 </>
               ) : (
                 <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
                   No SIM card linked to this terminal.
-                  <Btn variant="ghost" sm icon="plus" style={{ marginTop: 12, display: "flex" }} onClick={() => setShowSimModal(true)}>Link SIM Card</Btn>
+                  {can("Terminals.Edit") && <Btn variant="ghost" sm icon="plus" style={{ marginTop: 12, display: "flex" }} onClick={() => setShowSimModal(true)}>Link SIM Card</Btn>}
                 </div>
               )}
             </div>
@@ -1334,7 +1344,7 @@ export function TerminalDetail({
       </div>
 
       {/* Status update modal */}
-      {showStatus && (
+      {showStatus && can("Terminals.Edit") && (
         <Modal
           title="Update Terminal Status" sub={terminalSerial(terminal) + " · " + terminal.brand + " " + terminal.model} icon="refresh" size="slim"
           onClose={() => setShowStatus(false)}
@@ -1365,9 +1375,9 @@ export function TerminalDetail({
         </Modal>
       )}
 
-      {showSimModal && <SimLinkModal terminal={terminal} hasExisting={!!linkedSim} onClose={() => setShowSimModal(false)} onLink={handleLinkSim} />}
+      {showSimModal && can("Terminals.Edit") && <SimLinkModal terminal={terminal} hasExisting={!!linkedSim} onClose={() => setShowSimModal(false)} onLink={handleLinkSim} />}
 
-      {showAddTid && (
+      {showAddTid && can("Terminals.Edit") && (
         <TidModal
           serial={terminalSerial(terminal)}
           onClose={() => setShowAddTid(false)}
@@ -1375,7 +1385,7 @@ export function TerminalDetail({
         />
       )}
 
-      {editingTid && (
+      {editingTid && can("Terminals.Edit") && (
         <TidModal
           serial={terminalSerial(terminal)}
           existing={editingTid}

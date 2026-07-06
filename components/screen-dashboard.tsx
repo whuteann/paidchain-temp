@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { DashboardOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import type { Route } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 const money = (n: number) =>
   "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -63,6 +64,7 @@ const JT_COLORS: Record<string, string> = {
 };
 
 export function Dashboard({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const [data, setData] = useState<DashboardOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMonth, setIsMonth] = useState(false);
@@ -74,8 +76,6 @@ export function Dashboard({ nav }: { nav: NavFn }) {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [isMonth]);
-
-  console.log("data", data);
 
   const termBreakdown = data?.terminal_status_breakdown ?? {};
   const tMax = Math.max(...Object.values(termBreakdown), 1);
@@ -117,7 +117,7 @@ export function Dashboard({ nav }: { nav: NavFn }) {
         {/* Terminal breakdown + jobs by type */}
         <div className="dashboard-split-grid" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
           <Card title="Terminal Inventory by Status" icon="terminal"
-            actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("terminals")}>Inventory</Btn>}
+            actions={can("Terminals.View") ? <Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("terminals")}>Inventory</Btn> : undefined}
           >
             <div className="card-pad">
               {TERMINAL_STATUS_ORDER.filter((s) => termBreakdown[s] !== undefined).map((s) => (
@@ -133,7 +133,7 @@ export function Dashboard({ nav }: { nav: NavFn }) {
           </Card>
 
           <Card title="Open Jobs by Type" icon="jobs"
-            actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>All Jobs</Btn>}
+            actions={can("Jobs.View") ? <Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>All Jobs</Btn> : undefined}
           >
             <div className="card-pad">
               {Object.keys(jobsByType).length === 0 ? (
@@ -159,7 +159,7 @@ export function Dashboard({ nav }: { nav: NavFn }) {
         {/* Recent Activity + Needs Attention */}
         <div className="dashboard-lower-grid" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
           <Card title="Recent Activity" icon="clock"
-            actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>View all</Btn>}
+            actions={can("Jobs.View") ? <Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("jobs")}>View all</Btn> : undefined}
           >
             {data.recent_activity.length === 0 ? (
               <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>No recent activity.</div>
@@ -192,10 +192,10 @@ export function Dashboard({ nav }: { nav: NavFn }) {
             <Card title="Needs Attention" icon="alert">
               <div className="attention-list">
                 {[
-                  { ico: "jobs",    c: "var(--warn)",   bg: "var(--warn-bg)",   t: data.open_jobs_count + " open jobs",              s: "Pending across all types",       go: () => nav("jobs") },
-                  { ico: "payouts", c: "var(--indigo)",  bg: "var(--indigo-bg)", t: data.pending_payouts_count + " pending payouts",   s: money(data.pending_payouts_net) + " net",  go: () => nav("payouts") },
-                  { ico: "wrench",  c: "var(--bad)",    bg: "var(--bad-bg)",    t: faultyCount + " faulty terminals",                 s: "Awaiting repair routing",        go: () => nav("terminals") },
-                ].map((a, i) => (
+                  { perm: "Jobs.View", ico: "jobs",    c: "var(--warn)",   bg: "var(--warn-bg)",   t: data.open_jobs_count + " open jobs",              s: "Pending across all types",       go: () => nav("jobs") },
+                  { perm: "Payouts.View", ico: "payouts", c: "var(--indigo)",  bg: "var(--indigo-bg)", t: data.pending_payouts_count + " pending payouts",   s: money(data.pending_payouts_net) + " net",  go: () => nav("payouts") },
+                  { perm: "Terminals.View", ico: "wrench",  c: "var(--bad)",    bg: "var(--bad-bg)",    t: faultyCount + " faulty terminals",                 s: "Awaiting repair routing",        go: () => nav("terminals") },
+                ].filter((a) => can(a.perm)).map((a, i) => (
                   <MobileListItem
                     key={i}
                     className="attention-item"

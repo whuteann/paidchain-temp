@@ -13,6 +13,7 @@ import type {
   UserOut,
 } from "@/lib/api";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 const REFERRALS_PAGE_SIZE = 20;
 const BATCHES_PAGE_SIZE = 20;
@@ -889,6 +890,7 @@ function MarkPaidModal({ batch, onClose, onSaved }: { batch: ReferralBonusBatchO
 }
 
 export function Referrals({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const [rows, setRows] = useState<ReferralOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -909,7 +911,6 @@ export function Referrals({ nav }: { nav: NavFn }) {
       status: recordStatus === "All" ? undefined : recordStatus,
       commission_status: commissionStatus === "All" ? undefined : commissionStatus,
     }).then((p) => {
-      console.log("items: ", p.items);
       setRows(p.items);
       setTotal(p.total);
       setPages(p.pages || 1);
@@ -926,7 +927,7 @@ export function Referrals({ nav }: { nav: NavFn }) {
       <PageHead
         title="Referrals"
         sub={`${total} referral leads · merchant referrals and commission eligibility`}
-        actions={<Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Add Referral</Btn>}
+        actions={can("Referral Bonuses.Create") ? <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Add Referral</Btn> : undefined}
       />
       <Card>
         <Toolbar>
@@ -982,12 +983,13 @@ export function Referrals({ nav }: { nav: NavFn }) {
         )}
         <Pagination total={total} shown={pageShown(rows, total)} page={page} pages={pages} onPageChange={setPage} />
       </Card>
-      {showCreate && <CreateReferralModal onClose={() => setShowCreate(false)} onCreate={(r) => nav("referral-detail", r.id)} />}
+      {showCreate && can("Referral Bonuses.Create") && <CreateReferralModal onClose={() => setShowCreate(false)} onCreate={(r) => nav("referral-detail", r.id)} />}
     </div>
   );
 }
 
 export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const [referral, setReferral] = useState<ReferralOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -1025,8 +1027,6 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   const merchantId = referral.merchant?.id || referral.merchant_id;
 
-  console.log(referral.attachments);
-
   return (
     <div>
       {toast}
@@ -1041,10 +1041,10 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
         <div className="page-head-actions">
           {/* <Btn variant="ghost" icon="shield" onClick={() => setModal("review")}>Review</Btn> */}
-          <Btn variant="ghost" icon="users" onClick={() => setModal("assign")}>Assign Processor</Btn>
+          {can("Referral Bonuses.Edit") && <Btn variant="ghost" icon="users" onClick={() => setModal("assign")}>Assign Processor</Btn>}
           {/* <Btn variant="ghost" icon="edit" onClick={() => setModal("processing")}>Progress</Btn> */}
-          <Btn variant="ghost" icon="upload" onClick={() => setModal("upload")}>Attachment</Btn>
-          <Btn variant="primary" icon="checkCircle" onClick={() => setModal("confirm")}>Confirm</Btn>
+          {can("Referral Bonuses.Edit") && <Btn variant="ghost" icon="upload" onClick={() => setModal("upload")}>Attachment</Btn>}
+          {can("Referral Bonuses.Confirm") && <Btn variant="primary" icon="checkCircle" onClick={() => setModal("confirm")}>Confirm</Btn>}
         </div>
       </div>
 
@@ -1067,7 +1067,7 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       <div className="detail-grid">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card title="Lead Information" icon="building" actions={<Btn sm variant="ghost" icon="edit" onClick={() => setModal("edit-lead")}>Edit</Btn>}>
+          <Card title="Lead Information" icon="building" actions={can("Referral Bonuses.Edit") ? <Btn sm variant="ghost" icon="edit" onClick={() => setModal("edit-lead")}>Edit</Btn> : undefined}>
             <div className="card-pad">
               <dl className="kv">
                 <dt>Merchant name</dt><dd>{referral.merchant_name}</dd>
@@ -1083,7 +1083,7 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          <Card title="Processing Progress" icon="activity" actions={<Btn sm variant="ghost" icon="edit" onClick={() => setModal("edit-progress")}>Edit</Btn>}>
+          <Card title="Processing Progress" icon="activity" actions={can("Referral Bonuses.Edit") ? <Btn sm variant="ghost" icon="edit" onClick={() => setModal("edit-progress")}>Edit</Btn> : undefined}>
             <div className="card-pad">
               <dl className="kv">
                 <dt>Lead progress</dt><dd>{statusChip(referral.lead_status, "lead")}</dd>
@@ -1095,7 +1095,7 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          <Card title="Merchant Link & Activation" icon="link" actions={<Btn sm variant="ghost" icon="link" onClick={() => setModal("link")}>Link</Btn>}>
+          <Card title="Merchant Link & Activation" icon="link" actions={can("Referral Bonuses.Edit") ? <Btn sm variant="ghost" icon="link" onClick={() => setModal("link")}>Link</Btn> : undefined}>
             <div className="card-pad">
               <dl className="kv">
                 <dt>Linked merchant</dt><dd>{merchantId ? <span className="mono">{merchantId}</span> : "-"}</dd>
@@ -1150,7 +1150,7 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          <Card title="Attachments" icon="file" actions={<Btn sm variant="ghost" icon="upload" onClick={() => setModal("upload")}>Upload</Btn>}>
+          <Card title="Attachments" icon="file" actions={can("Referral Bonuses.Edit") ? <Btn sm variant="ghost" icon="upload" onClick={() => setModal("upload")}>Upload</Btn> : undefined}>
             <div className="card-pad">
               {!referral.attachments?.length ? (
                 <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No attachments</div>
@@ -1189,28 +1189,29 @@ export function ReferralDetail({ id, nav }: { id: string; nav: NavFn }) {
           <Card>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {merchantId && <Btn variant="ghost" icon="merchants" onClick={() => nav("merchant-detail", merchantId)}>Open Merchant</Btn>}
-              <Btn variant="ghost" icon="link" onClick={() => setModal("link")}>Link Existing Merchant</Btn>
-              <Btn variant="ghost" icon="merchants" onClick={() => nav("merchants")}>Create Merchant</Btn>
-              <Btn variant="danger" icon="x" onClick={() => setModal("cancel")}>Close Referral</Btn>
+              {can("Referral Bonuses.Edit") && <Btn variant="ghost" icon="link" onClick={() => setModal("link")}>Link Existing Merchant</Btn>}
+              {can("Merchants.Create") && <Btn variant="ghost" icon="merchants" onClick={() => nav("merchants")}>Create Merchant</Btn>}
+              {can("Referral Bonuses.Edit") && <Btn variant="danger" icon="x" onClick={() => setModal("cancel")}>Close Referral</Btn>}
             </div>
           </Card>
         </div>
       </div>
 
-      {modal === "edit-lead" && <EditLeadInfoModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "edit-progress" && <EditLeadProgressModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "review" && <ValidateReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "assign" && <AssignProcessorModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "processing" && <ProcessingModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "link" && <LinkMerchantModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "confirm" && <ConfirmReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "cancel" && <CancelReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
-      {modal === "upload" && <UploadAttachmentModal referral={referral} onClose={() => setModal(null)} onUploaded={() => load().then(() => flash("Attachment uploaded"))} />}
+      {modal === "edit-lead" && can("Referral Bonuses.Edit") && <EditLeadInfoModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "edit-progress" && can("Referral Bonuses.Edit") && <EditLeadProgressModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "review" && can("Referral Bonuses.Edit") && <ValidateReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "assign" && can("Referral Bonuses.Edit") && <AssignProcessorModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "processing" && can("Referral Bonuses.Edit") && <ProcessingModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "link" && can("Referral Bonuses.Edit") && <LinkMerchantModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "confirm" && can("Referral Bonuses.Confirm") && <ConfirmReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "cancel" && can("Referral Bonuses.Edit") && <CancelReferralModal referral={referral} onClose={() => setModal(null)} onSaved={update} />}
+      {modal === "upload" && can("Referral Bonuses.Edit") && <UploadAttachmentModal referral={referral} onClose={() => setModal(null)} onUploaded={() => load().then(() => flash("Attachment uploaded"))} />}
     </div>
   );
 }
 
 export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const now = new Date();
   const [rows, setRows] = useState<ReferralBonusBatchOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1246,7 +1247,7 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
       <PageHead
         title="Referral Bonuses"
         sub={`${total} quarterly batches · RM50 lead generator and RM50 processor lines`}
-        actions={<Btn variant="primary" icon="plus" onClick={() => setShowGenerate(true)}>Generate Batch</Btn>}
+        actions={can("Referral Bonuses.Create") ? <Btn variant="primary" icon="plus" onClick={() => setShowGenerate(true)}>Generate Batch</Btn> : undefined}
       />
       <Card>
         <Toolbar>
@@ -1297,7 +1298,7 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
         )}
         <Pagination total={total} shown={pageShown(rows, total)} page={page} pages={pages} onPageChange={setPage} />
       </Card>
-      {showGenerate && <GenerateBatchModal onClose={() => setShowGenerate(false)} onCreate={(b) => nav("referral-bonus-batch-detail", b.id)} />}
+      {showGenerate && can("Referral Bonuses.Create") && <GenerateBatchModal onClose={() => setShowGenerate(false)} onCreate={(b) => nav("referral-bonus-batch-detail", b.id)} />}
     </div>
   );
 }
@@ -1335,6 +1336,7 @@ function BatchLinesTable({ lines }: { lines: ReferralBonusLineOut[] }) {
 }
 
 export function ReferralBonusBatchDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const [batch, setBatch] = useState<ReferralBonusBatchOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -1353,6 +1355,7 @@ export function ReferralBonusBatchDetail({ id, nav }: { id: string; nav: NavFn }
 
   async function exportCsv() {
     if (!batch) return;
+    if (!can("Referral Bonuses.Export")) return;
     setExporting(true);
     try {
       const blob = await api.referralBonusBatches.export(batch.id);
@@ -1394,8 +1397,8 @@ export function ReferralBonusBatchDetail({ id, nav }: { id: string; nav: NavFn }
           <p className="page-sub">{batch.id} · generated {fmtDate(batch.generated_at)}</p>
         </div>
         <div className="page-head-actions">
-          <Btn variant="ghost" icon="download" disabled={exporting} onClick={exportCsv}>{exporting ? "Exporting..." : "Export CSV"}</Btn>
-          <Btn variant="primary" icon="checkCircle" disabled={batch.status === "Paid"} onClick={() => setShowPaid(true)}>Mark Paid</Btn>
+          {can("Referral Bonuses.Export") && <Btn variant="ghost" icon="download" disabled={exporting} onClick={exportCsv}>{exporting ? "Exporting..." : "Export CSV"}</Btn>}
+          {can("Referral Bonuses.Process") && <Btn variant="primary" icon="checkCircle" disabled={batch.status === "Paid"} onClick={() => setShowPaid(true)}>Mark Paid</Btn>}
         </div>
       </div>
 
@@ -1420,7 +1423,7 @@ export function ReferralBonusBatchDetail({ id, nav }: { id: string; nav: NavFn }
         <BatchLinesTable lines={lines} />
       </Card>
 
-      {showPaid && (
+      {showPaid && can("Referral Bonuses.Process") && (
         <MarkPaidModal
           batch={batch}
           onClose={() => setShowPaid(false)}

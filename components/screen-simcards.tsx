@@ -7,6 +7,7 @@ import { useTerminals } from "./terminals-context";
 import { NavFn } from "./shell";
 import { api, ApiError } from "@/lib/api";
 import type { SimCardOut, SimCardCreate, SimCardDetails } from "@/lib/api";
+import { useCan } from "@/lib/use-permissions";
 
 function SimStatus({ status }: { status: string }) {
   const m = SIM_STATUS[status] || {};
@@ -35,7 +36,6 @@ function CreateSimCardModal({ onClose, onCreate }: {
       onCreate(result);
       onClose();
     } catch (e) {
-      console.log("error: ", e);
       setErr(e instanceof ApiError ? e.message : "Failed to add SIM card");
       setSaving(false);
     }
@@ -94,6 +94,7 @@ const SIMCARDS_PAGE_SIZE = 20;
 
 /* =================== LISTING =================== */
 export function SimCards({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const { terminals } = useTerminals();
   const [simCards, setSimCards] = useState<SimCardOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,7 +145,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
         sub="SIM card inventory · manage carrier assignments and terminal links"
         actions={<>
           {/* <Btn variant="ghost" icon="download">Export</Btn> */}
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Add SIM Card</Btn>
+          {can("SIM Cards.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Add SIM Card</Btn>}
         </>}
       />
 
@@ -213,7 +214,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
         <Pagination total={total} shown={simCards.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
 
-      {showCreate && <CreateSimCardModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {showCreate && can("SIM Cards.Create") && <CreateSimCardModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
@@ -221,6 +222,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
 
 /* =================== DETAIL =================== */
 export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const { updateTerminal } = useTerminals();
   const [sim, setSim] = useState<SimCardOut | null>(null);
   const [loading, setLoading] = useState(true);
@@ -272,6 +274,7 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function save() {
     if (!draft || !sim) return;
+    if (!can("SIM Cards.Edit")) return;
     setSaving(true);
     try {
       const result = await api.simCards.update(id, {
@@ -293,6 +296,7 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
   }
 
   async function handleDelete() {
+    if (!can("SIM Cards.Delete")) return;
     setDeleting(true);
     try {
       await api.simCards.remove(id);
@@ -319,12 +323,14 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={sim.carrier + " · " + sim.iccid}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("simcards")}>Back</Btn>
-          {!editing ? (
+          {!editing || !can("SIM Cards.Edit") ? (
             <>
-              <Btn variant="ghost" icon="edit" onClick={startEdit}>Edit</Btn>
-              <Btn variant="ghost" icon="trash" style={{ color: "var(--bad)" }} disabled={deleting} onClick={handleDelete}>
-                {deleting ? "Deleting…" : "Delete"}
-              </Btn>
+              {can("SIM Cards.Edit") && <Btn variant="ghost" icon="edit" onClick={startEdit}>Edit</Btn>}
+              {can("SIM Cards.Delete") && (
+                <Btn variant="ghost" icon="trash" style={{ color: "var(--bad)" }} disabled={deleting} onClick={handleDelete}>
+                  {deleting ? "Deleting…" : "Delete"}
+                </Btn>
+              )}
             </>
           ) : (
             <>

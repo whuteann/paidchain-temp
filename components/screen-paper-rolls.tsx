@@ -5,6 +5,7 @@ import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal
 import { api, ApiError } from "@/lib/api";
 import type { PaperRollOut, PaperRollCreate, PaperRollDetails } from "@/lib/api";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 const LOW = 100;
 const CRITICAL = 50;
@@ -16,8 +17,9 @@ function TypeChip({ type }: { type: string }) {
 
 /* =================== UPDATE STOCK MODAL =================== */
 function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e: PaperRollOut) => void }) {
+  const can = useCan();
   const [f, setF] = useState({
-    direction: "in", subType: "Issued",
+    direction: can("Paper Rolls.Record") ? "in" : "out", subType: can("Paper Rolls.Record") ? "Issued" : "Adjustment",
     quantity: "", reference: "", note: "",
     date: new Date().toISOString().slice(0, 10),
   });
@@ -30,6 +32,7 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
   async function submit() {
     if (!valid) return;
     const type = f.direction === "in" ? "Received" : (f.subType as "Issued" | "Adjustment");
+    if (type === "Adjustment" ? !can("Paper Rolls.Adjust") : !can("Paper Rolls.Record")) return;
     const body: PaperRollCreate = {
       type,
       quantity: f.direction === "in" ? qty : -qty,
@@ -65,7 +68,7 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
           {[
             { id: "in",  label: "Stock In — Received",  icon: "arrowUp" },
             { id: "out", label: "Stock Out — Issued",    icon: "arrowDownRight" },
-          ].map((opt) => (
+          ].filter((opt) => opt.id === "in" ? can("Paper Rolls.Record") : can(["Paper Rolls.Record", "Paper Rolls.Adjust"])).map((opt) => (
             <label
               key={opt.id}
               style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", border: "1.5px solid " + (f.direction === opt.id ? "var(--slate)" : "var(--line)"), borderRadius: 10, cursor: "pointer", background: f.direction === opt.id ? "var(--bg-2, #f5f5f5)" : "transparent" }}
@@ -81,8 +84,8 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
       {f.direction === "out" && (
         <Field label="Type">
           <select className="input" value={f.subType} onChange={(e) => set("subType", e.target.value)}>
-            <option>Issued</option>
-            <option>Adjustment</option>
+            {can("Paper Rolls.Record") && <option>Issued</option>}
+            {can("Paper Rolls.Adjust") && <option>Adjustment</option>}
           </select>
         </Field>
       )}
@@ -121,6 +124,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export function PaperRolls({ nav: _ }: { nav: NavFn }) {
+  const can = useCan();
   const [entries, setEntries] = useState<PaperRollOut[]>([]);
   const [details, setDetails] = useState<PaperRollDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -158,6 +162,7 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
   });
 
   async function handleExport() {
+    if (!can("Paper Rolls.Export")) return;
     setExporting(true);
     try {
       const blob = await api.paperRolls.exportBillingReport();
@@ -185,10 +190,10 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
         title="Paper Rolls"
         sub="Thermal paper roll inventory · track stock received and issued to merchants"
         actions={<>
-          <Btn variant="ghost" icon="download" disabled={exporting} onClick={handleExport}>
+          {can("Paper Rolls.Export") && <Btn variant="ghost" icon="download" disabled={exporting} onClick={handleExport}>
             {exporting ? "Exporting…" : "Export"}
-          </Btn>
-          <Btn variant="primary" icon="plus" onClick={() => setShowUpdate(true)}>Update Stock</Btn>
+          </Btn>}
+          {can(["Paper Rolls.Record", "Paper Rolls.Adjust"]) && <Btn variant="primary" icon="plus" onClick={() => setShowUpdate(true)}>Update Stock</Btn>}
         </>}
       />
 
@@ -278,7 +283,7 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
         <Pagination total={entries.length} shown={filtered.length} />
       </Card>
 
-      {showUpdate && <UpdateStockModal onClose={() => setShowUpdate(false)} onSave={handleSave} />}
+      {showUpdate && can(["Paper Rolls.Record", "Paper Rolls.Adjust"]) && <UpdateStockModal onClose={() => setShowUpdate(false)} onSave={handleSave} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );

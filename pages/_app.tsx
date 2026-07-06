@@ -1,12 +1,23 @@
 import "@/styles/globals.css";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { AppProps } from "next/app";
 import { useRouter } from "next/router";
 import { Provider, useSelector, useDispatch } from "react-redux";
 import { PersistGate } from "redux-persist/integration/react";
 import { store, persistor } from "@/store";
 import type { RootState, AppDispatch } from "@/store";
-import { setDevMode } from "@/store/authSlice";
+import {
+  clearRolePermissions,
+  clearRolePermissionsError,
+  setDevMode,
+  setRolePermissions,
+  setRolePermissionsError,
+  updateAuthUser,
+} from "@/store/authSlice";
+import type { AuthUser } from "@/store/authSlice";
+import type { MeOut } from "@/lib/api";
+import { api } from "@/lib/api";
+import { canAccessPath, getFirstAllowedPath, getRequiredPermission } from "@/lib/permissions";
 import { CustomersProvider } from "@/components/customers-context";
 import { JobSlaProvider } from "@/components/job-sla-context";
 import { MerchantsProvider } from "@/components/merchants-context";
@@ -19,14 +30,50 @@ import { PaperRollsProvider } from "@/components/paper-rolls-context";
 
 const PUBLIC_PATHS = ["/login"];
 
+function permissionsMatchUser(user: AuthUser, roleId: string | null, roleName: string | null) {
+  if (user.role_id && roleId) return user.role_id === roleId;
+  return !!user.role && user.role === roleName;
+}
+
+function meToAuthUser(me: MeOut, fallback: AuthUser): AuthUser {
+  return {
+    id: me.id,
+    name: me.name,
+    email: me.email,
+    role: me.role,
+    role_id: me.role_id ?? fallback.role_id,
+    status: me.status,
+    last_active: me.last_active,
+    open_jobs_count: me.open_jobs_count ?? me.jobs ?? fallback.open_jobs_count,
+    permissions: me.permissions ?? [],
+  };
+}
+
+function PermissionLoadError() {
+  return (
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--ink, #111)" }}>
+      <div style={{ fontSize: 14 }}>Unable to load role permissions.</div>
+    </div>
+  );
+}
+
 function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname: string }) {
   const router = useRouter();
   const token = useSelector((s: RootState) => s.auth.token);
+  const authUser = useSelector((s: RootState) => s.auth.user);
+  const permissions = useSelector((s: RootState) => s.auth.permissions ?? []);
+  const permissionsRoleId = useSelector((s: RootState) => s.auth.permissionsRoleId ?? null);
+  const permissionsRoleName = useSelector((s: RootState) => s.auth.permissionsRoleName ?? null);
+  const permissionError = useSelector((s: RootState) => s.auth.permissionsError ?? null);
   const devMode = useSelector((s: RootState) => s.auth.devMode);
   const dispatch = useDispatch<AppDispatch>();
+  const loadingMeRef = useRef(false);
+  const failedMeRef = useRef(false);
 
   const isPublic = PUBLIC_PATHS.includes(pathname);
   const isAuthed = !!token || devMode;
+  const requiredPermission = getRequiredPermission(pathname);
+  const hasCurrentRolePermissions = !!authUser && permissionsMatchUser(authUser, permissionsRoleId, permissionsRoleName);
 
   useEffect(() => {
     if (!isPublic && !isAuthed) {
@@ -34,8 +81,91 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
     }
   }, [isPublic, isAuthed, router]);
 
+  useEffect(() => {
+    if (isPublic || !isAuthed || devMode) {
+      loadingMeRef.current = false;
+      failedMeRef.current = false;
+      return;
+    }
+
+    if (!authUser) {
+      loadingMeRef.current = false;
+      failedMeRef.current = false;
+      dispatch(clearRolePermissions());
+      return;
+    }
+
+    if (permissionsMatchUser(authUser, permissionsRoleId, permissionsRoleName)) {
+      loadingMeRef.current = false;
+      failedMeRef.current = false;
+      if (permissionError) dispatch(clearRolePermissionsError());
+      return;
+    }
+
+    if (authUser.permissions) {
+      dispatch(setRolePermissions({
+        roleId: authUser.role_id,
+        roleName: authUser.role,
+        permissions: authUser.permissions,
+      }));
+      return;
+    }
+
+    if (permissionError && failedMeRef.current) return;
+    if (loadingMeRef.current) return;
+
+    let cancelled = false;
+    loadingMeRef.current = true;
+    if (permissionError) dispatch(clearRolePermissionsError());
+
+    api.auth.me()
+      .then((me) => {
+        if (cancelled) return;
+        failedMeRef.current = false;
+        dispatch(updateAuthUser(meToAuthUser(me, authUser)));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          failedMeRef.current = true;
+          dispatch(setRolePermissionsError(err instanceof Error ? err.message : "Failed to load role permissions."));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) loadingMeRef.current = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser, devMode, dispatch, isAuthed, isPublic, permissionError, permissionsRoleId, permissionsRoleName]);
+
+  useEffect(() => {
+    if (isPublic || !isAuthed || devMode || !authUser || permissionError || !hasCurrentRolePermissions) {
+      return;
+    }
+
+    if (!canAccessPath(pathname, permissions)) {
+      router.replace(getFirstAllowedPath(permissions));
+    }
+  }, [
+    authUser,
+    devMode,
+    hasCurrentRolePermissions,
+    isAuthed,
+    isPublic,
+    pathname,
+    permissionError,
+    permissions,
+    router,
+  ]);
+
   // Prevent protected page flash before redirect completes
   if (!isPublic && !isAuthed) return null;
+  if (!isPublic && isAuthed && !devMode && requiredPermission) {
+    if (permissionError) return <PermissionLoadError />;
+    if (!authUser || !hasCurrentRolePermissions) return null;
+    if (!canAccessPath(pathname, permissions)) return null;
+  }
 
   return (
     <>

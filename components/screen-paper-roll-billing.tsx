@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Card, Btn, PageHead, Toolbar, Empty, Chip, ResponsiveTable, MobileListItem } from "./components";
 import { api, ApiError } from "@/lib/api";
 import type { PaperRollBillingRow } from "@/lib/api";
+import { useCan } from "@/lib/use-permissions";
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -33,6 +34,7 @@ function InvoiceStatusChip({ status }: { status: string }) {
 const INVOICE_STATUS_OPTIONS = ["All", "Pending", "Invoiced", "Paid"];
 
 export function PaperRollBilling() {
+  const can = useCan();
   const [rows, setRows] = useState<PaperRollBillingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [invoiceStatus, setInvoiceStatus] = useState("All");
@@ -50,6 +52,7 @@ export function PaperRollBilling() {
   }, [invoiceStatus]);
 
   async function handleExport() {
+    if (!can("Paper Rolls.Export")) return;
     setExporting(true);
     try {
       const filter = invoiceStatus !== "All" ? invoiceStatus : undefined;
@@ -67,11 +70,11 @@ export function PaperRollBilling() {
       <PageHead
         title="Paper Roll Billing"
         sub={`${rows.length} record${rows.length !== 1 ? "s" : ""} · billing details for all paper roll jobs`}
-        actions={
+        actions={can("Paper Rolls.Export") ? (
           <Btn variant="primary" icon="download" onClick={handleExport} disabled={exporting}>
             {exporting ? "Exporting…" : "Export CSV"}
           </Btn>
-        }
+        ) : undefined}
       />
 
       <Card>

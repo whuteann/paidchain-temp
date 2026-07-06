@@ -7,6 +7,7 @@ import { CreateMerchantModal } from "./screen-merchants";
 import { api, ApiError } from "@/lib/api";
 import type { CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 function CustomerStatus({ status }: { status: string }) {
   const m = CUSTOMER_STATUS[status] || {};
@@ -172,7 +173,7 @@ function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOu
 function CustomerOnboardingModal({ customer, onSkip, onCreateMerchant }: {
   customer: CustomerOut;
   onSkip: () => void;
-  onCreateMerchant: () => void;
+  onCreateMerchant?: () => void;
 }) {
   return (
     <Modal
@@ -183,7 +184,7 @@ function CustomerOnboardingModal({ customer, onSkip, onCreateMerchant }: {
         <>
           <div className="mf-spacer" />
           <Btn variant="ghost" onClick={onSkip}>Skip for now</Btn>
-          <Btn variant="primary" iconRight="chevRight" onClick={onCreateMerchant}>Create First Merchant</Btn>
+          {onCreateMerchant && <Btn variant="primary" iconRight="chevRight" onClick={onCreateMerchant}>Create First Merchant</Btn>}
         </>
       }
     >
@@ -204,6 +205,7 @@ const CUSTOMERS_PAGE_SIZE = 20;
 
 /* =================== LISTING =================== */
 export function Customers({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const [customers, setCustomers] = useState<CustomerOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
@@ -267,7 +269,7 @@ export function Customers({ nav }: { nav: NavFn }) {
         sub="Billing entities · parent organisations that own one or more merchants"
         actions={<>
           {/* <Btn variant="ghost" icon="download">Export</Btn> */}
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Customer</Btn>
+          {can("Customers.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Customer</Btn>}
         </>}
       />
 
@@ -333,15 +335,15 @@ export function Customers({ nav }: { nav: NavFn }) {
         <Pagination total={total} shown={customers.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
 
-      {showCreate && <CreateCustomerModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {showCreate && can("Customers.Create") && <CreateCustomerModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {onboardingCustomer && (
         <CustomerOnboardingModal
           customer={onboardingCustomer}
           onSkip={finishOnboarding}
-          onCreateMerchant={startMerchantOnboarding}
+          onCreateMerchant={can("Merchants.Create") ? startMerchantOnboarding : undefined}
         />
       )}
-      {merchantOnboardingCustomer && (
+      {merchantOnboardingCustomer && can("Merchants.Create") && (
         <CreateMerchantModal
           customerId={merchantOnboardingCustomer.id}
           customerName={merchantOnboardingCustomer.name}
@@ -363,6 +365,7 @@ export function Customers({ nav }: { nav: NavFn }) {
 
 /* =================== DETAIL =================== */
 export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const [customer, setCustomer] = useState<CustomerOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -416,7 +419,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={customer.id + " · " + customer.type}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("customers")}>Back</Btn>
-          <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>
+          {can("Customers.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>}
         </>}
       />
 
@@ -467,7 +470,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
       <Card
         title={"Merchants (" + linked.length + ")"}
         icon="merchants"
-        actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowAddMerchant(true)}>Add Merchant</Btn>}
+        actions={can("Merchants.Create") ? <Btn variant="primary" sm icon="plus" onClick={() => setShowAddMerchant(true)}>Add Merchant</Btn> : undefined}
       >
         {linkedLoading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
@@ -507,7 +510,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
         )}
       </Card>
 
-      {showEdit && (
+      {showEdit && can("Customers.Edit") && (
         <EditCustomerModal
           customer={customer}
           onClose={() => setShowEdit(false)}
@@ -515,7 +518,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
         />
       )}
 
-      {showAddMerchant && (
+      {showAddMerchant && can("Merchants.Create") && (
         <CreateMerchantModal
           onClose={() => setShowAddMerchant(false)}
           onSave={handleAddMerchant}

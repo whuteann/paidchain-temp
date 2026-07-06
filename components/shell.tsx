@@ -1,10 +1,11 @@
 /* PaidChain — app shell: sidebar + topbar */
-import { useEffect, useState, ReactNode } from "react";
+import { useEffect, useMemo, useState, ReactNode } from "react";
 import { useRouter } from "next/router";
 import { useDispatch, useSelector } from "react-redux";
 import { Icon } from "./icons";
 import { logout, setDevMode } from "@/store/authSlice";
 import type { AppDispatch, RootState } from "@/store";
+import { canAccessPath } from "@/lib/permissions";
 
 export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "payouts" | "payout-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs";
 export type NavFn = (to: Route, param?: string) => void;
@@ -139,9 +140,24 @@ export function Shell({ children }: ShellProps) {
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
   const authUser = useSelector((s: RootState) => s.auth.user);
+  const permissions = useSelector((s: RootState) => s.auth.permissions ?? []);
+  const devMode = useSelector((s: RootState) => s.auth.devMode);
   const activeParent = getActiveFromPath(router.pathname);
   const crumbs = getCrumbsFromPath(router.pathname);
   const mobileTitle = crumbs[crumbs.length - 1]?.label || "PaidChain";
+
+  const visibleNav = useMemo(
+    () => NAV
+      .map((sec) => ({
+        ...sec,
+        items: sec.items.filter((it) => {
+          const path = NAV_PATHS[it.id];
+          return path ? canAccessPath(path, permissions, devMode) : true;
+        }),
+      }))
+      .filter((sec) => sec.items.length > 0),
+    [devMode, permissions]
+  );
 
   useEffect(() => {
     const closeDrawer = () => setMobileDrawerOpen(false);
@@ -196,7 +212,7 @@ export function Shell({ children }: ShellProps) {
           </button>
         </div>
         <div className="sb-scroll">
-          {NAV.map((sec) => (
+          {visibleNav.map((sec) => (
             <div key={sec.group || "_top"}>
               {sec.group && <div className="sb-section-label">{sec.group}</div>}
               {sec.items.map((it) => (
