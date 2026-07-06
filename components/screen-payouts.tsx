@@ -6,6 +6,7 @@ import { PAYOUT_METHODS } from "./data";
 import { api, ApiError } from "@/lib/api";
 import type { PayoutOut, PayoutTransaction, BulkCreateResult, PayoutCheck, PayoutDetails, CustomerOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 const money = (n: number) => "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAYOUTS_PAGE_SIZE = 20;
@@ -400,6 +401,7 @@ function UploadTransactionsModal({ onClose, onProcess }: { onClose: () => void; 
 
 /* =================== LISTING =================== */
 export function Payouts({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const [rows, setRows] = useState<PayoutOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [details, setDetails] = useState<PayoutDetails>({
@@ -492,9 +494,9 @@ export function Payouts({ nav }: { nav: NavFn }) {
         title="Payouts"
         sub="Settlement & merchant payouts · exception checks and e-invoicing"
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
-          <Btn variant="ghost" icon="upload" onClick={() => setShowUpload(true)}>Upload Transactions</Btn>
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Payout</Btn>
+          {can("Payouts.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
+          {can("Payouts.Create") && <Btn variant="ghost" icon="upload" onClick={() => setShowUpload(true)}>Upload Transactions</Btn>}
+          {can("Payouts.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Payout</Btn>}
         </>}
       />
 
@@ -568,8 +570,8 @@ export function Payouts({ nav }: { nav: NavFn }) {
         <Pagination total={total} shown={rows.length} page={page} pages={pages} onPageChange={changePage} />
       </Card>
 
-      {showCreate && <CreatePayoutModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
-      {showUpload && <UploadTransactionsModal onClose={() => setShowUpload(false)} onProcess={handleUpload} />}
+      {showCreate && can("Payouts.Create") && <CreatePayoutModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {showUpload && can("Payouts.Create") && <UploadTransactionsModal onClose={() => setShowUpload(false)} onProcess={handleUpload} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
@@ -577,6 +579,7 @@ export function Payouts({ nav }: { nav: NavFn }) {
 
 /* =================== PAYOUT DETAIL =================== */
 export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const [payout, setPayout] = useState<PayoutOut | null>(null);
   const [txns, setTxns] = useState<PayoutTransaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -618,6 +621,7 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function handleMarkPaid() {
     if (!proofFile) return;
+    if (!can("Payouts.Process")) return;
     setSaving(true);
     try {
       const today = new Date().toISOString().slice(0, 10);
@@ -639,15 +643,15 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={payout.merchant.name + " · " + payout.period}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("payouts")}>Back</Btn>
-          <Btn variant="ghost" icon="download">Export</Btn>
-          {payout.status === "Pending" && !showMarkPaid && (
+          {can("Payouts.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
+          {can("Payouts.Process") && payout.status === "Pending" && !showMarkPaid && (
             <Btn variant="primary" icon="check" onClick={() => setShowMarkPaid(true)}>Mark as Paid</Btn>
           )}
         </>}
       />
 
       {/* Inline mark-as-paid panel */}
-      {showMarkPaid && (
+      {showMarkPaid && can("Payouts.Process") && (
         <div className="card" style={{ marginBottom: 16, border: "1px solid var(--info-line, var(--line))", background: "var(--info-bg, var(--bg-2))" }}>
           <div className="card-head">
             <Icon name="checkCircle" size={17} style={{ color: "var(--info)" }} />

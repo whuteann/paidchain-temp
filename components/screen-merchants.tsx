@@ -7,6 +7,7 @@ import { api, ApiError } from "@/lib/api";
 import type { MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, MdrOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
+import { useCan } from "@/lib/use-permissions";
 
 function EntitySearchSelect<T extends { id: string }>({
   label, hint, placeholder, value, onSelect, fetchResults, renderOption, getLabel, disabled, disabledHint,
@@ -483,8 +484,6 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [q, setQ] = useState("");
   const [bank, setBank] = useState("All");
   const [status, setStatus] = useState("All");
-
-  console.log("list: ", merchantList);
   useEffect(() => {
     api.merchants.list().then((p) => setMerchantList(p.items)).catch(console.error).finally(() => setLoading(false));
   }, []);
@@ -723,6 +722,7 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
 
 /* =================== DETAIL =================== */
 export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const [merchant, setMerchant] = useState<MerchantOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -733,8 +733,6 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showEditMerchant, setShowEditMerchant] = useState(false);
   const [showEditCommercial, setShowEditCommercial] = useState(false);
   const [showUpdateStatus, setShowUpdateStatus] = useState(false);
-
-  console.log("details: ", merchant);
   useEffect(() => {
     api.merchants.get(id)
       .then(setMerchant)
@@ -779,9 +777,9 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
         <div className="page-head-actions">
           <Btn variant="ghost" icon="mail">Contact</Btn>
-          <Btn variant="ghost" icon="tag" onClick={() => setShowUpdateStatus(true)}>Update Status</Btn>
-          <Btn variant="ghost" icon="edit" onClick={() => setShowEditMerchant(true)}>Edit</Btn>
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreateJob(true)}>New Job</Btn>
+          {can("Merchants.Edit") && <Btn variant="ghost" icon="tag" onClick={() => setShowUpdateStatus(true)}>Update Status</Btn>}
+          {can("Merchants.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEditMerchant(true)}>Edit</Btn>}
+          {can("Jobs.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreateJob(true)}>New Job</Btn>}
         </div>
       </div>
 
@@ -809,12 +807,12 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
       <div style={{ marginTop: 20 }}>
         {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} />
-          : tab === "commercial" ? <CommercialTab m={merchant} onEdit={() => setShowEditCommercial(true)} />
+          : tab === "commercial" ? <CommercialTab m={merchant} canEdit={can("Merchants.Edit")} onEdit={() => setShowEditCommercial(true)} />
           : tab === "terminals"  ? <TerminalsTab rows={linkedTerminals} nav={nav} />
           : <JobsTab rows={merchantJobs} nav={nav} />}
       </div>
 
-      {showCreateJob && (
+      {showCreateJob && can("Jobs.Create") && (
         <CreateJobModal
           onClose={() => setShowCreateJob(false)}
           onCreate={(job) => {
@@ -840,7 +838,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         />
       )}
 
-      {showEditMerchant && (
+      {showEditMerchant && can("Merchants.Edit") && (
         <CreateMerchantModal
           onClose={() => setShowEditMerchant(false)}
           onSave={(next) => {
@@ -852,7 +850,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
           existingMerchant={merchant}
         />
       )}
-      {showUpdateStatus && (
+      {showUpdateStatus && can("Merchants.Edit") && (
         <UpdateMerchantStatusModal
           merchant={merchant}
           onClose={() => setShowUpdateStatus(false)}
@@ -860,7 +858,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         />
       )}
 
-      {showEditCommercial && merchant.commercial_profile && (
+      {showEditCommercial && can("Merchants.Edit") && merchant.commercial_profile && (
         <CommercialProfileModal
           merchantId={merchant.id}
           existing={merchant.commercial_profile}
@@ -1009,20 +1007,22 @@ function OverviewTab({ m, nav }: { m: MerchantOut; nav: NavFn }) {
   );
 }
 
-function CommercialTab({ m, onEdit }: { m: MerchantOut; onEdit: () => void }) {
+function CommercialTab({ m, canEdit, onEdit }: { m: MerchantOut; canEdit: boolean; onEdit: () => void }) {
   if (!m.commercial_profile) {
     return (
       <Card>
         <Empty icon="percent" title="No commercial profile" sub="Set up a commercial profile to configure MDR, rental plan and billing terms" />
-        <div style={{ display: "flex", justifyContent: "center", paddingBottom: 20 }}>
-          <Btn variant="primary" icon="plus" onClick={onEdit}>Set Up Commercial Profile</Btn>
-        </div>
+        {canEdit && (
+          <div style={{ display: "flex", justifyContent: "center", paddingBottom: 20 }}>
+            <Btn variant="primary" icon="plus" onClick={onEdit}>Set Up Commercial Profile</Btn>
+          </div>
+        )}
       </Card>
     );
   }
   const cp: MerchantCommercialProfileOut = m.commercial_profile;
   return (
-    <Card title="Commercial Profile" icon="percent" actions={<Btn variant="ghost" sm icon="edit" onClick={onEdit}>Edit</Btn>}>
+    <Card title="Commercial Profile" icon="percent" actions={canEdit ? <Btn variant="ghost" sm icon="edit" onClick={onEdit}>Edit</Btn> : undefined}>
       <div className="card-pad">
         <dl className="kv">
           {cp.mdr_plan            && <><dt>MDR Plan</dt><dd>{cp.mdr_plan}</dd></>}

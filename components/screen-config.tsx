@@ -5,6 +5,7 @@ import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pa
 import { ROLES, PERMISSION_MODULES } from "./data";
 import { api, ApiError } from "@/lib/api";
 import type { UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
+import { useCan } from "@/lib/use-permissions";
 
 /* =================== SETTINGS =================== */
 export function TerminalSettings() {
@@ -43,6 +44,7 @@ function jobTypeSlug(jobType: string): string {
 
 /* =================== REFERRAL BONUS SETTINGS =================== */
 function ReferralBonusSettings() {
+  const can = useCan();
   const [rule, setRule] = useState<ReferralBonusRuleOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -63,6 +65,7 @@ function ReferralBonusSettings() {
   }
 
   function startEdit() {
+    if (!can("Settings.Edit")) return;
     if (!rule) return;
     setDraft({
       observation_days: rule.observation_days,
@@ -81,6 +84,7 @@ function ReferralBonusSettings() {
   function cancelEdit() { setEditing(false); setDraft({}); }
 
   async function save() {
+    if (!can("Settings.Edit")) return;
     setSaving(true);
     try {
       const updated = await api.referralBonusRules.updateActive(draft);
@@ -125,7 +129,6 @@ function ReferralBonusSettings() {
   if (loading) return <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>;
   if (!rule) return <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>No active referral bonus rule found.</div>;
 
-  console.log(rule);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "relative" }}>
       {toast && (
@@ -144,7 +147,7 @@ function ReferralBonusSettings() {
               <Btn variant="primary" sm icon="check" disabled={saving} onClick={save}>Save</Btn>
             </div>
           ) : (
-            <Btn variant="ghost" sm icon="edit" onClick={startEdit}>Edit</Btn>
+            can("Settings.Edit") ? <Btn variant="ghost" sm icon="edit" onClick={startEdit}>Edit</Btn> : undefined
           )
         }
       >
@@ -213,6 +216,7 @@ function ReferralBonusSettings() {
 }
 
 function JobSlaSettings() {
+  const can = useCan();
   const [slaMap, setSlaMap] = useState<JobSlaMap>({});
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -229,6 +233,7 @@ function JobSlaSettings() {
   }
 
   function handleChange(jobType: string, fromStage: string, toStage: string, field: "warning_days" | "breach_days", value: string) {
+    if (!can("Settings.Edit")) return;
     setSlaMap((prev) => ({
       ...prev,
       [jobType]: prev[jobType].map((t) =>
@@ -241,6 +246,7 @@ function JobSlaSettings() {
   const hasInvalid = Object.values(slaMap).some((arr) => arr.some((t) => t.warning_days > t.breach_days));
 
   async function saveAll() {
+    if (!can("Settings.Edit")) return;
     if (hasInvalid) return;
     setSaving(true);
     const keys = Array.from(dirtyKeys);
@@ -267,7 +273,7 @@ function JobSlaSettings() {
       <Card
         title="Job SLA Thresholds"
         icon="clock"
-        actions={dirtyKeys.size > 0 && (
+        actions={can("Settings.Edit") && dirtyKeys.size > 0 && (
           <Btn variant="primary" sm icon="check" disabled={saving || hasInvalid} onClick={saveAll}>
             {saving ? "Saving…" : "Save Changes"}
           </Btn>
@@ -305,6 +311,7 @@ function JobSlaSettings() {
                           <td style={{ maxWidth: 160 }}>
                             <input
                               className="input" type="number" min="0"
+                              disabled={!can("Settings.Edit")}
                               style={invalid ? { borderColor: "var(--bad)" } : undefined}
                               value={t.warning_days}
                               onChange={(e) => handleChange(jobType, t.from_stage, t.to_stage, "warning_days", e.target.value)}
@@ -313,6 +320,7 @@ function JobSlaSettings() {
                           <td style={{ maxWidth: 160 }}>
                             <input
                               className="input" type="number" min="0"
+                              disabled={!can("Settings.Edit")}
                               style={invalid ? { borderColor: "var(--bad)" } : undefined}
                               value={t.breach_days}
                               onChange={(e) => handleChange(jobType, t.from_stage, t.to_stage, "breach_days", e.target.value)}
@@ -392,6 +400,7 @@ function MdrModal({ rate, onClose, onSave }: { rate?: MdrOut; onClose: () => voi
 }
 
 export function MDR() {
+  const can = useCan();
   const [rates, setRates] = useState<MdrOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -414,7 +423,7 @@ export function MDR() {
         sub="Merchant Discount Rate schedule by payment type"
         actions={<>
           {/* <Btn variant="ghost" icon="download">Export</Btn> */}
-          <Btn variant="primary" icon="plus" onClick={() => setModal({ open: true })}>Add Rate</Btn>
+          {can("Settings.Edit") && <Btn variant="primary" icon="plus" onClick={() => setModal({ open: true })}>Add Rate</Btn>}
         </>}
       />
       <Card>
@@ -443,9 +452,11 @@ export function MDR() {
                       {m.rate.toFixed(2)}<span style={{ fontSize: 11, color: "var(--ink-3)" }}>%</span>
                     </span></td>
                     <td><div className="row-actions">
-                      <button className="icon-btn" onClick={() => setModal({ open: true, rate: m })}>
-                        <Icon name="edit" size={14} />
-                      </button>
+                      {can("Settings.Edit") && (
+                        <button className="icon-btn" onClick={() => setModal({ open: true, rate: m })}>
+                          <Icon name="edit" size={14} />
+                        </button>
+                      )}
                     </div></td>
                   </tr>
                 ))}
@@ -454,7 +465,7 @@ export function MDR() {
           </div>
         )}
       </Card>
-      {modal.open && <MdrModal rate={modal.rate} onClose={() => setModal({ open: false })} onSave={handleSave} />}
+      {modal.open && can("Settings.Edit") && <MdrModal rate={modal.rate} onClose={() => setModal({ open: false })} onSave={handleSave} />}
     </div>
   );
 }
@@ -544,6 +555,7 @@ function RentalPlanModal({ plan, onClose, onSave }: { plan?: RentalPlanOut; onCl
 }
 
 export function RentalPlans() {
+  const can = useCan();
   const [plans, setPlans] = useState<RentalPlanOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
@@ -567,6 +579,7 @@ export function RentalPlans() {
   }
 
   async function handleDeactivate(p: RentalPlanOut) {
+    if (!can("Settings.Edit")) return;
     setDeactivating(p.id);
     try {
       const updated = await api.rentalPlans.deactivate(p.id);
@@ -591,7 +604,7 @@ export function RentalPlans() {
       <PageHead
         title="Rental Plans"
         sub="Define pricing plans used for merchant terminal rentals"
-        actions={<Btn variant="primary" icon="plus" onClick={() => setModal({ open: true })}>New Plan</Btn>}
+        actions={can("Settings.Edit") ? <Btn variant="primary" icon="plus" onClick={() => setModal({ open: true })}>New Plan</Btn> : undefined}
       />
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
@@ -630,10 +643,12 @@ export function RentalPlans() {
                     <td><Chip cls={p.active ? "chip-ok" : "chip-neutral"} dot>{p.active ? "Active" : "Inactive"}</Chip></td>
                     <td>
                       <div className="row-actions">
-                        <button className="icon-btn" title="Edit" onClick={() => setModal({ open: true, plan: p })}>
-                          <Icon name="edit" size={14} />
-                        </button>
-                        {p.active && (
+                        {can("Settings.Edit") && (
+                          <button className="icon-btn" title="Edit" onClick={() => setModal({ open: true, plan: p })}>
+                            <Icon name="edit" size={14} />
+                          </button>
+                        )}
+                        {can("Settings.Edit") && p.active && (
                           <button
                             className="icon-btn"
                             title="Deactivate"
@@ -654,7 +669,7 @@ export function RentalPlans() {
         )}
       </Card>
 
-      {modal.open && (
+      {modal.open && can("Settings.Edit") && (
         <RentalPlanModal plan={modal.plan} onClose={() => setModal({ open: false })} onSave={handleSave} />
       )}
 
@@ -781,6 +796,7 @@ function UsersTabContent({
   onAdd: (u: UserOut) => void;
   onUpdate: (u: UserOut) => void;
 }) {
+  const can = useCan();
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser] = useState<UserOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -793,6 +809,7 @@ function UsersTabContent({
   }
 
   async function handleStatusToggle(u: UserOut) {
+    if (!can("Users.Suspend")) return;
     const next = u.status === "Active" ? "Suspended" : "Active";
     try {
       const updated = await api.users.update(u.id, { status: next });
@@ -826,7 +843,7 @@ function UsersTabContent({
             {USERS_PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n} / page</option>)}
           </select>
           <span className="tb-meta">{loading ? "Loading…" : `${total} users`}</span>
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Invite User</Btn>
+          {can("Users.Invite") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Invite User</Btn>}
         </Toolbar>
         <div className="tbl-wrap">
           <table className="tbl">
@@ -841,10 +858,12 @@ function UsersTabContent({
                   <td className="td-mut">{u.last_active ?? "—"}</td>
                   <td>
                     <div className="row-actions">
-                      <button className="icon-btn" title="Edit" onClick={() => setEditUser(u)}><Icon name="edit" size={14} /></button>
-                      <button className="icon-btn" title={u.status === "Active" ? "Suspend" : "Activate"} onClick={() => handleStatusToggle(u)}>
-                        <Icon name={u.status === "Active" ? "x" : "check"} size={14} />
-                      </button>
+                      {can("Users.Edit") && <button className="icon-btn" title="Edit" onClick={() => setEditUser(u)}><Icon name="edit" size={14} /></button>}
+                      {can("Users.Suspend") && (
+                        <button className="icon-btn" title={u.status === "Active" ? "Suspend" : "Activate"} onClick={() => handleStatusToggle(u)}>
+                          <Icon name={u.status === "Active" ? "x" : "check"} size={14} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -855,14 +874,14 @@ function UsersTabContent({
         <Pagination total={total} shown={users.length} page={page} pages={pages} onPageChange={onPageChange} />
       </Card>
 
-      {showCreate && (
+      {showCreate && can("Users.Invite") && (
         <UserModal
           roles={roles}
           onClose={() => setShowCreate(false)}
           onSave={(u) => { onAdd(u); setShowCreate(false); showToast("User created"); }}
         />
       )}
-      {editUser && (
+      {editUser && can("Users.Edit") && (
         <UserModal
           roles={roles}
           existing={editUser}
@@ -881,6 +900,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
   existing?: UserOut;
   roles: RoleOut[];
 }) {
+  const can = useCan();
   const [f, setF] = useState(() => ({
     name: existing?.name ?? "",
     email: existing?.email ?? "",
@@ -900,6 +920,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
 
   async function submit() {
     if (!valid) return;
+    if (existing ? !can("Users.Edit") : !can("Users.Invite")) return;
     setSaving(true); setErr(null);
     try {
       const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder" };
@@ -915,6 +936,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
 
   async function handleResetPassword() {
     if (!existing || !resetPw) return;
+    if (!can("Users.Edit")) return;
     setResetting(true); setErr(null);
     try {
       const updated = await api.users.resetPassword(existing.id, resetPw);
@@ -966,7 +988,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
           ))}
         </div>
       </Field>
-      {existing && (
+      {existing && can("Users.Edit") && (
         <div style={{ marginTop: 8, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-2)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.6 }}>Reset Password</div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -990,8 +1012,8 @@ function UserModal({ onClose, onSave, existing, roles }: {
 
 /* =================== ROLES TAB =================== */
 function RolesTab({ roles, loading, onEdit }: { roles: RoleOut[]; loading: boolean; onEdit: (id: string) => void }) {
+  const can = useCan();
   const totalPerms = PERMISSION_MODULES.reduce((s, m) => s + m.actions.length, 0);
-  console.log("roles: ",  roles);
   
   if (loading) return <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>;
 
@@ -1014,7 +1036,7 @@ function RolesTab({ roles, loading, onEdit }: { roles: RoleOut[]; loading: boole
               <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{role.permissions.length}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--ink-3)" }}>/{totalPerms}</span></div>
               <div>permissions</div>
             </div>
-            <Btn variant="ghost" sm icon="edit" onClick={() => onEdit(role.id)}>Edit Permissions</Btn>
+            {can("Users.Edit") && <Btn variant="ghost" sm icon="edit" onClick={() => onEdit(role.id)}>Edit Permissions</Btn>}
           </div>
         );
       })}
@@ -1024,6 +1046,7 @@ function RolesTab({ roles, loading, onEdit }: { roles: RoleOut[]; loading: boole
 
 /* =================== ROLE DETAIL =================== */
 function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => void; onUpdate: (r: RoleOut) => void }) {
+  const can = useCan();
   const [name, setName] = useState(role.name);
   const [desc, setDesc] = useState(role.description);
   const [perms, setPerms] = useState<Set<string>>(new Set(role.permissions));
@@ -1034,6 +1057,7 @@ function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => v
   const roleMeta = ROLES[role.name];
 
   function toggle(key: string) {
+    if (!can("Users.Edit")) return;
     setPerms((prev) => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
@@ -1042,6 +1066,7 @@ function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => v
   }
 
   async function save() {
+    if (!can("Users.Edit")) return;
     setSaving(true);
     try {
       const body: RoleUpdate = { name, description: desc, permissions: Array.from(perms) };
@@ -1065,7 +1090,7 @@ function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => v
         <Chip cls={roleMeta?.chip}>{role.name}</Chip>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12.5, color: "var(--ink-3)", marginRight: 8 }}>{perms.size} of {totalCount} permissions granted</span>
-        <Btn variant="primary" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save Changes"}</Btn>
+        {can("Users.Edit") && <Btn variant="primary" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save Changes"}</Btn>}
       </div>
 
       {/* Role info */}
@@ -1116,6 +1141,7 @@ function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => v
                       >
                         <input
                           type="checkbox"
+                          disabled={!can("Users.Edit")}
                           checked={checked}
                           onChange={() => toggle(key)}
                           style={{ accentColor: "var(--indigo)", width: 14, height: 14, flexShrink: 0, cursor: "pointer" }}

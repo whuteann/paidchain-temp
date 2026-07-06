@@ -9,6 +9,7 @@ import { useTerminals } from "./terminals-context";
 import { api, ApiError } from "@/lib/api";
 import type { RentalOut } from "@/lib/api";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 const money = (n: number) => "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -232,6 +233,7 @@ function ExportRentalsModal({ onClose }: { onClose: () => void }) {
 const RENTALS_PAGE_SIZE = 20;
 
 export function Rentals({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const [rentals, setRentals] = useState<RentalOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
@@ -299,7 +301,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
         title="Rentals"
         sub="Terminal rental agreements · customer, merchant and device billing relationships"
         actions={<>
-          <Btn variant="ghost" icon="download" onClick={() => setShowExport(true)}>Export</Btn>
+          {can("Rentals.Export") && <Btn variant="ghost" icon="download" onClick={() => setShowExport(true)}>Export</Btn>}
           {/* <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Rental</Btn> */}
         </>}
       />
@@ -382,8 +384,8 @@ export function Rentals({ nav }: { nav: NavFn }) {
         <Pagination total={total} shown={rentals.length} page={page} pages={pages} onPageChange={changePage} />
       </Card>
 
-      {showExport && <ExportRentalsModal onClose={() => setShowExport(false)} />}
-      {showCreate && <CreateRentalModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {showExport && can("Rentals.Export") && <ExportRentalsModal onClose={() => setShowExport(false)} />}
+      {showCreate && can("Rentals.Create") && <CreateRentalModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
@@ -467,6 +469,7 @@ function EditRentalModal({ rental, onClose, onSave }: {
 
 /* =================== DETAIL =================== */
 export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const [rental, setRental] = useState<RentalOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -519,6 +522,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
   }
 
   async function generateInvoice() {
+    if (!can("Rentals.Edit")) return;
     setDocBusy("invoice");
     try {
       const document = await api.rentals.invoice(rental!.id);
@@ -536,6 +540,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function generateEinvoice() {
     if (!canGenerateEinvoice) return;
+    if (!can("Rentals.Edit")) return;
     setDocBusy("einvoice");
     try {
       const document = await api.rentals.einvoice(rental!.id);
@@ -562,8 +567,8 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={rental.customer.name + " · " + rental.merchant.name + " · " + rental.terminal.brand + " " + rental.terminal.model}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back</Btn>
-          <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>
-          <Btn variant="ghost" icon="download">Export</Btn>
+          {can("Rentals.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>}
+          {can("Rentals.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
         </>}
       />
 
@@ -595,12 +600,12 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
           </Card>
 
           <Card title="Billing Documents" icon="invoice" style={{ flex: 1 }} actions={<>
-            <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
+            {can("Rentals.Edit") && <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
               {docBusy === "invoice" ? "Generating…" : rental.invoice_issued ? "Regenerate Invoice" : "Generate Invoice"}
-            </Btn>
-            <Btn variant="ghost" sm icon="invoice" disabled={!canGenerateEinvoice || docBusy !== null} title={canGenerateEinvoice ? "Generate eInvoice" : "Customer TIN number required"} onClick={generateEinvoice}>
+            </Btn>}
+            {can("Rentals.Edit") && <Btn variant="ghost" sm icon="invoice" disabled={!canGenerateEinvoice || docBusy !== null} title={canGenerateEinvoice ? "Generate eInvoice" : "Customer TIN number required"} onClick={generateEinvoice}>
               {docBusy === "einvoice" ? "Generating…" : rental.einvoice_issued ? "Regenerate eInvoice" : "Generate eInvoice"}
-            </Btn>
+            </Btn>}
           </>}>
             <div style={{ padding: "4px 20px 16px" }}>
               {[
@@ -683,7 +688,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </Card>
 
-      {showEdit && <EditRentalModal rental={rental} onClose={() => setShowEdit(false)} onSave={(r) => { setRental(r); showToast("Rental updated"); }} />}
+      {showEdit && can("Rentals.Edit") && <EditRentalModal rental={rental} onClose={() => setShowEdit(false)} onSave={(r) => { setRental(r); showToast("Rental updated"); }} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );

@@ -10,6 +10,7 @@ import { api, ApiError, terminalSerial } from "@/lib/api";
 import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
+import { useCan } from "@/lib/use-permissions";
 
 /* =================== ASYNC SEARCH SELECT =================== */
 function EntitySearchSelect<T extends { id: string }>({
@@ -570,6 +571,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
 const JOBS_PAGE_SIZE = 20;
 
 export function Jobs({ nav }: { nav: NavFn }) {
+  const can = useCan();
   const [jobList, setJobList] = useState<JobOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -617,8 +619,8 @@ export function Jobs({ nav }: { nav: NavFn }) {
         title="Jobs"
         sub={total + " workflow jobs · SLA tracking, notifications and downstream actions"}
         actions={<>
-          <Btn variant="ghost" icon="download">Export</Btn>
-          <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Job</Btn>
+          {can("Jobs.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
+          {can("Jobs.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Job</Btn>}
         </>}
       />
 
@@ -674,7 +676,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
         <Pagination total={total} shown={jobList.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
 
-      {showCreate && <CreateJobModal onClose={() => setShowCreate(false)} onCreate={handleCreate} nav={nav} />}
+      {showCreate && can("Jobs.Create") && <CreateJobModal onClose={() => setShowCreate(false)} onCreate={handleCreate} nav={nav} />}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
@@ -781,6 +783,7 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
   onAssign: (serial: string) => void;
 }) {
   const router = useRouter();
+  const can = useCan();
   const [terminals, setTerminals] = useState<TerminalOut[]>([]);
   const [spec, setSpec] = useState<TermSettingOut | null>(null);
   const [selected, setSelected] = useState(job.terminal?.serial || "");
@@ -835,8 +838,8 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
       </>}
     >
       <div style={{display: "flex", gap: 10, marginBottom: 10}}>
-        <Btn variant="ghost" icon="plus" onClick={() => router.push("/terminals")}>Add New Terminal</Btn>
-        <Btn variant="ghost" icon="terminal" disabled={!requestedSettingId} onClick={addRequestedTerminal}>Add Requested Terminal</Btn>
+        {can("Terminals.Create") && <Btn variant="ghost" icon="plus" onClick={() => router.push("/terminals")}>Add New Terminal</Btn>}
+        {can("Terminals.Create") && <Btn variant="ghost" icon="terminal" disabled={!requestedSettingId} onClick={addRequestedTerminal}>Add Requested Terminal</Btn>}
       </div>
       {spec && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "10px 12px", background: "var(--info-bg)", borderRadius: 9, marginBottom: 16, fontSize: 12.5 }}>
@@ -919,8 +922,7 @@ function EscalateToReplacementModal({ job, onClose, onEscalate }: {
     };
     try {
       const result = await api.jobs.escalateToReplacement(job.id, body);
-      console.log("results: ", result);
-      onEscalate((result as any).id);
+      onEscalate(result.replacement_job.id);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Failed to escalate job");
       setSaving(false);
@@ -1002,6 +1004,7 @@ function EscalateToReplacementModal({ job, onClose, onEscalate }: {
 /* =================== JOB DETAIL =================== */
 
 export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
+  const can = useCan();
   const { rules } = useJobSla();
   const [job, setJob] = useState<JobOut | null>(null);
   const [requestedSpec, setRequestedSpec] = useState<TermSettingOut | null>(null);
@@ -1023,7 +1026,6 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     api.jobs.get(id)
       .then((j) => {
         setJob(j);
-        console.log("job", j);
         if (j.term_setting?.id) {
           api.termSettings.get(j.term_setting.id).then(setRequestedSpec).catch(console.error);
         }
@@ -1072,6 +1074,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function openAdvance() {
     if (!nextStage) return;
+    if (!can(nextStage === "Completed" ? "Jobs.Close" : "Jobs.Edit")) return;
     if (transitionNeedsEvidence(job!.type, nextStage) || (job!.type === "Replacement" && nextStage === "Completed")) {
       setPendingStage(nextStage);
       return;
@@ -1090,6 +1093,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function confirmPendingStage() {
     if (!pendingStage || !job) return;
+    if (!can(pendingStage === "Completed" ? "Jobs.Close" : "Jobs.Edit")) return;
     const evidenceRequired = transitionNeedsEvidence(job.type, pendingStage);
     if (evidenceRequired && files.length === 0) return;
     setAdvancing(true);
@@ -1114,6 +1118,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function handleAssignDevice(serial: string) {
     if (!job) return;
+    if (!can("Jobs.Edit")) return;
     try {
       const updated = await api.jobs.assignDevice(job.id, serial);
       setJob(updated);
@@ -1126,6 +1131,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   async function handleSwapDevice(serial: string) {
     if (!job) return;
+    if (!can("Jobs.Edit")) return;
     try {
       const updated = await api.jobs.assignDevice(job.id, serial);
       setJob(updated);
@@ -1136,7 +1142,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     }
   }
 
-  console.log("job", job)
+  const canAdvanceStage = !!nextStage && can(nextStage === "Completed" ? "Jobs.Close" : "Jobs.Edit");
 
   return (
     <div>
@@ -1157,11 +1163,11 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           </div>
         </div>
         <div className="page-head-actions">
-          {job.type === "Repair/Maintenance" && job.stage === "Pending" && !done && (
+          {can("Jobs.Escalate") && job.type === "Repair/Maintenance" && job.stage === "Pending" && !done && (
             <Btn variant="ghost" icon="swap" onClick={() => setShowEscalate(true)}>Escalate to Replacement</Btn>
           )}
-          {def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
-          <Btn variant="ghost" icon="edit">Edit</Btn>
+          {can("Jobs.Export") && def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
+          {can("Jobs.Edit") && <Btn variant="ghost" icon="edit">Edit</Btn>}
         </div>
       </div>
 
@@ -1187,7 +1193,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                   : "Advance this job when the next team has completed its work."}
           </div>
         </div>
-        {!done && nextStage && (
+        {!done && nextStage && canAdvanceStage && (
           <Btn
             variant="primary"
             iconRight={transitionNeedsEvidence(job.type, nextStage) ? "upload" : "chevRight"}
@@ -1371,7 +1377,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                     <div className="mono" style={{ fontWeight: 600, marginBottom: 2 }}>{job.terminal.serial}</div>
                     <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 12 }}>{job.terminal.brand + " " + job.terminal.model}</div>
                     <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%" }} onClick={() => nav("terminal-detail", job.terminal!.serial)}>View device</Btn>
-                    {!done && job.type == "Replacement/Maintenance" && (
+                    {can("Jobs.Edit") && !done && job.type == "Replacement/Maintenance" && (
                       <Btn variant="ghost" sm icon="swap" style={{ width: "100%", marginTop: 8 }} onClick={() => setShowSwap(true)}>Swap Device</Btn>
                     )}
                     {job.previous_terminal && (
@@ -1388,9 +1394,11 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                       <Icon name="activity" size={14} />
                       No device assigned yet
                     </div>
-                    <Btn variant="ghost" sm icon="terminal" style={{ width: "100%" }} onClick={() => setShowAssignDevice(true)}>
-                      Assign Device from Inventory
-                    </Btn>
+                    {can("Jobs.Edit") && (
+                      <Btn variant="ghost" sm icon="terminal" style={{ width: "100%" }} onClick={() => setShowAssignDevice(true)}>
+                        Assign Device from Inventory
+                      </Btn>
+                    )}
                   </>
                 )}
               </div>
@@ -1414,7 +1422,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </div>
 
-      {pendingStage && (
+      {pendingStage && can(pendingStage === "Completed" ? "Jobs.Close" : "Jobs.Edit") && (
         <Modal
           title={"Record " + pendingStage}
           sub={job.id + " · " + job.type}
@@ -1453,7 +1461,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         </Modal>
       )}
 
-      {showExport && (
+      {showExport && can("Jobs.Export") && (
         <Modal
           title="Export Job Details"
           sub={job.id + " · " + job.type}
@@ -1483,7 +1491,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         </Modal>
       )}
 
-      {showSwap && job.terminal && (
+      {showSwap && can("Jobs.Edit") && job.terminal && (
         <SwapDeviceModal
           job={job}
           onClose={() => setShowSwap(false)}
@@ -1491,7 +1499,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         />
       )}
 
-      {showAssignDevice && (
+      {showAssignDevice && can("Jobs.Edit") && (
         <AssignDeviceModal
           job={job}
           onClose={() => setShowAssignDevice(false)}
@@ -1499,7 +1507,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         />
       )}
 
-      {showEscalate && (
+      {showEscalate && can("Jobs.Escalate") && (
         <EscalateToReplacementModal
           job={job}
           onClose={() => setShowEscalate(false)}
