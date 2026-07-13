@@ -623,6 +623,7 @@ export interface TerminalPage {
 }
 
 export interface SimCardLinkBody {
+  terminal_serial: string;
   simcard_id: string;
 }
 
@@ -685,7 +686,7 @@ export const terminals = {
   update: (serial: string, body: TerminalUpdate) =>
     req<TerminalOut>("PATCH", `/terminals/${serial}`, { body }),
   activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
-  linkSim: (serial: string, body: SimCardLinkBody) => req<TerminalOut>("POST", `/terminals/${serial}/simcard`, { body }),
+  linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
   unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
   createTid: (serial: string, body: TerminalTidCreate) =>
     req<TerminalTidOut>("POST", `/terminals/${serial}/tids`, { body }),
@@ -1093,7 +1094,8 @@ export interface PayoutOut {
   fee: number;
   net: number;
   txns: number;
-  period: string;
+  period_start: string;
+  period_end: string;
   status: string;
   exceptions?: PayoutException[];
   checks?: PayoutCheck[];
@@ -1287,10 +1289,10 @@ export interface ReferralProcessingUpdate {
 export interface ReferralListParams {
   page?: number;
   per_page?: number;
-  query?: string;
-  lead_status?: string;
-  status?: string;
-  commission_status?: string;
+  query?: string | null;
+  status?: string | null;
+  bank?: string | null;
+  referrer_user_id?: string | null;
 }
 
 export interface ReferralPage {
