@@ -640,7 +640,7 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
     <div>
       <PageHead
         title={payout.id}
-        sub={payout.merchant.name + " · " + payout.period}
+        sub={payout.merchant.name + " · " + payout.period_start + " – " + payout.period_end}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("payouts")}>Back</Btn>
           {can("Payouts.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
@@ -709,7 +709,7 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
               ["MID",            payout.mid],
               ["Bank",           payout.bank],
               ["Payment Method", payout.payment_method],
-              ["Period",         payout.period],
+              ["Period",         payout.period_start + " – " + payout.period_end],
               ["Issued",         payout.issued || "—"],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>

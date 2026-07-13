@@ -75,7 +75,7 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
         await Promise.all(pendingTids.map((t) => api.terminals.createTid(terminalSerial(result), t)));
       }
       if (linkSim && selectedSimId) {
-        await api.terminals.linkSim(terminalSerial(result), { simcard_id: selectedSimId });
+        await api.terminals.linkSim({ terminal_serial: terminalSerial(result), simcard_id: selectedSimId });
       }
       onRegister(result);
       onClose();
@@ -1077,7 +1077,7 @@ export function TerminalDetail({
     if (!can("Terminals.Edit")) return;
     try {
       const serial = terminalSerial(terminal);
-      const updated = await api.terminals.linkSim(serial, { simcard_id: simId });
+      const updated = await api.terminals.linkSim({ terminal_serial: serial, simcard_id: simId });
       const newSim = await api.terminals.simCard(serial);
       setLinkedSimOverride(newSim);
       setTerminal((prev) => ({ ...prev, ...updated }));

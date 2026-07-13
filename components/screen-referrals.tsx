@@ -1,5 +1,5 @@
 /* PaidChain - Referral lead management + bonus batches */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "./icons";
 import { Btn, Card, Chip, Empty, Entity, Field, Modal, PageHead, Pagination, SearchBox, Toolbar, useToast, MobileListItem, ResponsiveTable } from "./components";
@@ -901,21 +901,25 @@ export function Referrals({ nav }: { nav: NavFn }) {
   const [recordStatus, setRecordStatus] = useState("All");
   const [commissionStatus, setCommissionStatus] = useState("All");
   const [showCreate, setShowCreate] = useState(false);
+  const visibleRows = useMemo(() => rows.filter((r) => {
+    if (leadStatus !== "All" && r.lead_status !== leadStatus) return false;
+    if (commissionStatus !== "All" && r.commission_status !== commissionStatus) return false;
+    return true;
+  }), [commissionStatus, leadStatus, rows]);
 
   useEffect(() => {
+    setLoading(true);
     api.referrals.list({
       page,
       per_page: REFERRALS_PAGE_SIZE,
       query: q || undefined,
-      lead_status: leadStatus === "All" ? undefined : leadStatus,
       status: recordStatus === "All" ? undefined : recordStatus,
-      commission_status: commissionStatus === "All" ? undefined : commissionStatus,
     }).then((p) => {
       setRows(p.items);
       setTotal(p.total);
       setPages(p.pages || 1);
     }).catch(console.error).finally(() => setLoading(false));
-  }, [page, q, leadStatus, recordStatus, commissionStatus]);
+  }, [page, q, recordStatus]);
 
   function resetPage(v: string, setter: (value: string) => void) {
     setter(v);
@@ -933,23 +937,23 @@ export function Referrals({ nav }: { nav: NavFn }) {
         <Toolbar>
           <SearchBox value={q} onChange={(v) => resetPage(v, setQ)} placeholder="Search referral, merchant, contact..." />
           <select className="select" value={leadStatus} onChange={(e) => resetPage(e.target.value, setLeadStatus)}>
-            {LEAD_STATUSES.map((s) => <option key={s}>{s === "All" ? "All Lead Progress" : s}</option>)}
+            {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s === "All" ? "All Lead Progress" : s}</option>)}
           </select>
           <select className="select" value={recordStatus} onChange={(e) => resetPage(e.target.value, setRecordStatus)}>
-            {REFERRAL_STATUSES.map((s) => <option key={s}>{s === "All" ? "All Record Status" : s}</option>)}
+            {REFERRAL_STATUSES.map((s) => <option key={s} value={s}>{s === "All" ? "All Record Status" : s}</option>)}
           </select>
           <select className="select" value={commissionStatus} onChange={(e) => resetPage(e.target.value, setCommissionStatus)}>
-            {COMMISSION_STATUSES.map((s) => <option key={s}>{s === "All" ? "All Commission Status" : s}</option>)}
+            {COMMISSION_STATUSES.map((s) => <option key={s} value={s}>{s === "All" ? "All Commission Status" : s}</option>)}
           </select>
-          <span className="tb-meta">{rows.length} shown</span>
+          <span className="tb-meta">{visibleRows.length} shown</span>
         </Toolbar>
         {loading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading...</div>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <Empty icon="link" title="No referrals match" sub="Try a different search or filter" />
         ) : (
           <ResponsiveTable
-            rows={rows}
+            rows={visibleRows}
             getKey={(r) => r.id}
             onRowClick={(r) => nav("referral-detail", r.id)}
             columns={[
@@ -981,7 +985,7 @@ export function Referrals({ nav }: { nav: NavFn }) {
             )}
           />
         )}
-        <Pagination total={total} shown={pageShown(rows, total)} page={page} pages={pages} onPageChange={setPage} />
+        <Pagination total={total} shown={pageShown(visibleRows, total)} page={page} pages={pages} onPageChange={setPage} />
       </Card>
       {showCreate && can("Referral Bonuses.Create") && <CreateReferralModal onClose={() => setShowCreate(false)} onCreate={(r) => nav("referral-detail", r.id)} />}
     </div>
@@ -1257,7 +1261,7 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
             {QUARTERS.map((q) => <option key={q} value={q}>Q{q}</option>)}
           </select>
           <select className="select" value={status} onChange={(e) => resetPage(e.target.value, setStatus)}>
-            {BATCH_STATUSES.map((s) => <option key={s}>{s === "All" ? "All Statuses" : s}</option>)}
+            {BATCH_STATUSES.map((s) => <option key={s} value={s}>{s === "All" ? "All Statuses" : s}</option>)}
           </select>
           <span className="tb-meta">{rows.length} shown</span>
         </Toolbar>
