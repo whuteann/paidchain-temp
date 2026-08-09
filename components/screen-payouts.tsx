@@ -242,7 +242,6 @@ function CreatePayoutModal({ onClose, onCreate }: { onClose: () => void; onCreat
           />
           {customer && (
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-              <Chip cls="chip-neutral">{customer.type}</Chip>
               <Chip cls={customer.status === "Active" ? "chip-ok" : "chip-warn"}>{customer.status}</Chip>
             </div>
           )}

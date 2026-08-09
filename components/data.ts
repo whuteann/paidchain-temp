@@ -183,6 +183,7 @@ export const JOB_STATUS: Record<string, StatusMeta> = {
   "Pending":         { chip: "chip-neutral" },
   "Escalated":       { chip: "chip-indigo" },
   "Device Prepared": { chip: "chip-info" },
+  "Device Returned": { chip: "chip-info" },
   "Stock Prepared":  { chip: "chip-info" },
   "Installed":       { chip: "chip-info" },
   "Delivered":       { chip: "chip-info" },
@@ -208,7 +209,8 @@ export const PAYOUT_STATUS: Record<string, StatusMeta> = {
 export const JOB_TYPES: Record<string, JobTypeMeta> = {
   "Installation":       { icon: "boxIn",   stages: ["Pending", "Device Prepared", "Job Done", "Completed"], exportable: true, needsTerminal: true },
   "Repair/Maintenance": { icon: "wrench",  stages: ["Pending", "Job Done", "Completed"], exportable: true },
-  "Replacement":        { icon: "swap",    stages: ["Pending", "Device Prepared", "Job Done", "Completed"], exportable: true, needsTerminal: true },
+  "Replacement":        { icon: "swap",    stages: ["Pending", "Device Prepared", "Job Done", "Device Returned", "Completed"], exportable: true, needsTerminal: true },
+  "Retrieval":          { icon: "box",     stages: ["Pending", "Device Returned", "Completed"], exportable: true },
   "Paper Roll Request": { icon: "receipt", stages: ["Pending", "Stock Prepared", "Job Done", "Completed"], exportable: false },
   "Remote Support":     { icon: "phone",   stages: ["Pending", "Completed"], exportable: false },
 };
@@ -226,7 +228,12 @@ export const DEFAULT_JOB_SLA_RULES: Record<string, SlaTransitionRule[]> = {
   "Replacement": [
     { from: "Pending", to: "Device Prepared", warningDays: 3, breachDays: 7 },
     { from: "Device Prepared", to: "Job Done", warningDays: 2, breachDays: 5 },
-    { from: "Job Done", to: "Completed", warningDays: 1, breachDays: 3 },
+    { from: "Job Done", to: "Device Returned", warningDays: 1, breachDays: 3 },
+    { from: "Device Returned", to: "Completed", warningDays: 1, breachDays: 2 },
+  ],
+  "Retrieval": [
+    { from: "Pending", to: "Device Returned", warningDays: 3, breachDays: 7 },
+    { from: "Device Returned", to: "Completed", warningDays: 1, breachDays: 2 },
   ],
   "Paper Roll Request": [
     { from: "Pending", to: "Stock Prepared", warningDays: 2, breachDays: 4 },

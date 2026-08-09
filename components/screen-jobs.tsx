@@ -7,7 +7,7 @@ import type { DropzoneFile } from "./components";
 import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, TerminalTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -102,11 +102,46 @@ const TYPE_META: Record<string, string> = {
   "Installation": "Deploy a terminal and create the rental after admin sign-off",
   "Repair/Maintenance": "Resolve a merchant device issue and close with maintenance proof",
   "Replacement": "Prepare a replacement device and swap out the previous rental unit",
+  "Retrieval": "Retrieve installed merchant devices and close their active rental links",
   "Paper Roll Request": "Prepare, deliver and reconcile paper roll stock requests",
   "Remote Support": "Resolve a merchant issue remotely and close with evidence",
 };
 
 const REPLACEMENT_STATUS_OPTIONS = ["Faulty", "Maintenance", "Returned", "Retired", "In Stock"];
+
+type InstallationTerminalDraft = {
+  rowId: string;
+  terminal_setting_id: string;
+  terminal_tid_id: string;
+  terminal_tid_mid_id: string;
+  mid: string;
+  mdr_rate_id: string;
+};
+
+type ServiceTerminalDraft = {
+  rowId: string;
+  terminal_id: string;
+  term_setting_id: string;
+};
+
+function newInstallationTerminalDraft(): InstallationTerminalDraft {
+  return {
+    rowId: Math.random().toString(36).slice(2),
+    terminal_setting_id: "",
+    terminal_tid_id: "",
+    terminal_tid_mid_id: "",
+    mid: "",
+    mdr_rate_id: "",
+  };
+}
+
+function newServiceTerminalDraft(): ServiceTerminalDraft {
+  return {
+    rowId: Math.random().toString(36).slice(2),
+    terminal_id: "",
+    term_setting_id: "",
+  };
+}
 
 function stampNow() {
   return new Date().toISOString().slice(0, 16).replace("T", " · ");
@@ -142,10 +177,12 @@ function elapsedToSla(elapsedDays: number, rule: SlaTransitionRule | null, compl
 
 function currentJobSla(job: JobOut, rules: Record<string, SlaTransitionRule[]>, now = stampNow()) {
   if (job.stage === "Completed") return "Met";
-  const stages = JOB_TYPES[job.type]?.stages ?? [];
+  const stages = job.stage_sequence?.length ? job.stage_sequence : JOB_TYPES[job.type]?.stages ?? [];
   const history = job.history ?? [];
   const currentStage = history[history.length - 1];
-  const nextStage = stages[job.stage_index + 1];
+  const sequenceIndex = stages.indexOf(job.stage);
+  const currentIndex = sequenceIndex >= 0 ? sequenceIndex : job.stage_index;
+  const nextStage = stages[currentIndex + 1];
   if (!currentStage || !nextStage) return job.sla;
   const rule = findRule(rules, job.type, currentStage.stage, nextStage);
   return elapsedToSla(daysBetween(currentStage.at, now), rule);
@@ -154,6 +191,7 @@ function currentJobSla(job: JobOut, rules: Record<string, SlaTransitionRule[]>, 
 function transitionNeedsEvidence(jobType: string, nextStage: string) {
   if (nextStage === "Completed") return true;
   if (nextStage === "Job Done") return true;
+  if ((jobType === "Retrieval" || jobType === "Replacement") && nextStage === "Device Returned") return true;
   return jobType === "Remote Support" && nextStage === "Completed";
 }
 
@@ -184,17 +222,19 @@ interface CreateJobModalProps {
   nav: NavFn;
   presetCustomer?: CustomerOut | null;
   presetMerchant?: MerchantOut | null;
+  presetType?: string | null;
 }
 
-export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, presetMerchant = null }: CreateJobModalProps) {
+export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, presetMerchant = null, presetType = null }: CreateJobModalProps) {
   const types = Object.keys(JOB_TYPES);
-  const [step, setStep] = useState(1);
-  const [type, setType] = useState<string | null>(null);
+  const initialType = presetType && JOB_TYPES[presetType] ? presetType : null;
+  const presetTypeLocked = Boolean(initialType);
+  const [step, setStep] = useState(initialType ? 2 : 1);
+  const [type, setType] = useState<string | null>(initialType);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOut | null>(presetCustomer);
   const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(presetMerchant);
-  const [selectedMerchantTerminalSerial, setSelectedMerchantTerminalSerial] = useState("");
   const [merchantTerminalState, setMerchantTerminalState] = useState<{
     merchantId: string | null;
     items: MerchantTerminalOut[];
@@ -204,7 +244,10 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
     items: [],
     loading: Boolean(presetMerchant?.id),
   });
-  const [selectedTermSetting, setSelectedTermSetting] = useState<TermSettingOut | null>(null);
+  const [installationTerminals, setInstallationTerminals] = useState<InstallationTerminalDraft[]>([newInstallationTerminalDraft()]);
+  const [serviceTerminals, setServiceTerminals] = useState<ServiceTerminalDraft[]>([newServiceTerminalDraft()]);
+  const [merchantTids, setMerchantTids] = useState<TerminalTidOut[]>(presetMerchant?.tids ?? []);
+  const [merchantTidsLoading, setMerchantTidsLoading] = useState(Boolean(presetMerchant?.id));
   const [termSettingsList, setTermSettingsList] = useState<TermSettingOut[]>([]);
   const [adminUsers, setAdminUsers] = useState<UserOut[]>([]);
   const [form, setForm] = useState({
@@ -223,58 +266,142 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
 
   useEffect(() => {
     api.termSettings.list({ active: true }).then(setTermSettingsList).catch(console.error);
-    api.users.list({ role: "Admin", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
+    api.users.list({ role: "Operations", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
   }, []);
 
-  useEffect(() => {
-    if (!selectedMerchant?.id) return;
+  const selectedMerchantId = selectedMerchant?.id;
+  const selectedMerchantInitialTids = selectedMerchant?.tids;
 
+  useEffect(() => {
     let cancelled = false;
-    api.merchants.terminals(selectedMerchant.id)
-      .then((items) => {
+
+    Promise.resolve().then(() => {
+      if (!selectedMerchantId) {
         if (!cancelled) {
-          setMerchantTerminalState({ merchantId: selectedMerchant.id, items, loading: false });
-          setSelectedMerchantTerminalSerial((current) =>
-            current && items.some((terminal) => terminal.serial === current)
-              ? current
-              : (items[0]?.serial ?? "")
-          );
+          setMerchantTids([]);
+          setMerchantTidsLoading(false);
         }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          console.error(e);
-          setMerchantTerminalState({ merchantId: selectedMerchant.id, items: [], loading: false });
-          setSelectedMerchantTerminalSerial("");
-        }
-      });
+        return;
+      }
+
+      setMerchantTidsLoading(true);
+      setMerchantTids(selectedMerchantInitialTids ?? []);
+
+      api.merchants.get(selectedMerchantId)
+        .then((merchant) => {
+          if (!cancelled) setMerchantTids(merchant.tids ?? []);
+        })
+        .catch((e) => {
+          if (!cancelled) console.error(e);
+        })
+        .finally(() => {
+          if (!cancelled) setMerchantTidsLoading(false);
+        });
+
+      api.merchants.terminals(selectedMerchantId)
+        .then((items) => {
+          if (!cancelled) {
+            setMerchantTerminalState({ merchantId: selectedMerchantId, items, loading: false });
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            console.error(e);
+            setMerchantTerminalState({ merchantId: selectedMerchantId, items: [], loading: false });
+          }
+        });
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedMerchant?.id]);
+  }, [selectedMerchantId, selectedMerchantInitialTids]);
 
   const def = type ? JOB_TYPES[type] : null;
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const merchantTerminals = merchantTerminalState.merchantId === selectedMerchant?.id ? merchantTerminalState.items : [];
   const merchantTerminalsLoading = merchantTerminalState.merchantId === selectedMerchant?.id && merchantTerminalState.loading;
-  const selectedMerchantTerminal = merchantTerminals.find((t) => t.serial === selectedMerchantTerminalSerial) ?? null;
-  const requiresTermSpec = type === "Installation" || type === "Replacement";
-  const requiresMerchantDevice = type === "Repair/Maintenance" || type === "Replacement" || type === "Remote Support";
+  const requiresInstallationTerminals = type === "Installation";
+  const requiresServiceTerminals = type === "Repair/Maintenance" || type === "Replacement" || type === "Remote Support" || type === "Retrieval";
   const requiresPaperRollFields = type === "Paper Roll Request";
+  const selectedInstallationTidIds = installationTerminals.map((row) => row.terminal_tid_id).filter(Boolean);
+  const hasDuplicateInstallationTids = new Set(selectedInstallationTidIds).size !== selectedInstallationTidIds.length;
+  const installationTerminalsComplete = installationTerminals.length > 0 && installationTerminals.every((row) =>
+    row.terminal_setting_id && row.terminal_tid_id && row.mid.trim() && row.mdr_rate_id
+  );
+  const selectedServiceTerminalIds = serviceTerminals.map((row) => row.terminal_id).filter(Boolean);
+  const hasDuplicateServiceTerminals = new Set(selectedServiceTerminalIds).size !== selectedServiceTerminalIds.length;
+  const serviceTerminalsComplete = serviceTerminals.length > 0 && serviceTerminals.every((row) =>
+    row.terminal_id && (type !== "Replacement" || row.term_setting_id)
+  );
+
   const valid = !!(
     type &&
     selectedCustomer &&
     selectedMerchant &&
     form.due &&
     form.assignee &&
-    (!requiresTermSpec || selectedTermSetting) &&
-    (!requiresMerchantDevice || (!!selectedMerchantTerminal && !merchantTerminalsLoading)) &&
+    (!requiresInstallationTerminals || (installationTerminalsComplete && !hasDuplicateInstallationTids)) &&
+    (!requiresServiceTerminals || (serviceTerminalsComplete && !hasDuplicateServiceTerminals && !merchantTerminalsLoading)) &&
     (!requiresPaperRollFields || Number(form.paperRollQty) > 0)
   );
 
+  function setInstallationTerminalRow(index: number, patch: Partial<InstallationTerminalDraft>) {
+    setInstallationTerminals((rows) => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
+  }
+
+  function selectInstallationTid(index: number, tidId: string) {
+    const tid = merchantTids.find((item) => item.id === tidId);
+    const activeMids = tid?.mids?.filter((m) => (m.status ?? "Active") !== "Inactive") ?? [];
+    const firstMid = activeMids[0];
+    setInstallationTerminalRow(index, {
+      terminal_tid_id: tidId,
+      terminal_tid_mid_id: firstMid?.id ?? "",
+      mid: firstMid?.mid ?? "",
+      mdr_rate_id: firstMid?.mdr_rate_id ?? "",
+    });
+  }
+
+  function selectInstallationMid(index: number, tidId: string, midId: string) {
+    const tid = merchantTids.find((item) => item.id === tidId);
+    const mid = tid?.mids?.find((item) => item.id === midId);
+    setInstallationTerminalRow(index, {
+      terminal_tid_mid_id: midId,
+      mid: mid?.mid ?? "",
+      mdr_rate_id: mid?.mdr_rate_id ?? "",
+    });
+  }
+
+  function addInstallationTerminalRow() {
+    setInstallationTerminals((rows) => [...rows, newInstallationTerminalDraft()]);
+  }
+
+  function removeInstallationTerminalRow(index: number) {
+    setInstallationTerminals((rows) => rows.length > 1 ? rows.filter((_, i) => i !== index) : rows);
+  }
+
+  function setServiceTerminalRow(index: number, patch: Partial<ServiceTerminalDraft>) {
+    setServiceTerminals((rows) => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
+  }
+
+  function addServiceTerminalRow() {
+    setServiceTerminals((rows) => [...rows, newServiceTerminalDraft()]);
+  }
+
+  function removeServiceTerminalRow(index: number) {
+    setServiceTerminals((rows) => rows.length > 1 ? rows.filter((_, i) => i !== index) : rows);
+  }
+
   async function submit() {
     if (!type || !selectedCustomer || !selectedMerchant) return;
+    if (requiresInstallationTerminals && hasDuplicateInstallationTids) {
+      setErr("Duplicate TID ids are not allowed in one installation job.");
+      return;
+    }
+    if (requiresServiceTerminals && hasDuplicateServiceTerminals) {
+      setErr("Duplicate terminal serials are not allowed in one service job.");
+      return;
+    }
     setSaving(true); setErr(null);
     const body: JobCreate = {
       type,
@@ -284,8 +411,25 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       priority: form.priority,
       due_date: form.due,
       notes: form.notes || TYPE_META[type],
-      term_setting_id: requiresTermSpec ? (selectedTermSetting?.id || null) : null,
-      service_terminal_serial: requiresMerchantDevice ? (selectedMerchantTerminal?.serial ?? null) : null,
+      term_setting_id: null,
+      terminals: requiresInstallationTerminals
+        ? installationTerminals.map((row) => ({
+          terminal_setting_id: row.terminal_setting_id,
+          tid: row.terminal_tid_id,
+          mid: row.mid.trim(),
+          mdr: row.mdr_rate_id,
+        }))
+        : undefined,
+      service_terminals: requiresServiceTerminals
+        ? serviceTerminals.map((row) => (
+          type === "Replacement"
+            ? { terminal_id: row.terminal_id, term_setting_id: row.term_setting_id }
+            : type === "Retrieval"
+              ? { terminal_id: row.terminal_id, term_setting_id: null }
+            : { terminal_id: row.terminal_id }
+        ))
+        : undefined,
+      service_terminal_serial: undefined,
       paper_roll_qty: requiresPaperRollFields ? Number(form.paperRollQty) : null,
       payment_target: requiresPaperRollFields ? form.paymentTarget : null,
       invoice_party: requiresPaperRollFields ? (form.invoiceParty || null) : null,
@@ -311,7 +455,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       size="wide"
       onClose={onClose}
       foot={<>
-        {step === 2 && <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>}
+        {step === 2 && !presetTypeLocked && <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>}
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
         {step === 1
@@ -356,7 +500,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                 onSelect={(c) => {
                   setSelectedCustomer(c);
                   setSelectedMerchant(null);
-                  setSelectedMerchantTerminalSerial("");
+                  setServiceTerminals([newServiceTerminalDraft()]);
                   setMerchantTerminalState({ merchantId: null, items: [], loading: false });
                 }}
                 fetchResults={(query) => api.customers.list({ query, per_page: 8 }).then((p) => p.items)}
@@ -394,7 +538,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
               value={selectedMerchant}
               onSelect={(merchant) => {
                 setSelectedMerchant(merchant);
-                setSelectedMerchantTerminalSerial("");
+                setServiceTerminals([newServiceTerminalDraft()]);
                 setMerchantTerminalState({ merchantId: merchant?.id ?? null, items: [], loading: !!merchant });
               }}
               fetchResults={(query) => selectedCustomer
@@ -417,86 +561,188 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
             </div>
           )}
 
-          {(type === "Repair/Maintenance" || type === "Remote Support") && (
-            <Field label="Affected terminal">
+          {requiresServiceTerminals && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    {type === "Replacement" ? "Replacement lines" : type === "Retrieval" ? "Retrieval devices" : "Service terminals"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                    {type === "Retrieval" ? "required · select every merchant device to retrieve" : "required · one line per merchant terminal"}
+                  </div>
+                </div>
+                <Btn variant="ghost" sm icon="plus" onClick={addServiceTerminalRow}>Add Line</Btn>
+              </div>
+
               {merchantTerminalsLoading ? (
-                <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-3)" }}>
+                <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-3)", marginBottom: 14 }}>
                   Loading merchant terminals…
                 </div>
-              ) : merchantTerminals.length > 0 ? (
-                <select
-                  className="input"
-                  value={selectedMerchantTerminalSerial}
-                  onChange={(e) => setSelectedMerchantTerminalSerial(e.target.value)}
-                >
-                  {merchantTerminals.map((terminal) => (
-                    <option key={terminal.serial} value={terminal.serial}>
-                      {terminal.serial} · {terminal.brand} {terminal.model}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)" }}>
+              ) : merchantTerminals.length === 0 ? (
+                <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)", marginBottom: 14 }}>
                   No linked merchant terminal found for this workflow.
                 </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                  {serviceTerminals.map((row, index) => {
+                    const duplicateTerminal = !!row.terminal_id && serviceTerminals.some((other, otherIndex) =>
+                      otherIndex !== index && other.terminal_id === row.terminal_id
+                    );
+                    return (
+                      <div key={row.rowId} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                          <div style={{ fontWeight: 700, fontSize: 12.5 }}>
+                            {type === "Replacement" ? `Replacement ${index + 1}` : type === "Retrieval" ? `Retrieval ${index + 1}` : `Terminal ${index + 1}`}
+                          </div>
+                          {serviceTerminals.length > 1 && (
+                            <Btn variant="ghost" sm icon="x" onClick={() => removeServiceTerminalRow(index)}>Remove</Btn>
+                          )}
+                        </div>
+                        <div className={type === "Replacement" ? "field-row" : undefined} style={type === "Replacement" ? undefined : { marginBottom: 0 }}>
+                          <Field label={type === "Replacement" ? "Terminal to replace" : type === "Retrieval" ? "Terminal to retrieve" : "Affected terminal"} hint={duplicateTerminal ? "duplicate selected" : "terminal serial"}>
+                            <select
+                              className="input"
+                              value={row.terminal_id}
+                              onChange={(e) => setServiceTerminalRow(index, { terminal_id: e.target.value })}
+                              style={duplicateTerminal ? { borderColor: "var(--bad)" } : undefined}
+                            >
+                              <option value="">Select terminal…</option>
+                              {merchantTerminals.map((terminal) => (
+                                <option key={terminal.serial} value={terminal.serial}>
+                                  {terminal.serial} · {terminal.brand} {terminal.model}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                          {type === "Replacement" && (
+                            <Field label="Replacement model" hint="required">
+                              <select
+                                className="input"
+                                value={row.term_setting_id}
+                                onChange={(e) => setServiceTerminalRow(index, { term_setting_id: e.target.value })}
+                              >
+                                <option value="">Select model…</option>
+                                {termSettingsList.map((setting) => (
+                                  <option key={setting.id} value={setting.id}>
+                                    {setting.brand} {setting.model} · {setting.id}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-            </Field>
+
+              {hasDuplicateServiceTerminals && (
+                <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: -6, marginBottom: 14 }}>
+                  Duplicate terminal serials are not allowed in one service job.
+                </div>
+              )}
+            </>
           )}
 
-          {type === "Replacement" && merchantTerminals.length > 0 && (
-            <Field label="Device to be replaced">
-              <select
-                className="input"
-                value={selectedMerchantTerminalSerial}
-                onChange={(e) => setSelectedMerchantTerminalSerial(e.target.value)}
-              >
-                {merchantTerminals.map((terminal) => (
-                  <option key={terminal.serial} value={terminal.serial}>
-                    {terminal.serial} · {terminal.brand} {terminal.model}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-
-          {type === "Replacement" && merchantTerminalsLoading && (
-            <Field label="Device to be replaced">
-              <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-3)" }}>
-                Loading merchant terminal…
-              </div>
-            </Field>
-          )}
-
-          {type === "Replacement" && !merchantTerminalsLoading && merchantTerminals.length === 0 && (
-            <Field label="Device to be replaced">
-              <div className="input" style={{ color: "var(--warn)", background: "var(--warn-bg)" }}>
-                No linked merchant terminal found to replace.
-              </div>
-            </Field>
-          )}
-
-          {requiresTermSpec && (
+          {type === "Installation" && (
             <>
-              <EntitySearchSelect<TermSettingOut>
-                label={type === "Replacement" ? "Replacement terminal model" : "Terminal model"}
-                hint="required · warehouse assigns the actual unit"
-                placeholder="Search brand or model…"
-                value={selectedTermSetting}
-                onSelect={setSelectedTermSetting}
-                fetchResults={(query) => Promise.resolve(
-                  termSettingsList.filter((t) => (t.brand + " " + t.model).toLowerCase().includes(query.toLowerCase()))
-                )}
-                getLabel={(t) => t.brand + " " + t.model}
-                renderOption={(t) => (
-                  <div className="cell-2">
-                    <span className="td-strong">{t.brand} {t.model}</span>
-                    <span className="c2-sub">{t.category} · RM {t.monthly_rental}/mo</span>
-                  </div>
-                )}
-              />
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: -10, marginBottom: 14 }}>
-                The Warehouse Manager will assign a specific unit from inventory.
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>Terminal lines</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>required · one line per installation device</div>
+                </div>
+                <Btn variant="ghost" sm icon="plus" onClick={addInstallationTerminalRow}>Add Line</Btn>
               </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                {installationTerminals.map((row, index) => {
+                  const duplicateTid = !!row.terminal_tid_id && installationTerminals.some((other, otherIndex) =>
+                    otherIndex !== index && other.terminal_tid_id === row.terminal_tid_id
+                  );
+                  const rowTid = merchantTids.find((tid) => tid.id === row.terminal_tid_id);
+                  const rowMids = rowTid?.mids?.filter((m) => (m.status ?? "Active") !== "Inactive") ?? [];
+                  const selectedMid = rowMids.find((m) => m.id === row.terminal_tid_mid_id);
+                  const mdrLabel = selectedMid?.mdr_rate
+                    ? `${selectedMid.mdr_rate.id} · ${selectedMid.mdr_rate.type} ${selectedMid.mdr_rate.rate}%`
+                    : row.mdr_rate_id || "—";
+                  return (
+                    <div key={row.rowId} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>Terminal {index + 1}</div>
+                        {installationTerminals.length > 1 && (
+                          <Btn variant="ghost" sm icon="x" onClick={() => removeInstallationTerminalRow(index)}>Remove</Btn>
+                        )}
+                      </div>
+                      <div className="field-row">
+                        <Field label="Terminal setting" hint="model id">
+                          <select
+                            className="input"
+                            value={row.terminal_setting_id}
+                            onChange={(e) => setInstallationTerminalRow(index, { terminal_setting_id: e.target.value })}
+                          >
+                            <option value="">Select model…</option>
+                            {termSettingsList.map((setting) => (
+                              <option key={setting.id} value={setting.id}>
+                                {setting.brand} {setting.model} · {setting.id}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="TID" hint={duplicateTid ? "duplicate selected" : "terminal_tids id"}>
+                          <select
+                            className="input"
+                            value={row.terminal_tid_id}
+                            onChange={(e) => selectInstallationTid(index, e.target.value)}
+                            style={duplicateTid ? { borderColor: "var(--bad)" } : undefined}
+                            disabled={merchantTidsLoading}
+                          >
+                            <option value="">{merchantTidsLoading ? "Loading TIDs…" : "Select TID…"}</option>
+                            {merchantTids.map((tid) => (
+                              <option key={tid.id} value={tid.id}>
+                                {tid.tid} · {tid.id}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+                      <div className="field-row" style={{ marginBottom: 0 }}>
+                        <Field label="MID" hint={!rowTid ? "select a TID first" : rowMids.length === 0 ? "no active MIDs — add one from the merchant page" : undefined}>
+                          <select
+                            className="input"
+                            value={row.terminal_tid_mid_id}
+                            onChange={(e) => selectInstallationMid(index, row.terminal_tid_id, e.target.value)}
+                            disabled={!rowTid || rowMids.length === 0}
+                          >
+                            <option value="">{!rowTid ? "Select TID first…" : rowMids.length ? "Select MID…" : "No active MIDs"}</option>
+                            {rowMids.map((mid) => (
+                              <option key={mid.id} value={mid.id}>
+                                {mid.mid}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="MDR" hint="derived from MID">
+                          <input className="input" value={mdrLabel} disabled readOnly />
+                        </Field>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!merchantTidsLoading && selectedMerchant && merchantTids.length === 0 && (
+                <div style={{ fontSize: 12.5, color: "var(--warn)", marginTop: -6, marginBottom: 14 }}>
+                  This merchant has no linked TIDs available for installation.
+                </div>
+              )}
+
+              {hasDuplicateInstallationTids && (
+                <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: -6, marginBottom: 14 }}>
+                  Duplicate TID ids are not allowed in one installation request.
+                </div>
+              )}
             </>
           )}
 
@@ -631,7 +877,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
             {["All", ...Object.keys(JOB_TYPES)].map((option) => <option key={option} value={option}>{option === "All" ? "All Types" : option}</option>)}
           </select>
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
-            {["All", "Pending", "Device Prepared", "Stock Prepared", "Job Done", "Completed"].map((option) => <option key={option} value={option}>{option === "All" ? "All Statuses" : option}</option>)}
+            {["All", "Pending", "Device Prepared", "Device Returned", "Stock Prepared", "Job Done", "Completed"].map((option) => <option key={option} value={option}>{option === "All" ? "All Statuses" : option}</option>)}
           </select>
           <select className="select" value={sla} onChange={(e) => { setSla(e.target.value); resetPage(); }}>
             {["All", "On Track", "Due Soon", "Breached", "Met"].map((option) => <option key={option} value={option}>{option === "All" ? "All SLA" : option}</option>)}
@@ -777,15 +1023,20 @@ function SwapDeviceModal({ job, onClose, onSwap }: {
 }
 
 /* =================== ASSIGN DEVICE MODAL =================== */
-function AssignDeviceModal({ job, onClose, onAssign }: {
+function AssignDeviceModal({ job, onClose, onAssign, initialJobTerminalId = null }: {
   job: JobOut;
   onClose: () => void;
-  onAssign: (serial: string) => void;
+  onAssign: (serial: string, jobTerminalId?: string | null) => void;
+  initialJobTerminalId?: string | null;
 }) {
   const router = useRouter();
   const can = useCan();
+  const jobTerminals = job.job_terminals ?? [];
   const [terminals, setTerminals] = useState<TerminalOut[]>([]);
   const [spec, setSpec] = useState<TermSettingOut | null>(null);
+  const [selectedJobTerminalId, setSelectedJobTerminalId] = useState(
+    initialJobTerminalId ?? (jobTerminals.length === 1 ? jobTerminals[0].id : "")
+  );
   const [selected, setSelected] = useState(job.terminal?.serial || "");
   const [q, setQ] = useState("");
 
@@ -799,11 +1050,17 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
     api.terminals.list({ status: "In Stock", query: q || undefined }).then((page) => setTerminals(page.items)).catch(console.error);
   }, [q]);
 
-  const matching = spec ? terminals.filter((t) => t.brand === spec.brand && t.model === spec.model) : [];
+  const selectedJobTerminal = jobTerminals.find((terminal) => terminal.id === selectedJobTerminalId) ?? null;
+  const selectedRequestedSpec = selectedJobTerminal?.term_setting ?? spec;
+  const targetSettingId = selectedJobTerminal?.terminal_setting_id ?? job.term_setting?.id ?? "";
+  const matching = targetSettingId
+    ? terminals.filter((t) => t.term_setting_id === targetSettingId)
+    : spec ? terminals.filter((t) => t.brand === spec.brand && t.model === spec.model) : [];
   const matchingSerials = new Set(matching.map((t) => terminalSerial(t)));
   const others = terminals.filter((t) => !matchingSerials.has(terminalSerial(t)));
   const chosen = terminals.find((t) => terminalSerial(t) === selected) ?? null;
-  const requestedSettingId = job.term_setting?.id ?? "";
+  const requestedSettingId = targetSettingId;
+  const needsJobTerminalTarget = jobTerminals.length > 1;
 
   function addRequestedTerminal() {
     if (!requestedSettingId) return;
@@ -834,17 +1091,53 @@ function AssignDeviceModal({ job, onClose, onAssign }: {
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={!chosen} onClick={() => chosen && onAssign(terminalSerial(chosen))}>Assign Device</Btn>
+        <Btn
+          variant="primary"
+          icon="check"
+          disabled={!chosen || (needsJobTerminalTarget && !selectedJobTerminalId)}
+          onClick={() => chosen && onAssign(terminalSerial(chosen), selectedJobTerminalId || undefined)}
+        >
+          Assign Device
+        </Btn>
       </>}
     >
       <div style={{display: "flex", gap: 10, marginBottom: 10}}>
         {can("Terminals.Create") && <Btn variant="ghost" icon="plus" onClick={() => router.push("/terminals")}>Add New Terminal</Btn>}
         {can("Terminals.Create") && <Btn variant="ghost" icon="terminal" disabled={!requestedSettingId} onClick={addRequestedTerminal}>Add Requested Terminal</Btn>}
       </div>
-      {spec && (
+
+      {jobTerminals.length > 0 && (
+        <Field label="Job device line" hint="selected">
+          <div className="input" style={{ display: "flex", flexDirection: "column", justifyContent: "center", background: "var(--bg-2, #f5f5f5)" }}>
+            {selectedJobTerminal ? (
+              <>
+                <span style={{ fontWeight: 600 }}>
+                  {(jobTerminals.findIndex((terminal) => terminal.id === selectedJobTerminal.id) + 1) || 1}.{" "}
+                  {selectedJobTerminal.term_setting?.brand ?? "Terminal"} {selectedJobTerminal.term_setting?.model ?? selectedJobTerminal.terminal_setting_id ?? ""}
+                </span>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                  {selectedJobTerminal.service_terminal_serial
+                    ? `Service terminal ${selectedJobTerminal.service_terminal_serial}`
+                    : selectedJobTerminal.tid?.tid
+                      ? `TID ${selectedJobTerminal.tid.tid}`
+                      : selectedJobTerminal.terminal_tid_id || "No linked service terminal"}
+                  {(() => {
+                    const mid = selectedJobTerminal.mid || selectedJobTerminal.tid?.mids?.[0]?.mid;
+                    return mid ? ` · MID ${mid}` : "";
+                  })()}
+                </span>
+              </>
+            ) : (
+              <span style={{ color: "var(--ink-3)" }}>No job device line selected</span>
+            )}
+          </div>
+        </Field>
+      )}
+
+      {selectedRequestedSpec && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "10px 12px", background: "var(--info-bg)", borderRadius: 9, marginBottom: 16, fontSize: 12.5 }}>
           <Icon name="terminal" size={15} style={{ color: "var(--info)" }} />
-          <span>Requested spec: <strong>{spec.brand} {spec.model}</strong> · {spec.category}</span>
+          <span>Requested spec: <strong>{selectedRequestedSpec.brand} {selectedRequestedSpec.model}</strong> · {selectedRequestedSpec.category}</span>
         </div>
       )}
 
@@ -902,7 +1195,7 @@ function EscalateToReplacementModal({ job, onClose, onEscalate }: {
 
   useEffect(() => {
     api.termSettings.list({ active: true }).then(setTermSettingsList).catch(console.error);
-    api.users.list({ role: "Admin", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
+    api.users.list({ role: "Operations", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
   }, []);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -1001,6 +1294,54 @@ function EscalateToReplacementModal({ job, onClose, onEscalate }: {
   );
 }
 
+function TrackParcelModal({ job, onClose, onSaved }: {
+  job: JobOut;
+  onClose: () => void;
+  onSaved: (job: JobOut) => void;
+}) {
+  const [trackingNumber, setTrackingNumber] = useState(job.shipment_tracking?.tracking_number ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!trackingNumber.trim()) {
+      setErr("Tracking number is required");
+      return;
+    }
+    setSaving(true); setErr(null);
+    try {
+      const updated = await api.jobs.setParcel(job.id, trackingNumber.trim());
+      onSaved(updated);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save tracking number");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={job.shipment_tracking ? "Change Tracking Number" : "Track Parcel"}
+      sub={job.id + " · " + job.type}
+      icon="truck"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !trackingNumber.trim()} onClick={submit}>
+          {saving ? "Saving…" : "Track Parcel"}
+        </Btn>
+      </>}
+    >
+      <Field label="Tracking number" hint="required">
+        <input className="input" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="EE123456789MY" />
+      </Field>
+      {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
+    </Modal>
+  );
+}
+
 /* =================== JOB DETAIL =================== */
 
 export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
@@ -1017,8 +1358,12 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [advancing, setAdvancing] = useState(false);
   const [showSwap, setShowSwap] = useState(false);
   const [showAssignDevice, setShowAssignDevice] = useState(false);
+  const [assignJobTerminalId, setAssignJobTerminalId] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
+  const [showTrackParcel, setShowTrackParcel] = useState(false);
+  const [refreshingParcel, setRefreshingParcel] = useState(false);
+  const [docBusy, setDocBusy] = useState<"form" | "do" | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1054,8 +1399,9 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   );
 
   const def = JOB_TYPES[job.type] ?? { stages: [], icon: "jobs", exportable: false };
-  const stages = def.stages;
-  const currentIndex = job.stage_index;
+  const stages = job.stage_sequence?.length ? job.stage_sequence : def.stages;
+  const sequenceIndex = stages.indexOf(job.stage);
+  const currentIndex = sequenceIndex >= 0 ? sequenceIndex : job.stage_index;
   const currentSla = currentJobSla(job, rules);
   const nextStage = stages[currentIndex + 1] || null;
   const done = job.stage === "Completed";
@@ -1063,6 +1409,22 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const activeRule = nextStage ? findRule(rules, job.type, activeHistory?.stage ?? "", nextStage) : null;
   const activeElapsedDays = nextStage && activeHistory ? daysBetween(activeHistory.at, stampNow()) : 0;
   const evidenceStages = Object.entries(job.evidence_by_stage ?? {}).filter(([, evidence]) => evidence.length > 0);
+  const jobTerminals = job.job_terminals ?? [];
+  const hasJobTerminals = jobTerminals.length > 0;
+  const allJobTerminalsAssigned = hasJobTerminals && jobTerminals.every((terminal) =>
+    Boolean(terminal.terminal_serial || terminal.terminal?.serial || terminal.terminal?.serial_no)
+  );
+  const hasPreparedDevice = hasJobTerminals ? allJobTerminalsAssigned : Boolean(job.terminal);
+  const devicePreparationBlocked = ["Installation", "Replacement"].includes(job.type) && nextStage === "Device Prepared" && !hasPreparedDevice;
+  const jobTerminalAssignmentRequired = job.type === "Installation" || job.type === "Replacement";
+  const deviceReturnedIdx = stages.indexOf("Device Returned");
+  const parcelTrackingStage = deviceReturnedIdx > 0 ? stages[deviceReturnedIdx - 1] : null;
+  const showTrackParcelAction = parcelTrackingStage !== null && job.stage === parcelTrackingStage && !done;
+  const jobTerminalCardTitle =
+    job.type === "Installation" ? "Installation Devices"
+      : job.type === "Replacement" ? "Replacement Devices"
+        : job.type === "Retrieval" ? "Retrieval Devices"
+        : "Service Terminals";
 
   const historyRows = job.history.map((entry, index) => {
     if (index === 0) return { entry, durationDays: null as number | null, transitionSla: "On Track" };
@@ -1091,6 +1453,53 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     }
   }
 
+  async function refreshParcel() {
+    if (!job || !can("Jobs.Edit")) return;
+    setRefreshingParcel(true);
+    try {
+      const updated = await api.jobs.refreshParcel(job.id);
+      setJob(updated);
+      flash("Tracking info refreshed");
+    } catch {
+      flash("Failed to refresh tracking");
+    } finally {
+      setRefreshingParcel(false);
+    }
+  }
+
+  function openDocument(blob: Blob) {
+    if (typeof window === "undefined") return;
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function downloadInstallationForm() {
+    if (!job || !can("Jobs.Export")) return;
+    setDocBusy("form");
+    try {
+      const blob = await api.jobs.installationForm(job.id);
+      openDocument(blob);
+    } catch {
+      flash("Failed to generate installation form");
+    } finally {
+      setDocBusy(null);
+    }
+  }
+
+  async function downloadDeliveryOrder() {
+    if (!job || !can("Jobs.Export")) return;
+    setDocBusy("do");
+    try {
+      const blob = await api.jobs.deliveryOrder(job.id);
+      openDocument(blob);
+    } catch {
+      flash("Failed to generate delivery order");
+    } finally {
+      setDocBusy(null);
+    }
+  }
+
   async function confirmPendingStage() {
     if (!pendingStage || !job) return;
     if (!can(pendingStage === "Completed" ? "Jobs.Close" : "Jobs.Edit")) return;
@@ -1116,17 +1525,23 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     }
   }
 
-  async function handleAssignDevice(serial: string) {
+  async function handleAssignDevice(serial: string, jobTerminalId?: string | null) {
     if (!job) return;
     if (!can("Jobs.Edit")) return;
     try {
-      const updated = await api.jobs.assignDevice(job.id, serial);
+      const updated = await api.jobs.assignDevice(job.id, serial, jobTerminalId);
       setJob(updated);
       setShowAssignDevice(false);
+      setAssignJobTerminalId(null);
       flash("Device " + serial + " assigned to " + job.id);
     } catch {
       flash("Failed to assign device");
     }
+  }
+
+  function openAssignDevice(jobTerminalId?: string | null) {
+    setAssignJobTerminalId(jobTerminalId ?? null);
+    setShowAssignDevice(true);
   }
 
   async function handleSwapDevice(serial: string) {
@@ -1143,6 +1558,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   }
 
   const canAdvanceStage = !!nextStage && can(nextStage === "Completed" ? "Jobs.Close" : "Jobs.Edit");
+
 
   return (
     <div>
@@ -1166,6 +1582,21 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           {can("Jobs.Escalate") && job.type === "Repair/Maintenance" && job.stage === "Pending" && !done && (
             <Btn variant="ghost" icon="swap" onClick={() => setShowEscalate(true)}>Escalate to Replacement</Btn>
           )}
+          {can("Jobs.Edit") && showTrackParcelAction && (
+            <Btn variant="ghost" icon="truck" onClick={() => setShowTrackParcel(true)}>
+              {job.shipment_tracking ? "Change Tracking #" : "Track Parcel"}
+            </Btn>
+          )}
+          {can("Jobs.Export") && job.print_form && (
+            <Btn variant="ghost" icon="invoice" disabled={docBusy !== null} onClick={downloadInstallationForm}>
+              {docBusy === "form" ? "Generating…" : "Installation Form"}
+            </Btn>
+          )}
+          {can("Jobs.Export") && job.print_do && (
+            <Btn variant="ghost" icon="file" disabled={docBusy !== null} onClick={downloadDeliveryOrder}>
+              {docBusy === "do" ? "Generating…" : "Delivery Order"}
+            </Btn>
+          )}
           {can("Jobs.Export") && def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
           {can("Jobs.Edit") && <Btn variant="ghost" icon="edit">Edit</Btn>}
         </div>
@@ -1186,7 +1617,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
             {done
               ? "Workflow finished with evidence and notifications logged."
-              : (["Installation", "Replacement"].includes(job.type) && nextStage === "Device Prepared" && !job.terminal)
+              : devicePreparationBlocked
                 ? "Assign a device from inventory before advancing to Device Prepared."
                 : nextStage && activeRule
                   ? `${activeElapsedDays} day(s) elapsed · warning after ${activeRule.warningDays} day(s), breach after ${activeRule.breachDays} day(s).`
@@ -1197,7 +1628,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           <Btn
             variant="primary"
             iconRight={transitionNeedsEvidence(job.type, nextStage) ? "upload" : "chevRight"}
-            disabled={advancing || (["Installation", "Replacement"].includes(job.type) && nextStage === "Device Prepared" && !job.terminal)}
+            disabled={advancing || devicePreparationBlocked}
             onClick={openAdvance}
           >
             {advancing ? "Saving…" : transitionNeedsEvidence(job.type, nextStage) ? "Record " + nextStage : "Advance to " + nextStage}
@@ -1229,6 +1660,66 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
               </div>
             </div>
           </Card>
+
+          {hasJobTerminals && (
+            <Card title={jobTerminalCardTitle} icon="terminal">
+              <div className="card-pad">
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {jobTerminals.map((terminal, index) => {
+                    const assignedSerial = terminal.terminal_serial || terminal.terminal?.serial || terminal.terminal?.serial_no || "";
+                    const serviceSerial = terminal.service_terminal_serial || terminal.service_terminal?.serial || terminal.service_terminal?.serial_no || "";
+                    const rowNeedsAssignment = jobTerminalAssignmentRequired;
+
+                    console.log(index, ": ", terminal)
+                    return (
+                      <div key={terminal.id} style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>
+                              {job.type === "Replacement" ? `Replacement ${index + 1}` : job.type === "Installation" ? `Terminal ${index + 1}` : job.type === "Retrieval" ? `Retrieval ${index + 1}` : `Service terminal ${index + 1}`}
+                            </div>
+                            <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
+                              {job.type !== "Installation" && serviceSerial
+                                ? `${serviceSerial} · ${terminal.service_terminal?.brand ?? ""} ${terminal.service_terminal?.model ?? ""}`.trim()
+                                : terminal.term_setting
+                                ? `${terminal.term_setting.brand} ${terminal.term_setting.model} · ${terminal.term_setting.category}`
+                                : terminal.terminal_setting_id}
+                            </div>
+                          </div>
+                          <Chip cls={rowNeedsAssignment ? assignedSerial ? "chip-ok" : "chip-warn" : "chip-neutral"}>
+                            {rowNeedsAssignment ? assignedSerial ? "Assigned" : "Pending" : "Selected"}
+                          </Chip>
+                        </div>
+                        <dl className="kv" style={{ gridTemplateColumns: "88px 1fr", margin: 0 }}>
+                          {serviceSerial && (<><dt>Old serial</dt><dd className="mono">{serviceSerial}</dd></>)}
+                          {job.type === "Replacement" && terminal.term_setting && (
+                            <><dt>Requested</dt><dd>{terminal.term_setting.brand} {terminal.term_setting.model}</dd></>
+                          )}
+                          {terminal.terminal_setting_id && (<><dt>Brand & Model</dt><dd className="mono">{terminal.term_setting?.brand} {terminal.term_setting?.model}</dd></>)}
+                          {job.type === "Installation" && (<>
+                            <dt>TID</dt><dd className="mono">{terminal.tid?.tid || terminal.terminal_tid_id || "—"}</dd>
+                            <dt>MID</dt><dd className="mono">{terminal.mid || terminal.tid?.mids?.[0]?.mid || "—"}</dd>
+                            <dt>MDR</dt><dd className="mono">{terminal.mdr_rate_id || terminal.tid?.mids?.[0]?.mdr_rate_id || "—"}</dd>
+                          </>)}
+                          {rowNeedsAssignment && (<><dt>{job.type === "Replacement" ? "New serial" : "Serial"}</dt><dd className="mono">{assignedSerial || "—"}</dd></>)}
+                          {terminal.previous_terminal_status && (<><dt>Old status</dt><dd>{terminal.previous_terminal_status}</dd></>)}
+                        </dl>
+                        {assignedSerial ? (
+                          <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", assignedSerial)}>View device</Btn>
+                        ) : rowNeedsAssignment && can("Jobs.Edit") && !done ? (
+                          <Btn variant="ghost" sm icon="terminal" style={{ width: "100%", marginTop: 10 }} onClick={() => openAssignDevice(terminal.id)}>
+                            Assign Device
+                          </Btn>
+                        ) : serviceSerial ? (
+                          <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", serviceSerial)}>View service terminal</Btn>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </Card>
+          )}
 
           <Card title="Evidence & Notes" icon="file">
             <div className="card-pad">
@@ -1337,6 +1828,29 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
+          {job.shipment_tracking && (
+            <Card
+              title="Shipment Tracking"
+              icon="truck"
+              actions={can("Jobs.Edit") ? (
+                <Btn variant="ghost" sm icon="refresh" disabled={refreshingParcel} onClick={refreshParcel}>
+                  {refreshingParcel ? "Refreshing…" : "Refresh status"}
+                </Btn>
+              ) : undefined}
+            >
+              <div className="card-pad">
+                <dl className="kv" style={{ gridTemplateColumns: "128px 1fr" }}>
+                  <dt>Tracking #</dt><dd className="mono">{job.shipment_tracking.tracking_number}</dd>
+                  <dt>Carrier</dt><dd>{job.shipment_tracking.carrier}</dd>
+                  <dt>Status</dt><dd>{job.shipment_tracking.status ? <Chip cls="chip-neutral" dot>{job.shipment_tracking.status}</Chip> : "—"}</dd>
+                  {job.shipment_tracking.status_description && (<><dt>Details</dt><dd>{job.shipment_tracking.status_description}</dd></>)}
+                  <dt>Last event</dt><dd className="mono">{job.shipment_tracking.last_event_at ? formatDateTime(job.shipment_tracking.last_event_at) : "—"}</dd>
+                  <dt>Last checked</dt><dd className="mono">{job.shipment_tracking.last_checked_at ? formatDateTime(job.shipment_tracking.last_checked_at) : "—"}</dd>
+                </dl>
+              </div>
+            </Card>
+          )}
+
           <Card title="SLA Tracking" icon="clock">
             <div className="card-pad">
               {job.sla_leg ? (
@@ -1363,7 +1877,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          {(job.terminal || (["Installation", "Replacement"].includes(job.type) && !done)) && (
+          {(!hasJobTerminals && (job.terminal || (["Installation", "Replacement"].includes(job.type) && !done))) && (
             <Card title={job.type === "Replacement" ? "Replacement Device" : "Device"} icon="terminal">
               <div className="card-pad">
                 {requestedSpec && (
@@ -1395,7 +1909,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                       No device assigned yet
                     </div>
                     {can("Jobs.Edit") && (
-                      <Btn variant="ghost" sm icon="terminal" style={{ width: "100%" }} onClick={() => setShowAssignDevice(true)}>
+                      <Btn variant="ghost" sm icon="terminal" style={{ width: "100%" }} onClick={() => openAssignDevice()}>
                         Assign Device from Inventory
                       </Btn>
                     )}
@@ -1502,7 +2016,11 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
       {showAssignDevice && can("Jobs.Edit") && (
         <AssignDeviceModal
           job={job}
-          onClose={() => setShowAssignDevice(false)}
+          initialJobTerminalId={assignJobTerminalId}
+          onClose={() => {
+            setShowAssignDevice(false);
+            setAssignJobTerminalId(null);
+          }}
           onAssign={handleAssignDevice}
         />
       )}
@@ -1515,6 +2033,17 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             setShowEscalate(false);
             flash("Escalated — Replacement job " + replacementJobId + " created");
             setTimeout(() => nav("job-detail", replacementJobId), 1200);
+          }}
+        />
+      )}
+
+      {showTrackParcel && can("Jobs.Edit") && (
+        <TrackParcelModal
+          job={job}
+          onClose={() => setShowTrackParcel(false)}
+          onSaved={(updated) => {
+            setJob(updated);
+            flash("Tracking number saved");
           }}
         />
       )}

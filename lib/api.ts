@@ -155,6 +155,72 @@ export interface ActivityOut {
   actor: string | null;
 }
 
+export interface AddressOut {
+  id: string;
+  address_line_1: string | null;
+  address_line_2: string | null;
+  city: string | null;
+  state: string | null;
+  postcode: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AddressIn {
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
+}
+
+export interface CustomerRef {
+  id: string;
+  name: string;
+  reg_no?: string | null;
+  tin?: string | null;
+  contact?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  status?: string | null;
+}
+
+export interface MerchantRef {
+  id: string;
+  name: string;
+  mid?: string | null;
+  type?: string | null;
+  status?: string | null;
+  contact?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  bank?: string | null;
+  mcc_code?: string | null;
+  customer_id?: string | null;
+  customer?: CustomerRef | null;
+}
+
+export interface TerminalRef {
+  serial: string;
+  serial_no?: string;
+  brand?: string | null;
+  model?: string | null;
+  status?: string | null;
+  merchant?: MerchantRef | null;
+  customer?: CustomerRef | null;
+}
+
+export interface SimCardRef {
+  id: string;
+  iccid?: string | null;
+  msisdn?: string | null;
+  carrier?: string | null;
+  plan?: string | null;
+  data_allowance?: string | null;
+  status?: string | null;
+  terminal_serial?: string | null;
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export type { AuthUser } from "@/store/authSlice";
@@ -248,13 +314,13 @@ export const dashboard = {
 export interface CustomerOut {
   id: string;
   name: string;
-  type: string;
-  reg_no: string;
+  reg_no: string | null;
   tin: string | null;
   contact: string;
   phone: string;
   email: string;
-  address: string;
+  address: string | null;
+  addresses?: AddressOut[];
   status: string;
   onboarded_date: string;
   merchant_count: number;
@@ -262,24 +328,34 @@ export interface CustomerOut {
 
 export interface CustomerCreate {
   name: string;
-  type: string;
-  reg_no: string;
+  reg_no?: string | null;
   tin?: string | null;
   contact: string;
   phone: string;
   email: string;
-  address: string;
+  address?: string | null;
+  addresses?: AddressIn[];
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
 }
 
 export interface CustomerUpdate {
   name?: string | null;
-  type?: string | null;
   reg_no?: string | null;
   tin?: string | null;
   contact?: string | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
+  addresses?: AddressIn[];
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
   status?: string | null;
 }
 
@@ -346,6 +422,7 @@ export interface MerchantOut {
   name: string;
   type: string;
   mid: string;
+  mcc_code?: string | null;
   bank: string;
   status: string;
   finance: string;
@@ -356,6 +433,7 @@ export interface MerchantOut {
   phone: string;
   email: string;
   address: string;
+  addresses?: AddressOut[];
   onboarded: string;
   bank_account_name: string;
   bank_account_number: string;
@@ -364,6 +442,7 @@ export interface MerchantOut {
   customer_name: string;
   secondary_mid?: string | null;
   mids?: MerchantMIDOut[] | null;
+  tids?: TerminalTidOut[] | null;
   commercial_profile?: MerchantCommercialProfileOut | null;
 }
 
@@ -383,16 +462,10 @@ export interface MerchantMIDIn {
   remarks?: string | null;
 }
 
-
 export interface MerchantCommercialProfileIn {
   rental_plan_id?: string | null;
   rental_price?: number | null;
   plan_period?: string | null;
-  mdr_plan?: string | null;
-  trial_start?: string | null;
-  trial_end?: string | null;
-  discount_type?: string | null;
-  discount_value?: number | null;
   effective_date?: string | null;
 }
 
@@ -400,28 +473,41 @@ export interface MerchantCreate {
   customer_id: string;
   name: string;
   type: string;
+  mcc_code?: string | null;
   bank: string;
   contact: string;
   phone: string;
   email: string;
-  address: string;
+  address?: string | null;
+  addresses?: AddressIn[];
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
   bank_account_name: string;
   bank_account_number: string;
   bank_account_type: string;
-  mid?: string | null;
-  secondary_mid?: string | null;
-  mids?: MerchantMIDIn[] | null;
+  bank_code?: string | null;
   commercial_profile?: MerchantCommercialProfileIn | null;
+  tids?: TerminalTidCreate[];
 }
 
 export interface MerchantUpdate {
   name?: string | null;
   type?: string | null;
+  mcc_code?: string | null;
   bank?: string | null;
   contact?: string | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
+  addresses?: AddressIn[];
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
   bank_account_name?: string | null;
   bank_account_number?: string | null;
   bank_account_type?: string | null;
@@ -455,6 +541,7 @@ export interface MerchantDetails {
 
 export interface MerchantTerminalOut {
   serial: string;
+  serial_no?: string;
   term_setting_id: string;
   brand: string;
   model: string;
@@ -467,6 +554,8 @@ export interface MerchantTerminalOut {
   sim_type: string;
   condition_note: string;
   merchant: { id: string; name: string };
+  simcard?: SimCardRef | null;
+  sim?: SimCardRef | null;
 }
 
 export interface MerchantJobOut {
@@ -497,11 +586,6 @@ export interface MerchantCommercialProfileOut {
   rental_plan_id: string | null;
   rental_price: number | null;
   plan_period: string | null;
-  mdr_plan: string | null;
-  trial_start: string | null;
-  trial_end: string | null;
-  discount_type: string | null;
-  discount_value: number | null;
   effective_date: string | null;
 }
 
@@ -518,6 +602,11 @@ export const merchants = {
     req<MerchantJobOut[]>("GET", `/merchants/${merchantId}/jobs`, { params: { status } }),
   updateCommercial: (merchantId: string, body: MerchantCommercialProfileIn) =>
     req<MerchantCommercialProfileOut>("PATCH", `/merchants/${merchantId}/commercial`, { body }),
+  listTids: (merchantId: string) => req<TerminalTidOut[]>("GET", `/merchants/${merchantId}/tids`),
+  createTid: (merchantId: string, body: TerminalTidCreate) =>
+    req<TerminalTidOut>("POST", `/merchants/${merchantId}/tids`, { body }),
+  updateTid: (merchantId: string, tidId: string, body: TerminalTidUpdate) =>
+    req<TerminalTidOut>("PATCH", `/merchants/${merchantId}/tids/${tidId}`, { body }),
 };
 
 // ─── Terminal Settings ────────────────────────────────────────────────────────
@@ -563,10 +652,10 @@ export interface TerminalOut {
   serial?: string;
   brand: string;
   model: string;
-  bank: string;
   status: string;
   tid: string | null;
-  merchant: { id: string; name: string } | null;
+  merchant: MerchantRef | null;
+  customer?: CustomerRef | null;
   location: string;
   last_movement: string;
   rental_rate: number;
@@ -574,6 +663,9 @@ export interface TerminalOut {
   sim: string;
   condition_note: string;
   term_setting_id: string;
+  tids?: TerminalTidOut[];
+  simcard?: SimCardRef | null;
+  installation_status?: string | null;
   activity_log?: ActivityOut[];
   open_jobs?: { id: string; type: string; stage: string }[];
 }
@@ -587,7 +679,6 @@ export interface TerminalCreate {
   brand: string;
   model: string;
   location: string;
-  bank: string;
   rental_rate: number;
   rental_plan: string;
   sim: string;
@@ -627,6 +718,11 @@ export interface SimCardLinkBody {
   simcard_id: string;
 }
 
+export interface TerminalMerchantAssign {
+  merchant_id: string;
+  terminal_tid_id: string;
+}
+
 export interface TerminalBulkItem {
   serial_no: string;
   tid?: string | null;
@@ -637,44 +733,72 @@ export interface TerminalBulkCreate {
   serial_numbers?: string[] | null;
   terminals?: TerminalBulkItem[] | null;
   tids?: string[] | null;
-  bank?: string | null;
   initial_location?: string;
   sim_type?: string | null;
 }
 
 export interface TerminalTidOut {
   id: string;
-  terminal_serial: string;
+  terminal_serial: string | null;
   tid: string;
-  mid: string | null;
+  bank: string;
   merchant_id: string | null;
-  bank: string | null;
-  status: string;
-  effective_date: string;
-  termination_date: string | null;
-  remarks: string | null;
+  status?: string | null;
+  created_at?: string;
+  mids?: TerminalTidMidOut[];
+  sim_card?: SimCardRef | null;
+  simcard?: SimCardRef | null;
+}
+
+export interface TerminalTidMidOut {
+  id: string;
+  terminal_tid_id: string;
+  mid: string;
+  mdr_rate_id: string | null;
+  mdr_rate: MdrOut | null;
+  status?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TerminalTidMidCreate {
+  mid: string;
+  mdr_rate_id?: string | null;
+}
+
+export interface TerminalTidMidUpdate {
+  mid?: string | null;
+  mdr_rate_id?: string | null;
+  status?: string | null;
+  reason?: string | null;
+}
+
+export interface TerminalTidMidHistoryOut {
+  id: string;
+  terminal_tid_mid_id: string;
+  old_mid: string | null;
+  new_mid: string | null;
+  changed_by_user_id: string | null;
+  changed_at: string;
+  reason: string | null;
+}
+
+export interface TerminalTidAssign {
+  terminal_serial: string;
 }
 
 export interface TerminalTidCreate {
   tid: string;
-  mid?: string | null;
+  bank: string;
   merchant_id?: string | null;
-  bank?: string | null;
-  status?: string;
-  effective_date?: string | null;
-  termination_date?: string | null;
-  remarks?: string | null;
+  mid?: string | null;
+  mdr_rate_id?: string | null;
 }
 
 export interface TerminalTidUpdate {
-  tid?: string;
-  mid?: string | null;
-  merchant_id?: string | null;
+  tid?: string | null;
   bank?: string | null;
-  status?: string;
-  effective_date?: string | null;
-  termination_date?: string | null;
-  remarks?: string | null;
+  merchant_id?: string | null;
 }
 
 export const terminals = {
@@ -685,14 +809,36 @@ export const terminals = {
   bulkCreate: (body: TerminalBulkCreate) => req<BulkCreateResult>("POST", "/terminals/bulk", { body }),
   update: (serial: string, body: TerminalUpdate) =>
     req<TerminalOut>("PATCH", `/terminals/${serial}`, { body }),
+  assignMerchant: (serial: string, body: TerminalMerchantAssign) =>
+    req<TerminalOut>("POST", `/terminals/${serial}/merchant`, { body }),
   activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
   linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
   unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
   createTid: (serial: string, body: TerminalTidCreate) =>
     req<TerminalTidOut>("POST", `/terminals/${serial}/tids`, { body }),
   listTids: (serial: string) => req<TerminalTidOut[]>("GET", `/terminals/${serial}/tids`),
+  assignTid: (tidId: string, body: TerminalTidAssign) =>
+    req<TerminalTidOut>("POST", `/terminal-tids/${tidId}/terminal`, { body }),
   updateTid: (tidId: string, body: TerminalTidUpdate) =>
     req<TerminalTidOut>("PATCH", `/terminal-tids/${tidId}`, { body }),
+  deleteTid: (tidId: string) =>
+    req<TerminalTidOut>("DELETE", `/terminal-tids/${tidId}`),
+  reactivateTid: (tidId: string) =>
+    req<TerminalTidOut>("POST", `/terminal-tids/${tidId}/reactivate`),
+  tidMidHistory: (tidId: string) =>
+    req<TerminalTidMidHistoryOut[]>("GET", `/terminal-tids/${tidId}/mid-history`),
+  listTidMids: (tidId: string) =>
+    req<TerminalTidMidOut[]>("GET", `/terminal-tids/${tidId}/mids`),
+  createTidMid: (tidId: string, body: TerminalTidMidCreate) =>
+    req<TerminalTidMidOut>("POST", `/terminal-tids/${tidId}/mids`, { body }),
+  updateTidMid: (tidId: string, midId: string, body: TerminalTidMidUpdate) =>
+    req<TerminalTidMidOut>("PATCH", `/terminal-tids/${tidId}/mids/${midId}`, { body }),
+  deleteTidMid: (tidId: string, midId: string) =>
+    req<TerminalTidMidOut>("DELETE", `/terminal-tids/${tidId}/mids/${midId}`),
+  reactivateTidMid: (tidId: string, midId: string) =>
+    req<TerminalTidMidOut>("POST", `/terminal-tids/${tidId}/mids/${midId}/reactivate`),
+  tidMidSlotHistory: (tidId: string, midId: string) =>
+    req<TerminalTidMidHistoryOut[]>("GET", `/terminal-tids/${tidId}/mids/${midId}/history`),
 };
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -730,6 +876,35 @@ export interface JobSlaLeg {
   status: string;
 }
 
+export interface JobTerminalOut {
+  id: string;
+  job_id: string;
+  terminal_setting_id: string | null;
+  terminal_serial: string | null;
+  service_terminal_serial: string | null;
+  terminal_tid_id: string | null;
+  mid: string | null;
+  mdr_rate_id: string | null;
+  previous_terminal_status: string | null;
+  term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
+  terminal: { serial: string; serial_no?: string; brand: string; model: string } | null;
+  service_terminal: { serial: string; serial_no?: string; brand: string; model: string } | null;
+  tid: TerminalTidOut | null;
+}
+
+export interface ShipmentTrackingOut {
+  id: string;
+  tracking_number: string;
+  carrier: string;
+  status: string | null;
+  status_description: string | null;
+  last_event_at: string | null;
+  last_checked_at: string | null;
+  raw_response: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface JobOut {
   id: string;
   type: string;
@@ -745,6 +920,10 @@ export interface JobOut {
   previous_terminal: { serial: string; brand: string; model: string } | null;
   merchant_detail: { id: string; name: string; mid: string; bank: string } | null;
   term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
+  job_terminals?: JobTerminalOut[];
+  shipment_tracking?: ShipmentTrackingOut | null;
+  print_form: boolean;
+  print_do: boolean;
   created_at: string;
   due_date: string;
   priority: string;
@@ -773,6 +952,18 @@ export interface JobOut {
   evidence_by_stage: Record<string, JobEvidenceOut[]>;
 }
 
+export interface JobCreateTerminal {
+  terminal_setting_id: string;
+  tid: string;
+  mid: string;
+  mdr: string;
+}
+
+export interface JobServiceTerminalCreate {
+  terminal_id: string;
+  term_setting_id?: string | null;
+}
+
 export interface JobCreate {
   type: string;
   customer_id: string;
@@ -782,6 +973,9 @@ export interface JobCreate {
   due_date: string;
   notes?: string | null;
   term_setting_id?: string | null;
+  terminals?: JobCreateTerminal[];
+  service_terminals?: JobServiceTerminalCreate[];
+  terminal_replace?: string | null;
   service_terminal_serial?: string | null;
   paper_roll_qty?: number | null;
   payment_target?: string | null;
@@ -871,14 +1065,25 @@ export const jobs = {
     return req<JobOut>("PATCH", `/jobs/${id}/next`, { form });
   },
 
-  assignDevice: (id: string, serial_no: string) =>
-    req<JobOut>("POST", `/jobs/${id}/device`, { body: { serial_no } }),
+  assignDevice: (id: string, serial_no: string, job_terminal_id?: string | null) =>
+    req<JobOut>("POST", `/jobs/${id}/device`, {
+      body: job_terminal_id ? { job_terminal_id, serial_no } : { serial_no },
+    }),
 
   escalateToReplacement: (id: string, body: EscalateToReplacementBody) =>
     req<EscalateToReplacementResult>("POST", `/jobs/${id}/escalate-to-replacement`, { body }),
 
+  setParcel: (id: string, tracking_number: string) =>
+    req<JobOut>("PATCH", `/jobs/${id}/parcel`, { body: { tracking_number } }),
+
+  refreshParcel: (id: string) =>
+    req<JobOut>("POST", `/jobs/${id}/parcel/refresh`),
+
   export: (p?: { query?: string; type?: string; status?: string; bank?: string; date_from?: string; date_to?: string; date_field?: string }) =>
     reqBlob("GET", "/jobs/export", { params: p }),
+
+  installationForm: (id: string) => reqBlob("GET", `/jobs/${id}/installation-form`),
+  deliveryOrder: (id: string) => reqBlob("GET", `/jobs/${id}/delivery-order`),
 
   slaList: () => req<JobSlaMap>("GET", "/settings/sla"),
   slaUpdate: (job_type_slug: string, from_stage: string, to_stage: string, body: { warning_days?: number; breach_days?: number }) =>
@@ -896,7 +1101,9 @@ export interface SimCardOut {
   data_allowance: string;
   status: string;
   terminal_serial: string | null;
-  terminal: { serial: string; brand: string; model: string } | null;
+  terminal: TerminalRef | null;
+  merchant?: MerchantRef | null;
+  customer?: CustomerRef | null;
 }
 
 export interface SimCardCreate {
@@ -1434,9 +1641,11 @@ export interface UserOut {
   name: string;
   email: string;
   role: string;
+  role_id?: string | null;
   status: string;
   last_active: string | null;
   jobs: number;
+  banks?: string[];
 }
 
 export interface UserCreate {
@@ -1444,6 +1653,7 @@ export interface UserCreate {
   email: string;
   role_id: string;
   password: string;
+  banks?: string[];
 }
 
 export interface UserUpdate {
@@ -1451,6 +1661,7 @@ export interface UserUpdate {
   email?: string;
   role_id?: string;
   status?: string;
+  banks?: string[];
 }
 
 export interface UserListParams {

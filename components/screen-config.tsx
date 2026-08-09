@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pagination } from "./components";
-import { ROLES, PERMISSION_MODULES } from "./data";
+import { ROLES, PERMISSION_MODULES, BANKS } from "./data";
 import { api, ApiError } from "@/lib/api";
 import type { UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
@@ -907,6 +907,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
     role: existing
       ? roles.find((r) => r.name === existing.role)?.id ?? ""
       : roles.find((r) => r.name === "Operations")?.id ?? roles[0]?.id ?? "",
+    bank: existing?.banks?.[0] ?? BANKS[0],
     password: "",
   }));
   const [resetPw, setResetPw] = useState("");
@@ -923,9 +924,9 @@ function UserModal({ onClose, onSave, existing, roles }: {
     if (existing ? !can("Users.Edit") : !can("Users.Invite")) return;
     setSaving(true); setErr(null);
     try {
-      const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder" };
+      const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder", banks: [f.bank] };
       const result = existing
-        ? await api.users.update(existing.id, { name: f.name, email: f.email, role_id: f.role })
+        ? await api.users.update(existing.id, { name: f.name, email: f.email, role_id: f.role, banks: [f.bank] })
         : await api.users.create(body);
       onSave(result);
     } catch (e) {
@@ -987,6 +988,11 @@ function UserModal({ onClose, onSave, existing, roles }: {
             </div>
           ))}
         </div>
+      </Field>
+      <Field label="Bank">
+        <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
+          {BANKS.map((b) => <option key={b}>{b}</option>)}
+        </select>
       </Field>
       {existing && can("Users.Edit") && (
         <div style={{ marginTop: 8, paddingTop: 14, borderTop: "1px solid var(--line)" }}>

@@ -1,98 +1,13 @@
 /* PaidChain — Merchant listing + detail */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, MdrOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut } from "@/lib/api";
+import type { AddressIn, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, TerminalTidCreate, TerminalTidUpdate, TerminalTidOut, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, TerminalTidMidHistoryOut, MdrOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
 import { useCan } from "@/lib/use-permissions";
-
-function EntitySearchSelect<T extends { id: string }>({
-  label, hint, placeholder, value, onSelect, fetchResults, renderOption, getLabel, disabled, disabledHint,
-}: {
-  label: string;
-  hint?: string;
-  placeholder: string;
-  value: T | null;
-  onSelect: (item: T | null) => void;
-  fetchResults: (query: string) => Promise<T[]>;
-  renderOption: (item: T) => React.ReactNode;
-  getLabel: (item: T) => string;
-  disabled?: boolean;
-  disabledHint?: string;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<T[]>([]);
-  const [loading, setLoading] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function runSearch(v: string) {
-    setLoading(true);
-    fetchResults(v).then(setResults).catch(console.error).finally(() => setLoading(false));
-  }
-
-  function handleChange(v: string) {
-    setQuery(v);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => runSearch(v), 300);
-  }
-
-  function handleFocus() {
-    setOpen(true);
-    if (!loading && results.length === 0) runSearch(query);
-  }
-
-  return (
-    <Field label={label} hint={hint}>
-      <div style={{ position: "relative" }}>
-        {value ? (
-          <div className="input" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-2, #f5f5f5)" }}>
-            <span>{getLabel(value)}</span>
-            <button type="button" className="icon-btn" onClick={() => { onSelect(null); setQuery(""); setResults([]); }}>
-              <Icon name="x" size={13} />
-            </button>
-          </div>
-        ) : (
-          <input
-            className="input"
-            placeholder={disabled ? disabledHint : placeholder}
-            value={query}
-            disabled={disabled}
-            onChange={(e) => handleChange(e.target.value)}
-            onFocus={handleFocus}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
-          />
-        )}
-        {open && !value && !disabled && (
-          <div style={{
-            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20,
-            background: "#fff", border: "1px solid var(--line)", borderRadius: 10,
-            boxShadow: "var(--sh-sm)", maxHeight: 220, overflowY: "auto",
-          }}>
-            {loading ? (
-              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>Searching…</div>
-            ) : results.length === 0 ? (
-              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>No matches</div>
-            ) : (
-              results.map((item) => (
-                <div
-                  key={item.id}
-                  className="search-opt"
-                  onMouseDown={() => { onSelect(item); setQuery(""); setOpen(false); }}
-                >
-                  {renderOption(item)}
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-    </Field>
-  );
-}
 
 /* =================== CREATE MERCHANT MODAL =================== */
 interface CreateMerchantModalProps {
@@ -100,39 +15,108 @@ interface CreateMerchantModalProps {
   onSave: (m: MerchantOut) => void;
   customerId: string;
   customerName: string;
+  customer?: CustomerOut | null;
   existingMerchant?: MerchantOut | null;
 }
 
-export function CreateMerchantModal({ onClose, onSave, customerId, customerName, existingMerchant = null }: CreateMerchantModalProps) {
-  const MERCHANT_TYPES = ['Retail', 'Normal Retail', 'EV', 'F&B', 'Services', 'Other'];
+type MerchantTidDraft = {
+  tid: string;
+  bank: string;
+};
+
+type MerchantAddressForm = {
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postcode: string;
+};
+
+function blankMerchantAddressForm(): MerchantAddressForm {
+  return { addressLine1: "", addressLine2: "", city: "", state: "", postcode: "" };
+}
+
+function addressFormFromAddress(address?: { address_line_1: string | null; address_line_2: string | null; city: string | null; state: string | null; postcode: string | null } | null): MerchantAddressForm {
+  if (!address) return blankMerchantAddressForm();
+  return {
+    addressLine1: address.address_line_1 ?? "",
+    addressLine2: address.address_line_2 ?? "",
+    city: address.city ?? "",
+    state: address.state ?? "",
+    postcode: address.postcode ?? "",
+  };
+}
+
+function merchantInitialAddressForm(existingMerchant: MerchantOut | null, customer?: CustomerOut | null): MerchantAddressForm {
+  if (existingMerchant) return addressFormFromAddress(existingMerchant.addresses?.[0]);
+  return addressFormFromAddress(customer?.addresses?.[0]);
+}
+
+function buildMerchantAddressPayload(address: MerchantAddressForm): AddressIn[] {
+  const line1 = address.addressLine1.trim();
+  const line2 = address.addressLine2.trim();
+  const city = address.city.trim();
+  const state = address.state.trim();
+  const postcode = address.postcode.trim();
+  if (!line1 && !line2 && !city && !state && !postcode) return [];
+  return [{
+    address_line_1: line1 || null,
+    address_line_2: line2 || null,
+    city: city || null,
+    state: state || null,
+    postcode: postcode || null,
+  }];
+}
+
+function merchantAddressRows(merchant: MerchantOut): Array<[string, string]> {
+  const address = merchant.addresses?.[0];
+  if (!address) return [];
+  return [
+    ["Address line 1", address.address_line_1 ?? ""],
+    ["Address line 2", address.address_line_2 ?? ""],
+    ["City", address.city ?? ""],
+    ["State", address.state ?? ""],
+    ["Postcode", address.postcode ?? ""],
+  ].filter((row): row is [string, string] => Boolean(row[1].trim()));
+}
+
+function merchantTerminalSimLabel(t: MerchantTerminalOut) {
+  const sim = t.simcard ?? t.sim;
+  return [sim?.carrier, sim?.msisdn || sim?.iccid || t.sim_type].filter(Boolean).join(" · ");
+}
+
+function tidSimLabel(tid: TerminalTidOut) {
+  const sim = tid.sim_card ?? tid.simcard;
+  if (!sim) return "";
+  return [sim.carrier, sim.msisdn || sim.iccid, sim.plan].filter(Boolean).join(" · ");
+}
+
+export function CreateMerchantModal({ onClose, onSave, customerId, customerName, customer = null, existingMerchant = null }: CreateMerchantModalProps) {
+  const MERCHANT_TYPES = ['Retail', 'Corporate'];
   const ACCOUNT_TYPES = ["Current", "Savings"];
   const editing = Boolean(existingMerchant);
 
   const [f, setF] = useState({
     name: existingMerchant?.name ?? "",
     type: existingMerchant?.type ?? MERCHANT_TYPES[0],
+    mccCode: existingMerchant?.mcc_code ?? "",
     bank: existingMerchant?.bank ?? BANKS[0],
     contact: existingMerchant?.contact ?? "",
     phone: existingMerchant?.phone ?? "",
     email: existingMerchant?.email ?? "",
-    address: existingMerchant?.address ?? "",
     bankAccountName: existingMerchant?.bank_account_name ?? "",
     bankAccountNumber: existingMerchant?.bank_account_number ?? "",
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
-  const [mid, setMid] = useState(existingMerchant?.mid ?? "");
-  const [secondaryMid, setSecondaryMid] = useState(existingMerchant?.secondary_mid ?? "");
-  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
-  const [selectedMdrRate, setSelectedMdrRate] = useState<MdrOut | null>(null);
-  const [mdrLoading, setMdrLoading] = useState(true);
+  const [address, setAddress] = useState<MerchantAddressForm>(() => merchantInitialAddressForm(existingMerchant, customer));
+  const [tidRows, setTidRows] = useState<MerchantTidDraft[]>([{ tid: "", bank: BANKS[0] }]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = f.name.trim() && f.contact.trim();
+  const setAddressField = (k: keyof MerchantAddressForm, v: string) => setAddress((prev) => ({ ...prev, [k]: v }));
 
   // Commercial profile step (create-only)
   const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
-  const DISCOUNT_TYPES = ["Percentage", "Fixed Amount"];
   const [step, setStep] = useState<1 | 2>(1);
   const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
   const [rentalPlansLoading, setRentalPlansLoading] = useState(false);
@@ -140,45 +124,49 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     rental_plan_id: "",
     rental_price: "",
     plan_period: "Monthly",
-    trial_start: "",
-    trial_end: "",
-    discount_type: "",
-    discount_value: "",
     effective_date: "",
   });
   const setC = (k: string, v: string) => setCommercial((p) => ({ ...p, [k]: v }));
   const [linkingSaving, setLinkingSaving] = useState(false);
+  const hasCustomerLink = Boolean(customerId && customerName);
+  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim());
 
-  useEffect(() => {
-    api.mdr.list()
-      .then((rates) => {
-        setMdrRates(rates);
-        if (!existingMerchant) return;
-        const mdrPlan = existingMerchant.commercial_profile?.mdr_plan;
-        const matchedRate = mdrPlan
-          ? rates.find((rate) => rate.id === mdrPlan || rate.type === mdrPlan) ?? null
-          : null;
-        setSelectedMdrRate(matchedRate);
-      })
-      .catch(console.error)
-      .finally(() => setMdrLoading(false));
-  }, [existingMerchant]);
+  function setTidRow(index: number, key: keyof MerchantTidDraft, value: string) {
+    setTidRows((rows) => rows.map((row, i) => i === index ? { ...row, [key]: value } : row));
+  }
+
+  function addTidRow() {
+    setTidRows((rows) => [...rows, { tid: "", bank: BANKS[0] }]);
+  }
+
+  function removeTidRow(index: number) {
+    setTidRows((rows) => {
+      const next = rows.filter((_, i) => i !== index);
+      return next.length ? next : [{ tid: "", bank: BANKS[0] }];
+    });
+  }
+
+  function buildTidPayload(): TerminalTidCreate[] {
+    return tidRows
+      .map((row) => ({ tid: row.tid.trim(), bank: row.bank }))
+      .filter((row) => row.tid);
+  }
 
   function buildBaseBody(): MerchantCreate {
     return {
       customer_id: customerId,
       name: f.name.trim(),
       type: f.type,
-      mid: mid.trim() || null,
-      secondary_mid: secondaryMid.trim() || null,
+      mcc_code: f.mccCode.trim() || null,
       bank: f.bank,
       contact: f.contact.trim(),
       phone: f.phone.trim(),
       email: f.email.trim(),
-      address: f.address.trim(),
+      addresses: buildMerchantAddressPayload(address),
       bank_account_name: f.bankAccountName.trim() || f.name.trim(),
       bank_account_number: f.bankAccountNumber.trim(),
       bank_account_type: f.bankAccountType,
+      tids: buildTidPayload(),
     };
   }
 
@@ -188,14 +176,13 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     setSaving(true); setErr(null);
     try {
       const updateBody: MerchantUpdate = {
-        name: f.name.trim(), type: f.type, bank: f.bank,
+        name: f.name.trim(), type: f.type, mcc_code: f.mccCode.trim() || null, bank: f.bank,
         contact: f.contact.trim(), phone: f.phone.trim(),
-        email: f.email.trim(), address: f.address.trim(),
+        email: f.email.trim(),
+        addresses: buildMerchantAddressPayload(address),
         bank_account_name: f.bankAccountName.trim() || f.name.trim(),
         bank_account_number: f.bankAccountNumber.trim(),
         bank_account_type: f.bankAccountType,
-        mid: mid.trim() || null,
-        secondary_mid: secondaryMid.trim() || null,
       };
       const m = await api.merchants.update(existingMerchant.id, updateBody);
       onSave(m);
@@ -208,6 +195,11 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
 
   // Create-only: advance to commercial step without API call
   function goToCommercial() {
+    if (!hasCustomerLink) {
+      setErr("Select a customer before creating a merchant");
+      return;
+    }
+    if (!valid) return;
     setRentalPlansLoading(true);
     api.rentalPlans.list({ active: true })
       .then(setRentalPlans)
@@ -216,36 +208,33 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     setStep(2);
   }
 
-  // Auto-fill rental_price + plan_period when a rental plan is selected
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!commercial.rental_plan_id) return;
-    const plan = rentalPlans.find((p) => p.id === commercial.rental_plan_id);
-    if (plan) {
-      setCommercial((prev) => ({ ...prev, rental_price: String(plan.monthly_rate), plan_period: plan.plan_period }));
-    }
-  }, [commercial.rental_plan_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  function setCommercialRentalPlan(planId: string) {
+    const plan = rentalPlans.find((p) => p.id === planId);
+    setCommercial((prev) => ({
+      ...prev,
+      rental_plan_id: planId,
+      ...(plan ? { rental_price: String(plan.monthly_rate), plan_period: plan.plan_period } : {}),
+    }));
+  }
 
   async function saveCommercial() {
+    if (!hasCustomerLink) {
+      setErr("Select a customer before creating a merchant");
+      return;
+    }
     setLinkingSaving(true); setErr(null);
     try {
       const body: MerchantCreate = {
         ...buildBaseBody(),
         commercial_profile: {
-          mdr_plan: selectedMdrRate?.id ?? null,
           rental_plan_id: commercial.rental_plan_id || null,
           rental_price: commercial.rental_price ? parseFloat(commercial.rental_price) : null,
           plan_period: commercial.plan_period || null,
-          trial_start: commercial.trial_start || null,
-          trial_end: commercial.trial_end || null,
-          discount_type: commercial.discount_type || null,
-          discount_value: commercial.discount_value ? parseFloat(commercial.discount_value) : null,
           effective_date: commercial.effective_date || null,
         },
       };
       const m = await api.merchants.create(body);
       onSave(m);
-      onClose();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Failed to create merchant");
       setLinkingSaving(false);
@@ -253,11 +242,14 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   }
 
   async function skipCommercial() {
+    if (!hasCustomerLink) {
+      setErr("Select a customer before creating a merchant");
+      return;
+    }
     setLinkingSaving(true); setErr(null);
     try {
       const m = await api.merchants.create(buildBaseBody());
       onSave(m);
-      onClose();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Failed to create merchant");
       setLinkingSaving(false);
@@ -335,21 +327,62 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
               </select>
             </Field>
           </div>
+          <Field label="MCC Code">
+            <input className="input" placeholder="e.g. 5812" value={f.mccCode} onChange={(e) => set("mccCode", e.target.value)} />
+          </Field>
 
           <Field label="Customer (billing entity)">
             <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-2)", cursor: "not-allowed" }}>
-              {customerName}
+              {customerName || "No customer selected"}
             </div>
           </Field>
 
-          <div className="field-row">
-            <Field label="MID (primary)">
-              <input className="input" placeholder="e.g. MID00012345" value={mid} onChange={(e) => setMid(e.target.value)} />
+          {!editing && (
+            <Field label="Terminal IDs" hint="optional · add MIDs from the merchant page after creation">
+              <div style={{ display: "grid", gap: 10 }}>
+                {tidRows.map((row, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: tidRows.length > 1 ? "minmax(0, 1fr) minmax(0, 1fr) auto" : "minmax(0, 1fr) minmax(0, 1fr)",
+                      gap: 14,
+                      alignItems: "start",
+                    }}
+                  >
+                    <Field label={i === 0 ? "TID" : undefined}>
+                      <input
+                        className="input"
+                        placeholder="e.g. 12345678"
+                        value={row.tid}
+                        onChange={(e) => setTidRow(i, "tid", e.target.value)}
+                      />
+                    </Field>
+                    <Field label={i === 0 ? "Bank" : undefined}>
+                      <select className="input" value={row.bank} onChange={(e) => setTidRow(i, "bank", e.target.value)}>
+                        {BANKS.map((b) => <option key={b}>{b}</option>)}
+                      </select>
+                    </Field>
+                    {tidRows.length > 1 && (
+                      <div style={{ paddingTop: i === 0 ? 24 : 0 }}>
+                        <Btn
+                          variant="ghost"
+                          sm
+                          icon="x"
+                          title="Remove TID"
+                          onClick={() => removeTidRow(i)}
+                          style={{ color: "var(--bad)", height: 40 }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <Btn variant="ghost" sm icon="plus" onClick={addTidRow} style={{ justifySelf: "start" }}>
+                  Add TID
+                </Btn>
+              </div>
             </Field>
-            <Field label="Secondary MID">
-              <input className="input" placeholder="Optional" value={secondaryMid} onChange={(e) => setSecondaryMid(e.target.value)} />
-            </Field>
-          </div>
+          )}
 
           <Field label="Bank">
             <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
@@ -369,7 +402,21 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
             </Field>
           </div>
           <Field label="Address">
-            <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
+            <input className="input" placeholder="Address line 1" value={address.addressLine1} onChange={(e) => setAddressField("addressLine1", e.target.value)} />
+          </Field>
+          <Field label="Address line 2">
+            <input className="input" placeholder="Unit, floor, building" value={address.addressLine2} onChange={(e) => setAddressField("addressLine2", e.target.value)} />
+          </Field>
+          <div className="field-row">
+            <Field label="City">
+              <input className="input" placeholder="Kuala Lumpur" value={address.city} onChange={(e) => setAddressField("city", e.target.value)} />
+            </Field>
+            <Field label="State">
+              <input className="input" placeholder="WP Kuala Lumpur" value={address.state} onChange={(e) => setAddressField("state", e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Postcode">
+            <input className="input" placeholder="50000" value={address.postcode} onChange={(e) => setAddressField("postcode", e.target.value)} />
           </Field>
 
           <div className="field-row">
@@ -393,38 +440,11 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       {/* ── Step 2: Commercial profile ── */}
       {step === 2 && (
         <>
-          <EntitySearchSelect<MdrOut>
-            label="MDR plan"
-            hint="required"
-            placeholder="Search rate type, network, category…"
-            disabled={mdrLoading}
-            disabledHint="Loading MDR rates…"
-            value={selectedMdrRate}
-            onSelect={setSelectedMdrRate}
-            fetchResults={(query) => {
-              const needle = query.trim().toLowerCase();
-              const matches = needle
-                ? mdrRates.filter((rate) =>
-                    `${rate.type} ${rate.network} ${rate.category} ${rate.rate}`
-                      .toLowerCase()
-                      .includes(needle))
-                : mdrRates;
-              return Promise.resolve(matches.slice(0, 8));
-            }}
-            getLabel={(rate) => `${rate.type} · ${rate.rate}%`}
-            renderOption={(rate) => (
-              <div className="cell-2">
-                <span className="td-strong">{rate.type} · {rate.rate}%</span>
-                <span className="c2-sub">{rate.network} · {rate.category}</span>
-              </div>
-            )}
-          />
-
           <Field label="Rental plan">
             {rentalPlansLoading ? (
               <div className="input" style={{ color: "var(--ink-3)" }}>Loading plans…</div>
             ) : (
-              <select className="input" value={commercial.rental_plan_id} onChange={(e) => setC("rental_plan_id", e.target.value)}>
+              <select className="input" value={commercial.rental_plan_id} onChange={(e) => setCommercialRentalPlan(e.target.value)}>
                 <option value="">— None —</option>
                 {rentalPlans.map((p) => (
                   <option key={p.id} value={p.id}>{p.name} · RM {p.monthly_rate.toFixed(2)}/{p.plan_period}</option>
@@ -447,29 +467,6 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
           <Field label="Effective date">
             <input className="input" type="date" value={commercial.effective_date} onChange={(e) => setC("effective_date", e.target.value)} />
           </Field>
-
-          <div className="field-row">
-            <Field label="Trial start">
-              <input className="input" type="date" value={commercial.trial_start} onChange={(e) => setC("trial_start", e.target.value)} />
-            </Field>
-            <Field label="Trial end">
-              <input className="input" type="date" value={commercial.trial_end} onChange={(e) => setC("trial_end", e.target.value)} />
-            </Field>
-          </div>
-
-          <div className="field-row">
-            <Field label="Discount type">
-              <select className="input" value={commercial.discount_type} onChange={(e) => setC("discount_type", e.target.value)}>
-                <option value="">— None —</option>
-                {DISCOUNT_TYPES.map((d) => <option key={d}>{d}</option>)}
-              </select>
-            </Field>
-            {commercial.discount_type && (
-              <Field label="Discount value">
-                <input className="input" type="number" min="0" step="0.01" placeholder={commercial.discount_type === "Percentage" ? "e.g. 10" : "e.g. 50.00"} value={commercial.discount_value} onChange={(e) => setC("discount_value", e.target.value)} />
-              </Field>
-            )}
-          </div>
           {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
         </>
       )}
@@ -477,48 +474,173 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   );
 }
 
+function CustomerPickerModal({ onClose, onSelect }: {
+  onClose: () => void;
+  onSelect: (customer: CustomerOut) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [customers, setCustomers] = useState<CustomerOut[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setErr(null);
+      api.customers.list({ query: query.trim() || undefined, per_page: 8 })
+        .then((page) => {
+          if (!cancelled) setCustomers(page.items);
+        })
+        .catch((e) => {
+          if (!cancelled) setErr(e instanceof ApiError ? e.message : "Failed to load customers");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  return (
+    <Modal
+      title="Select Customer"
+      sub="Choose the billing entity for this merchant"
+      icon="building"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+      </>}
+    >
+      <Field label="Customer" hint="required">
+        <input
+          className="input"
+          placeholder="Search customer name, registration or contact..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoFocus
+        />
+      </Field>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 10 }}>{err}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {loading ? (
+          <div style={{ padding: "14px 0", fontSize: 13, color: "var(--ink-3)" }}>Loading customers...</div>
+        ) : customers.length === 0 ? (
+          <div style={{ padding: "14px 0", fontSize: 13, color: "var(--ink-3)" }}>No customers found.</div>
+        ) : customers.map((customer) => (
+          <button
+            key={customer.id}
+            type="button"
+            onClick={() => onSelect(customer)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              width: "100%",
+              padding: "11px 13px",
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              background: "#fff",
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            <div className="cell-2">
+              <span className="td-strong">{customer.name}</span>
+              <span className="c2-sub mono">{customer.reg_no || customer.id}</span>
+            </div>
+            <Chip cls={customer.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{customer.status}</Chip>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 /* =================== LISTING =================== */
 export function Merchants({ nav }: { nav: NavFn }) {
+  const can = useCan();
+  const MERCHANTS_PAGE_SIZE = 20;
   const [merchantList, setMerchantList] = useState<MerchantOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [bank, setBank] = useState("All");
   const [status, setStatus] = useState("All");
-  useEffect(() => {
-    api.merchants.list().then((p) => setMerchantList(p.items)).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [createCustomer, setCreateCustomer] = useState<CustomerOut | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const filtered = merchantList.filter((m) => {
-    const hay = (m.name + " " + m.mid + " " + m.bank + " " + m.id).toLowerCase();
-    if (q && !hay.includes(q.toLowerCase())) return false;
-    if (bank !== "All" && m.bank !== bank) return false;
-    if (status !== "All" && m.status !== status) return false;
-    return true;
-  });
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      api.merchants.list({
+        page,
+        per_page: MERCHANTS_PAGE_SIZE,
+        query: q.trim() || undefined,
+        status: status !== "All" ? status : undefined,
+        bank: bank !== "All" ? bank : undefined,
+      })
+        .then((p) => {
+          if (cancelled) return;
+          setMerchantList(p.items);
+          setTotal(p.total);
+          setPages(p.pages);
+        })
+        .catch(console.error)
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, q.trim() ? 250 : 0);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [page, q, status, bank]);
+
+  function handleMerchantCreated(merchant: MerchantOut) {
+    setMerchantList((prev) => [merchant, ...prev]);
+    setTotal((prev) => prev + 1);
+    setCreateCustomer(null);
+    setToast("Merchant " + merchant.name + " created");
+    setTimeout(() => setToast(null), 2800);
+  }
+
+  function resetPage() { setPage(1); }
 
   return (
     <div>
       <PageHead
         title="Merchants"
-        sub={merchantList.length + " merchants · search by name, MID, bank or merchant ID"}
-        // actions={<Btn variant="ghost" icon="download">Export</Btn>}
+        sub={total + " merchants · search by name, MID, TID, terminal serial or merchant ID"}
+        actions={can("Merchants.Create") ? <Btn variant="primary" icon="plus" onClick={() => setShowCustomerPicker(true)}>Create Merchant</Btn> : undefined}
       />
       <Card>
         <Toolbar>
-          <SearchBox value={q} onChange={setQ} placeholder="Search merchant, MID, bank…" />
-          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <SearchBox value={q} onChange={(value) => { setQ(value); resetPage(); }} placeholder="Search merchant, MID, TID, terminal…" />
+          <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
             {["All","Active","Onboarding","Suspended","Inactive"].map((s) => <option key={s}>{s}</option>)}
           </select>
-          <select className="select" value={bank} onChange={(e) => setBank(e.target.value)}>
+          <select className="select" value={bank} onChange={(e) => { setBank(e.target.value); resetPage(); }}>
             {["All", ...BANKS].map((s) => <option key={s} value={s}>{s === "All" ? "All Banks" : s}</option>)}
           </select>
-          <span className="tb-meta">{filtered.length} results</span>
+          <span className="tb-meta">{loading ? "Loading..." : `${total} results`}</span>
         </Toolbar>
         {loading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
-        ) : filtered.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
+        ) : merchantList.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
           <ResponsiveTable
-            rows={filtered}
+            rows={merchantList}
             getKey={(m) => m.id}
             onRowClick={(m) => nav("merchant-detail", m.id)}
             columns={[
@@ -548,8 +670,27 @@ export function Merchants({ nav }: { nav: NavFn }) {
             )}
           />
         )}
-        <Pagination total={merchantList.length} shown={filtered.length} />
+        <Pagination total={total} shown={merchantList.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
+      {showCustomerPicker && can("Merchants.Create") && (
+        <CustomerPickerModal
+          onClose={() => setShowCustomerPicker(false)}
+          onSelect={(customer) => {
+            setCreateCustomer(customer);
+            setShowCustomerPicker(false);
+          }}
+        />
+      )}
+      {createCustomer && can("Merchants.Create") && (
+        <CreateMerchantModal
+          onClose={() => setCreateCustomer(null)}
+          onSave={handleMerchantCreated}
+          customerId={createCustomer.id}
+          customerName={createCustomer.name}
+          customer={createCustomer}
+        />
+      )}
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );
 }
@@ -562,11 +703,7 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   onSaved: (cp: MerchantCommercialProfileOut) => void;
 }) {
   const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
-  const DISCOUNT_TYPES = ["Percentage", "Fixed Amount"];
 
-  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
-  const [mdrLoading, setMdrLoading] = useState(true);
-  const [selectedMdrRate, setSelectedMdrRate] = useState<MdrOut | null>(null);
   const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
   const [rentalPlansLoading, setRentalPlansLoading] = useState(true);
   const [f, setF] = useState({
@@ -574,49 +711,45 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
     rental_price:    existing.rental_price != null ? String(existing.rental_price) : "",
     plan_period:     existing.plan_period    ?? "Monthly",
     effective_date:  existing.effective_date ?? "",
-    trial_start:     existing.trial_start    ?? "",
-    trial_end:       existing.trial_end      ?? "",
-    discount_type:   existing.discount_type  ?? "",
-    discount_value:  existing.discount_value != null ? String(existing.discount_value) : "",
   });
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.mdr.list()
-      .then((rates) => {
-        setMdrRates(rates);
-        const match = rates.find((r) => r.id === existing.mdr_plan || r.type === existing.mdr_plan) ?? null;
-        setSelectedMdrRate(match);
-      })
-      .catch(console.error)
-      .finally(() => setMdrLoading(false));
-    api.rentalPlans.list({ active: true })
-      .then(setRentalPlans)
-      .catch(console.error)
-      .finally(() => setRentalPlansLoading(false));
-  }, []);
+  function setRentalPlan(planId: string, plans = rentalPlans) {
+    const plan = plans.find((p) => p.id === planId);
+    setF((prev) => ({
+      ...prev,
+      rental_plan_id: planId,
+      ...(plan ? { rental_price: String(plan.monthly_rate), plan_period: plan.plan_period } : {}),
+    }));
+  }
 
   useEffect(() => {
-    if (!f.rental_plan_id) return;
-    const plan = rentalPlans.find((p) => p.id === f.rental_plan_id);
-    if (plan) setF((prev) => ({ ...prev, rental_price: String(plan.monthly_rate), plan_period: plan.plan_period }));
-  }, [f.rental_plan_id, rentalPlans]); // eslint-disable-line react-hooks/exhaustive-deps
+    api.rentalPlans.list({ active: true })
+      .then((plans) => {
+        setRentalPlans(plans);
+        const plan = plans.find((p) => p.id === existing.rental_plan_id);
+        if (plan) {
+          setF((prev) => ({
+            ...prev,
+            rental_price: String(plan.monthly_rate),
+            plan_period: plan.plan_period,
+          }));
+        }
+      })
+      .catch(console.error)
+      .finally(() => setRentalPlansLoading(false));
+  }, [existing.rental_plan_id]);
 
   async function save() {
     setSaving(true); setErr(null);
     try {
       const body: MerchantCommercialProfileIn = {
-        mdr_plan:        selectedMdrRate?.id ?? "",
         rental_plan_id:  f.rental_plan_id  || null,
         rental_price:    f.rental_price    ? parseFloat(f.rental_price)    : null,
         plan_period:     f.plan_period     || null,
         effective_date:  f.effective_date  || null,
-        trial_start:     f.trial_start     || null,
-        trial_end:       f.trial_end       || null,
-        discount_type:   f.discount_type   || null,
-        discount_value:  f.discount_value  ? parseFloat(f.discount_value)  : null,
       };
       const result = await api.merchants.updateCommercial(merchantId, body);
       onSaved(result);
@@ -630,7 +763,7 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   return (
     <Modal
       title="Edit Commercial Profile"
-      sub="Update MDR plan, rental and billing terms"
+      sub="Update rental and billing terms"
       icon="percent"
       onClose={onClose}
       foot={<>
@@ -641,34 +774,11 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
         </Btn>
       </>}
     >
-      <EntitySearchSelect<MdrOut>
-        label="MDR plan"
-        placeholder="Search rate type, network, category…"
-        disabled={mdrLoading}
-        disabledHint="Loading MDR rates…"
-        value={selectedMdrRate}
-        onSelect={setSelectedMdrRate}
-        fetchResults={(query) => {
-          const needle = query.trim().toLowerCase();
-          const matches = needle
-            ? mdrRates.filter((r) => `${r.type} ${r.network} ${r.category} ${r.rate}`.toLowerCase().includes(needle))
-            : mdrRates;
-          return Promise.resolve(matches.slice(0, 8));
-        }}
-        getLabel={(r) => `${r.type} · ${r.rate}%`}
-        renderOption={(r) => (
-          <div className="cell-2">
-            <span className="td-strong">{r.type} · {r.rate}%</span>
-            <span className="c2-sub">{r.network} · {r.category}</span>
-          </div>
-        )}
-      />
-
       <Field label="Rental plan">
         {rentalPlansLoading ? (
           <div className="input" style={{ color: "var(--ink-3)" }}>Loading plans…</div>
         ) : (
-          <select className="input" value={f.rental_plan_id} onChange={(e) => set("rental_plan_id", e.target.value)}>
+          <select className="input" value={f.rental_plan_id} onChange={(e) => setRentalPlan(e.target.value)}>
             <option value="">— None —</option>
             {rentalPlans.map((p) => (
               <option key={p.id} value={p.id}>{p.name} · RM {p.monthly_rate.toFixed(2)}/{p.plan_period}</option>
@@ -691,29 +801,6 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
       <Field label="Effective date">
         <input className="input" type="date" value={f.effective_date} onChange={(e) => set("effective_date", e.target.value)} />
       </Field>
-
-      <div className="field-row">
-        <Field label="Trial start">
-          <input className="input" type="date" value={f.trial_start} onChange={(e) => set("trial_start", e.target.value)} />
-        </Field>
-        <Field label="Trial end">
-          <input className="input" type="date" value={f.trial_end} onChange={(e) => set("trial_end", e.target.value)} />
-        </Field>
-      </div>
-
-      <div className="field-row">
-        <Field label="Discount type">
-          <select className="input" value={f.discount_type} onChange={(e) => set("discount_type", e.target.value)}>
-            <option value="">— None —</option>
-            {DISCOUNT_TYPES.map((d) => <option key={d}>{d}</option>)}
-          </select>
-        </Field>
-        {f.discount_type && (
-          <Field label="Discount value">
-            <input className="input" type="number" min="0" step="0.01" placeholder={f.discount_type === "Percentage" ? "e.g. 10" : "e.g. 50.00"} value={f.discount_value} onChange={(e) => set("discount_value", e.target.value)} />
-          </Field>
-        )}
-      </div>
 
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
@@ -756,6 +843,39 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
     </div>
   );
 
+  function handleTidSaved(tid: TerminalTidOut) {
+    setMerchant((prev) => {
+      if (!prev) return prev;
+      const tids = prev.tids ?? [];
+      const exists = tids.some((item) => item.id === tid.id);
+      return {
+        ...prev,
+        tids: exists
+          ? tids.map((item) => item.id === tid.id ? tid : item)
+          : [...tids, tid],
+      };
+    });
+  }
+
+  function handleMidSaved(tidId: string, mid: TerminalTidMidOut) {
+    setMerchant((prev) => {
+      if (!prev) return prev;
+      const tids = prev.tids ?? [];
+      return {
+        ...prev,
+        tids: tids.map((tid) => {
+          if (tid.id !== tidId) return tid;
+          const mids = tid.mids ?? [];
+          const exists = mids.some((item) => item.id === mid.id);
+          return {
+            ...tid,
+            mids: exists ? mids.map((item) => item.id === mid.id ? mid : item) : [...mids, mid],
+          };
+        }),
+      };
+    });
+  }
+
   return (
     <div>
       <div className="back-link" onClick={() => nav("merchants")}>
@@ -788,7 +908,6 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
           { l: "Merchant Terminals", v: linkedTerminals.length,    ico: "terminal", c: "var(--info)" },
           { l: "Open Jobs",          v: merchantJobs.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
           // { l: "Finance Readiness",  v: merchant.finance,           ico: "shield",   c: merchant.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
-          // { l: "MDR Plan",           v: merchant.mdr_plan,          ico: "percent",  c: "var(--indigo)", small: true },
         ].map((s, i) => (
           <div key={i} className="stat">
             <div className="stat-top">
@@ -806,7 +925,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} />
+        {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onTidSaved={handleTidSaved} onMidSaved={handleMidSaved} />
           : tab === "commercial" ? <CommercialTab m={merchant} canEdit={can("Merchants.Edit")} onEdit={() => setShowEditCommercial(true)} />
           : tab === "terminals"  ? <TerminalsTab rows={linkedTerminals} nav={nav} />
           : <JobsTab rows={merchantJobs} nav={nav} />}
@@ -823,7 +942,6 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
           presetCustomer={{
             id: merchant.customer_id,
             name: merchant.customer_name,
-            type: "",
             reg_no: merchant.customer_id,
             tin: null,
             contact: "",
@@ -912,7 +1030,295 @@ function UpdateMerchantStatusModal({ merchant, onClose, onSaved }: { merchant: M
   );
 }
 
-function OverviewTab({ m, nav }: { m: MerchantOut; nav: NavFn }) {
+function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
+  merchant: MerchantOut;
+  existing?: TerminalTidOut | null;
+  onClose: () => void;
+  onSaved: (tid: TerminalTidOut) => void;
+}) {
+  const editing = Boolean(existing);
+  const [tid, setTid] = useState(existing?.tid ?? "");
+  const [bank, setBank] = useState(existing?.bank ?? merchant.bank ?? BANKS[0]);
+  const [mid, setMid] = useState("");
+  const [mdrRateId, setMdrRateId] = useState("");
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editing) return;
+    api.mdr.list().then(setMdrRates).catch(console.error);
+  }, [editing]);
+
+  async function submit() {
+    if (!tid.trim()) {
+      setErr("TID is required");
+      return;
+    }
+    setSaving(true); setErr(null);
+    try {
+      const result = editing
+        ? await api.merchants.updateTid(merchant.id, existing!.id, {
+          tid: tid.trim(),
+          bank,
+        } satisfies TerminalTidUpdate)
+        : await api.merchants.createTid(merchant.id, {
+          tid: tid.trim(),
+          bank,
+          mid: mid.trim() || null,
+          mdr_rate_id: mdrRateId || null,
+        } satisfies TerminalTidCreate);
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save TID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit TID" : "Add TID"}
+      sub={merchant.name}
+      icon="tag"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !tid.trim()} onClick={submit}>
+          {saving ? "Saving…" : editing ? "Save Changes" : "Add TID"}
+        </Btn>
+      </>}
+    >
+      <Field label="TID" hint="required">
+        <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="TID123456" />
+      </Field>
+      <Field label="Bank" hint="required">
+        <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
+          {BANKS.map((b) => <option key={b}>{b}</option>)}
+        </select>
+      </Field>
+      {!editing && (
+        <>
+          <Field label="Initial MID" hint="optional">
+            <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="MID123456" />
+          </Field>
+          <Field label="MDR rate" hint="optional">
+            <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+              <option value="">No MDR rate</option>
+              {mdrRates.map((rate) => (
+                <option key={rate.id} value={rate.id}>
+                  {rate.id} · {rate.type} {rate.rate}%
+                </option>
+              ))}
+            </select>
+          </Field>
+        </>
+      )}
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function MidModal({ tid, merchantName, existing, onClose, onSaved }: {
+  tid: TerminalTidOut;
+  merchantName: string;
+  existing?: TerminalTidMidOut | null;
+  onClose: () => void;
+  onSaved: (mid: TerminalTidMidOut) => void;
+}) {
+  const editing = Boolean(existing);
+  const [mid, setMid] = useState(existing?.mid ?? "");
+  const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
+  const [reason, setReason] = useState("");
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.mdr.list().then(setMdrRates).catch(console.error);
+  }, []);
+
+  async function submit() {
+    if (!mid.trim()) {
+      setErr("MID is required");
+      return;
+    }
+    setSaving(true); setErr(null);
+    try {
+      const result = editing
+        ? await api.terminals.updateTidMid(tid.id, existing!.id, {
+          mid: mid.trim(),
+          mdr_rate_id: mdrRateId || null,
+          reason: mid.trim() !== existing?.mid ? (reason.trim() || null) : null,
+        } satisfies TerminalTidMidUpdate)
+        : await api.terminals.createTidMid(tid.id, {
+          mid: mid.trim(),
+          mdr_rate_id: mdrRateId || null,
+        } satisfies TerminalTidMidCreate);
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save MID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit MID" : "Add MID"}
+      sub={`${merchantName} · ${tid.tid}`}
+      icon="tag"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !mid.trim()} onClick={submit}>
+          {saving ? "Saving…" : editing ? "Save Changes" : "Add MID"}
+        </Btn>
+      </>}
+    >
+      <Field label="MID" hint="required">
+        <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="MID123456" />
+      </Field>
+      <Field label="MDR rate">
+        <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+          <option value="">No MDR rate</option>
+          {mdrRates.map((rate) => (
+            <option key={rate.id} value={rate.id}>
+              {rate.id} · {rate.type} {rate.rate}%
+            </option>
+          ))}
+        </select>
+      </Field>
+      {editing && (
+        <Field label="MID change reason" hint="optional">
+          <textarea
+            className="textarea"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason for changing the MID..."
+            rows={3}
+          />
+        </Field>
+      )}
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function TidMidHistoryModal({ tid, onClose }: {
+  tid: TerminalTidOut;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<TerminalTidMidHistoryOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setErr(null);
+    api.terminals.tidMidHistory(tid.id)
+      .then(setRows)
+      .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load MID history"))
+      .finally(() => setLoading(false));
+  }, [tid.id]);
+
+  function midLabel(terminalTidMidId: string) {
+    const slot = tid.mids?.find((m) => m.id === terminalTidMidId);
+    return slot ? `${slot.mid} (${terminalTidMidId})` : terminalTidMidId;
+  }
+
+  return (
+    <Modal title="MID History" sub={`${tid.tid} · ${tid.id}`} icon="clock" size="slim" onClose={onClose}>
+      {loading ? (
+        <div style={{ padding: "20px 0", fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>Loading...</div>
+      ) : err ? (
+        <div style={{ fontSize: 13, color: "var(--bad)" }}>{err}</div>
+      ) : rows.length === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No MID changes recorded for this TID.</div>
+      ) : (
+        <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {rows.map((row) => (
+              <div key={row.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12, background: "var(--surface)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, color: "var(--ink-1)" }}>
+                    <span className="mono">{row.old_mid || "-"}</span>
+                    <span style={{ color: "var(--ink-3)", fontWeight: 500 }}> to </span>
+                    <span className="mono">{row.new_mid || "-"}</span>
+                  </div>
+                  <span className="td-mut" style={{ fontSize: 12 }}>{row.changed_at ? new Date(row.changed_at).toLocaleString() : "-"}</span>
+                </div>
+                <dl className="kv" style={{ gridTemplateColumns: "92px 1fr", margin: 0 }}>
+                  <dt>MID slot</dt><dd className="mono">{midLabel(row.terminal_tid_mid_id)}</dd>
+                  <dt>Reason</dt><dd>{row.reason || "-"}</dd>
+                  <dt>Changed by</dt><dd className="mono">{row.changed_by_user_id || "-"}</dd>
+                </dl>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
+  m: MerchantOut;
+  nav: NavFn;
+  canEdit: boolean;
+  onTidSaved: (tid: TerminalTidOut) => void;
+  onMidSaved: (tidId: string, mid: TerminalTidMidOut) => void;
+}) {
+  const tidValue = (value: string | null | undefined) => value || "-";
+  const [showAddTid, setShowAddTid] = useState(false);
+  const [editingTid, setEditingTid] = useState<TerminalTidOut | null>(null);
+  const [historyTid, setHistoryTid] = useState<TerminalTidOut | null>(null);
+  const [tidActionId, setTidActionId] = useState<string | null>(null);
+  const [tidActionError, setTidActionError] = useState<string | null>(null);
+  const [midModalTid, setMidModalTid] = useState<TerminalTidOut | null>(null);
+  const [editingMid, setEditingMid] = useState<TerminalTidMidOut | null>(null);
+  const [midActionId, setMidActionId] = useState<string | null>(null);
+  const [midActionError, setMidActionError] = useState<string | null>(null);
+  const addressRows = merchantAddressRows(m);
+
+  async function toggleTidStatus(tid: TerminalTidOut) {
+    if (!canEdit || tidActionId) return;
+    setTidActionId(tid.id);
+    setTidActionError(null);
+    try {
+      const active = (tid.status ?? "Active").toLowerCase() === "active";
+      const next = active
+        ? await api.terminals.deleteTid(tid.id)
+        : await api.terminals.reactivateTid(tid.id);
+      onTidSaved(next);
+    } catch (e) {
+      setTidActionError(e instanceof ApiError ? e.message : "Failed to update TID status");
+    } finally {
+      setTidActionId(null);
+    }
+  }
+
+  async function toggleMidStatus(tid: TerminalTidOut, mid: TerminalTidMidOut) {
+    if (!canEdit || midActionId) return;
+    setMidActionId(mid.id);
+    setMidActionError(null);
+    try {
+      const active = (mid.status ?? "Active").toLowerCase() === "active";
+      const next = active
+        ? await api.terminals.deleteTidMid(tid.id, mid.id)
+        : await api.terminals.reactivateTidMid(tid.id, mid.id);
+      onMidSaved(tid.id, next);
+    } catch (e) {
+      setMidActionError(e instanceof ApiError ? e.message : "Failed to update MID status");
+    } finally {
+      setMidActionId(null);
+    }
+  }
+
   return (
       <div className="detail-grid merchant-overview-grid">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -921,12 +1327,24 @@ function OverviewTab({ m, nav }: { m: MerchantOut; nav: NavFn }) {
             <dl className="kv">
               <dt>Legal name</dt><dd>{m.name}</dd>
               <dt>Merchant ID</dt><dd className="mono">{m.id}</dd>
+              {m.mcc_code && <><dt>MCC Code</dt><dd className="mono">{m.mcc_code}</dd></>}
               <dt>Category</dt><dd>{m.type}</dd>
               <dt>Bank</dt><dd>{m.bank}</dd>
-              <dt>Address</dt><dd style={{ fontWeight: 400 }}>{m.address}</dd>
             </dl>
           </div>
         </Card>
+        {addressRows.length > 0 && (
+          <Card title="Address" icon="mapPin">
+            <div className="card-pad">
+              <dl className="kv">
+                {addressRows.flatMap(([label, value]) => [
+                  <dt key={`${label}-label`}>{label}</dt>,
+                  <dd key={`${label}-value`}>{value}</dd>,
+                ])}
+              </dl>
+            </div>
+          </Card>
+        )}
         {/* <Card title="Finance Readiness" icon="shield">
           <div className="card-pad">
             <div style={{ marginBottom: 16 }}><Readiness value={m.finance} /></div>
@@ -948,22 +1366,164 @@ function OverviewTab({ m, nav }: { m: MerchantOut; nav: NavFn }) {
             </div>
           </div>
         </Card> */}
-        <Card title="Merchant IDs (MIDs)" icon="tag">
+        <Card
+          title="Terminal IDs (TIDs)"
+          icon="tag"
+          actions={canEdit ? <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddTid(true)}>Add TID</Btn> : undefined}
+        >
           <div className="card-pad">
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
-                <span className="mono" style={{ flex: 1 }}>{m.mid || "—"}</span>
-                <Chip cls="green">Primary</Chip>
+            {m.tids?.length ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {m.tids.map((tid) => (
+                  <div key={tid.id} style={{ padding: "10px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
+                      <span className="mono" style={{ fontWeight: 700 }}>{tidValue(tid.tid)}</span>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <button className="icon-btn" title="MID history" onClick={() => setHistoryTid(tid)}>
+                          <Icon name="clock" size={14} />
+                        </button>
+                        {canEdit && (
+                          <>
+                            <button className="icon-btn" title="Edit TID" onClick={() => setEditingTid(tid)}>
+                              <Icon name="edit" size={14} />
+                            </button>
+                            <button
+                              className="icon-btn"
+                              title={(tid.status ?? "Active").toLowerCase() === "active" ? "Deactivate TID" : "Reactivate TID"}
+                              disabled={tidActionId === tid.id}
+                              onClick={() => toggleTidStatus(tid)}
+                            >
+                              <Icon name={(tid.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <dl className="kv" style={{ margin: 0 }}>
+                      <dt>TID</dt><dd className="mono">{tidValue(tid.tid)}</dd>
+                      <dt>Bank</dt><dd>{tid.bank || "-"}</dd>
+                      <dt>Terminal Serial</dt>
+                      <dd className="mono">
+                        {tid.terminal_serial ? (
+                          <button
+                            type="button"
+                            style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+                            onClick={() => nav("terminal-detail", tid.terminal_serial!)}
+                          >
+                            {tid.terminal_serial}
+                          </button>
+                        ) : "-"}
+                      </dd>
+                      {(tid.sim_card || tid.simcard) && (
+                        <>
+                          <dt>SIM Card</dt>
+                          <dd>
+                            {(() => {
+                              const sim = tid.sim_card ?? tid.simcard;
+                              if (!sim) return null;
+                              const label = tidSimLabel(tid);
+                              return (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <button
+                                    type="button"
+                                    style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+                                    onClick={() => nav("simcard-detail", sim.id)}
+                                  >
+                                    {sim.id}
+                                  </button>
+                                  {label && <span className="td-mut">{label}</span>}
+                                  {sim.status && <Chip cls={sim.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{sim.status}</Chip>}
+                                </span>
+                              );
+                            })()}
+                          </dd>
+                        </>
+                      )}
+                      <dt>Status</dt><dd>{tid.status ? <Chip cls={tid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{tid.status}</Chip> : "-"}</dd>
+                    </dl>
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>MIDs</span>
+                        {canEdit && (
+                          <button className="icon-btn" title="Add MID" onClick={() => { setMidModalTid(tid); setEditingMid(null); }}>
+                            <Icon name="plus" size={14} />
+                          </button>
+                        )}
+                      </div>
+                      {tid.mids?.length ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {tid.mids.map((mid) => (
+                            <div key={mid.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "6px 8px", background: "var(--surface)", borderRadius: 5 }}>
+                              <div>
+                                <div className="mono" style={{ fontWeight: 600 }}>
+                                  {mid.mid}{" "}
+                                  {mid.status && <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
+                                </div>
+                                <div className="td-mut" style={{ fontSize: 12 }}>
+                                  {mid.mdr_rate ? `${mid.mdr_rate.type} · ${mid.mdr_rate.rate}% · ${mid.mdr_rate.network}` : "No MDR rate"}
+                                </div>
+                              </div>
+                              {canEdit && (
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                                  <button className="icon-btn" title="Edit MID" onClick={() => { setMidModalTid(tid); setEditingMid(mid); }}>
+                                    <Icon name="edit" size={13} />
+                                  </button>
+                                  <button
+                                    className="icon-btn"
+                                    title={(mid.status ?? "Active").toLowerCase() === "active" ? "Deactivate MID" : "Reactivate MID"}
+                                    disabled={midActionId === mid.id}
+                                    onClick={() => toggleMidStatus(tid, mid)}
+                                  >
+                                    <Icon name={(mid.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={13} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No MIDs linked.</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-              {m.secondary_mid && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
-                  <span className="mono" style={{ flex: 1 }}>{m.secondary_mid}</span>
-                  <Chip cls="chip-neutral">Secondary</Chip>
-                </div>
-              )}
-            </div>
+            ) : (
+              <div style={{ padding: "12px 0", fontSize: 13, color: "var(--ink-3)" }}>
+                No TIDs linked.
+              </div>
+            )}
+            {tidActionError && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 10 }}>{tidActionError}</div>}
+            {midActionError && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 10 }}>{midActionError}</div>}
           </div>
         </Card>
+        {historyTid && (
+          <TidMidHistoryModal tid={historyTid} onClose={() => setHistoryTid(null)} />
+        )}
+        {showAddTid && canEdit && (
+          <MerchantTidModal
+            merchant={m}
+            onClose={() => setShowAddTid(false)}
+            onSaved={onTidSaved}
+          />
+        )}
+        {editingTid && canEdit && (
+          <MerchantTidModal
+            merchant={m}
+            existing={editingTid}
+            onClose={() => setEditingTid(null)}
+            onSaved={onTidSaved}
+          />
+        )}
+        {midModalTid && canEdit && (
+          <MidModal
+            tid={midModalTid}
+            merchantName={m.name}
+            existing={editingMid}
+            onClose={() => { setMidModalTid(null); setEditingMid(null); }}
+            onSaved={(mid) => onMidSaved(midModalTid.id, mid)}
+          />
+        )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card title="Billing Customer" icon="building" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("customer-detail", m.customer_id)}>View</Btn>}>
@@ -998,7 +1558,6 @@ function OverviewTab({ m, nav }: { m: MerchantOut; nav: NavFn }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 11, fontSize: 13 }}>
             <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail"   size={15} style={{ color: "var(--ink-3)" }} />{m.email}</div>
             <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone"  size={15} style={{ color: "var(--ink-3)" }} />{m.phone}</div>
-            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mapPin" size={15} style={{ color: "var(--ink-3)" }} />{m.address}</div>
           </div>
         </div>
       </Card>
@@ -1011,7 +1570,7 @@ function CommercialTab({ m, canEdit, onEdit }: { m: MerchantOut; canEdit: boolea
   if (!m.commercial_profile) {
     return (
       <Card>
-        <Empty icon="percent" title="No commercial profile" sub="Set up a commercial profile to configure MDR, rental plan and billing terms" />
+        <Empty icon="percent" title="No commercial profile" sub="Set up a commercial profile to configure rental plan and billing terms" />
         {canEdit && (
           <div style={{ display: "flex", justifyContent: "center", paddingBottom: 20 }}>
             <Btn variant="primary" icon="plus" onClick={onEdit}>Set Up Commercial Profile</Btn>
@@ -1025,15 +1584,10 @@ function CommercialTab({ m, canEdit, onEdit }: { m: MerchantOut; canEdit: boolea
     <Card title="Commercial Profile" icon="percent" actions={canEdit ? <Btn variant="ghost" sm icon="edit" onClick={onEdit}>Edit</Btn> : undefined}>
       <div className="card-pad">
         <dl className="kv">
-          {cp.mdr_plan            && <><dt>MDR Plan</dt><dd>{cp.mdr_plan}</dd></>}
           {cp.rental_plan_id      && <><dt>Rental Plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
           {cp.rental_price != null && <><dt>Rental Price</dt><dd>RM {cp.rental_price.toFixed(2)}</dd></>}
           {cp.plan_period         && <><dt>Billing Period</dt><dd>{cp.plan_period}</dd></>}
           {cp.effective_date      && <><dt>Effective Date</dt><dd>{cp.effective_date}</dd></>}
-          {cp.trial_start         && <><dt>Trial Start</dt><dd>{cp.trial_start}</dd></>}
-          {cp.trial_end           && <><dt>Trial End</dt><dd>{cp.trial_end}</dd></>}
-          {cp.discount_type       && <><dt>Discount Type</dt><dd>{cp.discount_type}</dd></>}
-          {cp.discount_value != null && <><dt>Discount Value</dt><dd>{cp.discount_value}</dd></>}
         </dl>
       </div>
     </Card>
@@ -1052,6 +1606,7 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
           { key: "serial", header: "Serial", render: (t) => <span className="td-mono td-strong">{t.serial}</span> },
           { key: "device", header: "Device", render: (t) => <div className="cell-2"><span className="td-strong">{t.brand}</span><span className="c2-sub">{t.model}</span></div> },
           { key: "tid", header: "TID", render: (t) => <span className="td-mono td-mut">{t.tid || "—"}</span> },
+          { key: "sim", header: "SIM", render: (t) => <span className="td-mut">{merchantTerminalSimLabel(t) || "—"}</span> },
           { key: "status", header: "Status", render: (t) => <TerminalStatus status={t.status} /> },
           { key: "location", header: "Location", render: (t) => <span className="td-mut">{t.location}</span> },
           { key: "rental", header: "Rental", render: (t) => <>RM {t.rental_rate}/mo</> },
@@ -1063,6 +1618,7 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
             status={<TerminalStatus status={t.status} />}
             meta={[
               { label: "TID", value: <span className="td-mono">{t.tid || "—"}</span> },
+              { label: "SIM", value: merchantTerminalSimLabel(t) || "—" },
               { label: "Location", value: t.location },
               { label: "Rental", value: <>RM {t.rental_rate}/mo</> },
             ]}
