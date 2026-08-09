@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
 import { SIM_CARRIERS, SIM_PLANS, SIM_DATA_ALLOWANCES, SIM_STATUS } from "./data";
-import { useTerminals } from "./terminals-context";
 import { NavFn } from "./shell";
 import { api, ApiError } from "@/lib/api";
 import type { SimCardOut, SimCardCreate, SimCardDetails } from "@/lib/api";
@@ -95,7 +94,6 @@ const SIMCARDS_PAGE_SIZE = 20;
 /* =================== LISTING =================== */
 export function SimCards({ nav }: { nav: NavFn }) {
   const can = useCan();
-  const { terminals } = useTerminals();
   const [simCards, setSimCards] = useState<SimCardOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -184,7 +182,8 @@ export function SimCards({ nav }: { nav: NavFn }) {
               </thead>
               <tbody>
                 {!loading && simCards.map((s) => {
-                  const t = s.terminal_serial ? terminals.find((t) => t.serial === s.terminal_serial) : null;
+                  const t = s.terminal;
+                  const terminalId = t?.serial ?? s.terminal_serial;
                   return (
                     <tr key={s.id} onClick={() => nav("simcard-detail", s.id)}>
                       <td><span className="td-mono td-strong">{s.id}</span></td>
@@ -193,10 +192,10 @@ export function SimCards({ nav }: { nav: NavFn }) {
                       <td>{s.carrier}</td>
                       <td className="td-mut">{s.plan}</td>
                       <td>
-                        {t ? (
+                        {terminalId ? (
                           <div className="cell-2">
-                            <span className="td-strong">{t.brand} {t.model}</span>
-                            <span className="c2-sub mono">{t.serial}</span>
+                            <span className="td-strong">{[t?.brand, t?.model].filter(Boolean).join(" ") || "Linked terminal"}</span>
+                            <span className="c2-sub mono">{terminalId}</span>
                           </div>
                         ) : (
                           <span className="td-mut">In Storage</span>
@@ -223,7 +222,6 @@ export function SimCards({ nav }: { nav: NavFn }) {
 /* =================== DETAIL =================== */
 export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
   const can = useCan();
-  const { updateTerminal } = useTerminals();
   const [sim, setSim] = useState<SimCardOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -315,6 +313,9 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
     ["Plan",           sim.plan],
     ["Data Allowance", sim.data_allowance],
   ];
+  const connectedTerminalId = sim.terminal?.serial ?? sim.terminal_serial;
+  const connectedMerchant = sim.merchant ?? sim.terminal?.merchant ?? null;
+  const connectedCustomer = sim.customer ?? connectedMerchant?.customer ?? sim.terminal?.customer ?? null;
 
   return (
     <div>
@@ -391,19 +392,43 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
         </Card>
 
         {/* Terminal */}
-        {sim.terminal && (
-          <Card title="Terminal" icon="terminal" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("terminal-detail", sim.terminal!.serial)}>View</Btn>}>
+        {connectedTerminalId && (
+          <Card title="Connected Terminal" icon="terminal" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("terminal-detail", connectedTerminalId)}>View</Btn>}>
             <div style={{ padding: "4px 20px 16px" }}>
               {[
-                ["Serial", sim.terminal.serial],
-                ["Brand",  sim.terminal.brand],
-                ["Model",  sim.terminal.model],
-              ].map(([l, v]) => (
+                ["Serial", connectedTerminalId],
+                ["Brand",  sim.terminal?.brand],
+                ["Model",  sim.terminal?.model],
+                ["Status", sim.terminal?.status],
+              ].filter((row): row is [string, string] => Boolean(row[1])).map(([l, v]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                   <span style={{ color: "var(--ink-2)" }}>{l}</span>
                   <span style={{ fontWeight: 500, fontFamily: l === "Serial" ? "var(--mono)" : undefined }}>{v}</span>
                 </div>
               ))}
+            </div>
+          </Card>
+        )}
+        {(connectedMerchant || connectedCustomer) && (
+          <Card title="Assignment" icon="merchants">
+            <div style={{ padding: "4px 20px 16px" }}>
+              {[
+                ["Merchant", connectedMerchant?.name],
+                ["Merchant ID", connectedMerchant?.id],
+                ["MID", connectedMerchant?.mid],
+                ["Customer", connectedCustomer?.name],
+                ["Customer ID", connectedCustomer?.id],
+              ].filter((row): row is [string, string] => Boolean(row[1])).map(([l, v]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ color: "var(--ink-2)" }}>{l}</span>
+                  <span style={{ fontWeight: 500, fontFamily: ["Merchant ID","MID","Customer ID"].includes(l) ? "var(--mono)" : undefined }}>{v}</span>
+                </div>
+              ))}
+              {connectedMerchant?.id && (
+                <Btn variant="ghost" sm iconRight="chevRight" style={{ marginTop: 14, width: "100%" }} onClick={() => nav("merchant-detail", connectedMerchant.id)}>
+                  View merchant
+                </Btn>
+              )}
             </div>
           </Card>
         )}

@@ -2,10 +2,11 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";
-import { CUSTOMER_TYPES, CUSTOMER_STATUS } from "./data";
+import { CUSTOMER_STATUS } from "./data";
 import { CreateMerchantModal } from "./screen-merchants";
+import { CreateJobModal } from "./screen-jobs";
 import { api, ApiError } from "@/lib/api";
-import type { CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
+import type { AddressIn, CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
 
@@ -14,9 +15,90 @@ function CustomerStatus({ status }: { status: string }) {
   return <Chip cls={m.chip} dot>{status}</Chip>;
 }
 
+type MerchantJobFollowUp = {
+  customer: CustomerOut;
+  merchant: MerchantOut;
+};
+
+type CustomerAddressForm = {
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postcode: string;
+};
+
+function blankAddressForm(): CustomerAddressForm {
+  return { addressLine1: "", addressLine2: "", city: "", state: "", postcode: "" };
+}
+
+function customerAddressForm(customer: CustomerOut): CustomerAddressForm {
+  const address = customer.addresses?.[0];
+  return {
+    addressLine1: address?.address_line_1 ?? "",
+    addressLine2: address ? address.address_line_2 ?? "" : "",
+    city: address ? address.city ?? "" : "",
+    state: address ? address.state ?? "" : "",
+    postcode: address ? address.postcode ?? "" : "",
+  };
+}
+
+function buildAddressPayload(address: CustomerAddressForm): AddressIn[] {
+  const line1 = address.addressLine1.trim();
+  const line2 = address.addressLine2.trim();
+  const city = address.city.trim();
+  const state = address.state.trim();
+  const postcode = address.postcode.trim();
+  if (!line1 && !line2 && !city && !state && !postcode) return [];
+  return [{
+    address_line_1: line1 || null,
+    address_line_2: line2 || null,
+    city: city || null,
+    state: state || null,
+    postcode: postcode || null,
+  }];
+}
+
+function formatCustomerAddress(customer: CustomerOut): string {
+  const address = customer.addresses?.[0];
+  const parts = address ? [address.address_line_1, address.address_line_2, address.city, address.state, address.postcode] : [];
+  return parts.map((part) => part?.trim()).filter(Boolean).join(", ");
+}
+
+function customerAddressRows(customer: CustomerOut): Array<[string, string]> {
+  const address = customerAddressForm(customer);
+  return [
+    ["Address line 1", address.addressLine1],
+    ["Address line 2", address.addressLine2],
+    ["City", address.city],
+    ["State", address.state],
+    ["Postcode", address.postcode],
+  ].filter((row): row is [string, string] => Boolean(row[1].trim()));
+}
+
+function MerchantJobPromptModal({ merchant, onCancel, onProceed }: { merchant: MerchantOut; onCancel: () => void; onProceed: () => void }) {
+  return (
+    <Modal
+      title="Create Installation Job?"
+      sub={merchant.name}
+      icon="jobs"
+      onClose={onCancel}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+        <Btn variant="primary" icon="plus" onClick={onProceed}>Create Job</Btn>
+      </>}
+    >
+      <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>
+        Merchant created successfully. Do you want to proceed with creating an Installation job for this merchant?
+      </div>
+    </Modal>
+  );
+}
+
 /* =================== CREATE CUSTOMER MODAL =================== */
 function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCreate: (c: CustomerOut) => void }) {
-  const [f, setF] = useState({ name: "", type: CUSTOMER_TYPES[0], regNo: "", tin: "", contact: "", phone: "", email: "", address: "" });
+  const [f, setF] = useState({ name: "", regNo: "", tin: "", contact: "", phone: "", email: "", ...blankAddressForm() });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -26,10 +108,11 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
     setSaving(true); setErr(null);
     try {
       const body: CustomerCreate = {
-        name: f.name.trim(), type: f.type,
-        reg_no: f.regNo.trim(), tin: f.tin.trim() || null,
+        name: f.name.trim(),
+        reg_no: f.regNo.trim() || null, tin: f.tin.trim() || null,
         contact: f.contact.trim(), phone: f.phone.trim(),
-        email: f.email.trim(), address: f.address.trim(),
+        email: f.email.trim(),
+        addresses: buildAddressPayload(f),
       };
       const c = await api.customers.create(body);
       onCreate(c);
@@ -56,15 +139,10 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
         <Field label="Company / customer name" hint="required">
           <input className="input" placeholder="e.g. Sinar Holdings Bhd" value={f.name} onChange={(e) => set("name", e.target.value)} />
         </Field>
-        <Field label="Type">
-          <select className="input" value={f.type} onChange={(e) => set("type", e.target.value)}>
-            {CUSTOMER_TYPES.map((t) => <option key={t}>{t}</option>)}
-          </select>
+        <Field label="Registration number">
+          <input className="input" placeholder="e.g. 202301012345" value={f.regNo} onChange={(e) => set("regNo", e.target.value)} />
         </Field>
       </div>
-      <Field label="Registration number">
-        <input className="input" placeholder="e.g. 202301012345" value={f.regNo} onChange={(e) => set("regNo", e.target.value)} />
-      </Field>
       <Field label="TIN number">
         <input className="input" placeholder="Required for eInvoice generation" value={f.tin} onChange={(e) => set("tin", e.target.value)} />
       </Field>
@@ -80,7 +158,21 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
         </Field>
       </div>
       <Field label="Address">
-        <input className="input" placeholder="Street, City" value={f.address} onChange={(e) => set("address", e.target.value)} />
+        <input className="input" placeholder="Address line 1" value={f.addressLine1} onChange={(e) => set("addressLine1", e.target.value)} />
+      </Field>
+      <Field label="Address line 2">
+        <input className="input" placeholder="Unit, floor, building" value={f.addressLine2} onChange={(e) => set("addressLine2", e.target.value)} />
+      </Field>
+      <div className="field-row">
+        <Field label="City">
+          <input className="input" placeholder="Kuala Lumpur" value={f.city} onChange={(e) => set("city", e.target.value)} />
+        </Field>
+        <Field label="State">
+          <input className="input" placeholder="WP Kuala Lumpur" value={f.state} onChange={(e) => set("state", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Postcode">
+        <input className="input" placeholder="50000" value={f.postcode} onChange={(e) => set("postcode", e.target.value)} />
       </Field>
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
@@ -91,16 +183,17 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
 function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOut; onClose: () => void; onSave: (c: CustomerOut) => void }) {
   const [f, setF] = useState<CustomerUpdate>({
     name: customer.name,
-    type: customer.type,
     reg_no: customer.reg_no || "",
     tin: customer.tin || "",
     contact: customer.contact || "",
     phone: customer.phone || "",
     email: customer.email || "",
-    address: customer.address || "",
+    addresses: buildAddressPayload(customerAddressForm(customer)),
     status: customer.status,
   });
+  const [address, setAddress] = useState<CustomerAddressForm>(() => customerAddressForm(customer));
   const set = (k: keyof CustomerUpdate, v: string) => setF((prev) => ({ ...prev, [k]: v }));
+  const setAddressField = (k: keyof CustomerAddressForm, v: string) => setAddress((prev) => ({ ...prev, [k]: v }));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -108,7 +201,7 @@ function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOu
     setSaving(true);
     setErr(null);
     try {
-      const updated = await api.customers.update(customer.id, f);
+      const updated = await api.customers.update(customer.id, { ...f, addresses: buildAddressPayload(address) });
       onSave(updated);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Failed to save");
@@ -130,18 +223,11 @@ function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOu
       <Field label="Registered Name" hint="required">
         <input className="input" value={f.name ?? ""} onChange={(e) => set("name", e.target.value)} />
       </Field>
-      <div className="field-row">
-        <Field label="Type">
-          <select className="input" value={f.type ?? ""} onChange={(e) => set("type", e.target.value)}>
-            {CUSTOMER_TYPES.map((t) => <option key={t}>{t}</option>)}
-          </select>
-        </Field>
-        <Field label="Status">
-          <select className="input" value={f.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-            {Object.keys(CUSTOMER_STATUS).map((s) => <option key={s}>{s}</option>)}
-          </select>
-        </Field>
-      </div>
+      <Field label="Status">
+        <select className="input" value={f.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+          {Object.keys(CUSTOMER_STATUS).map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
       <div className="field-row">
         <Field label="Registration No.">
           <input className="input" value={f.reg_no ?? ""} onChange={(e) => set("reg_no", e.target.value)} />
@@ -162,7 +248,21 @@ function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOu
         </Field>
       </div>
       <Field label="Address">
-        <textarea className="textarea" value={f.address ?? ""} onChange={(e) => set("address", e.target.value)} />
+        <input className="input" value={address.addressLine1} onChange={(e) => setAddressField("addressLine1", e.target.value)} />
+      </Field>
+      <Field label="Address line 2">
+        <input className="input" value={address.addressLine2} onChange={(e) => setAddressField("addressLine2", e.target.value)} />
+      </Field>
+      <div className="field-row">
+        <Field label="City">
+          <input className="input" value={address.city} onChange={(e) => setAddressField("city", e.target.value)} />
+        </Field>
+        <Field label="State">
+          <input className="input" value={address.state} onChange={(e) => setAddressField("state", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Postcode">
+        <input className="input" value={address.postcode} onChange={(e) => setAddressField("postcode", e.target.value)} />
       </Field>
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
@@ -218,6 +318,8 @@ export function Customers({ nav }: { nav: NavFn }) {
   const [showCreate, setShowCreate] = useState(false);
   const [onboardingCustomer, setOnboardingCustomer] = useState<CustomerOut | null>(null);
   const [merchantOnboardingCustomer, setMerchantOnboardingCustomer] = useState<CustomerOut | null>(null);
+  const [jobPrompt, setJobPrompt] = useState<MerchantJobFollowUp | null>(null);
+  const [installationJob, setInstallationJob] = useState<MerchantJobFollowUp | null>(null);
 
   useEffect(() => {
     api.customers.details().then(setDetails).catch(console.error);
@@ -308,7 +410,6 @@ export function Customers({ nav }: { nav: NavFn }) {
             onRowClick={(c) => nav("customer-detail", c.id)}
             columns={[
               { key: "customer", header: "Customer", render: (c) => <div className="cell-2"><span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</span><span className="c2-sub mono">{c.id}</span></div> },
-              { key: "type", header: "Type", render: (c) => <Chip cls="chip-neutral">{c.type}</Chip> },
               { key: "reg", header: "Reg No", mobileLabel: "Registration", render: (c) => <span className="td-mono td-mut">{c.reg_no || "—"}</span> },
               { key: "merchants", header: "Merchants", render: (c) => <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
               { key: "contact", header: "Contact", render: (c) => <span className="td-mut">{c.contact}</span> },
@@ -321,7 +422,6 @@ export function Customers({ nav }: { nav: NavFn }) {
                 sub={<span className="mono">{c.id}</span>}
                 status={<CustomerStatus status={c.status} />}
                 meta={[
-                  { label: "Type", value: <Chip cls="chip-neutral">{c.type}</Chip> },
                   { label: "Merchants", value: <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
                   { label: "Contact", value: c.contact },
                   { label: "Registration", value: <span className="td-mono">{c.reg_no || "—"}</span> },
@@ -347,16 +447,52 @@ export function Customers({ nav }: { nav: NavFn }) {
         <CreateMerchantModal
           customerId={merchantOnboardingCustomer.id}
           customerName={merchantOnboardingCustomer.name}
+          customer={merchantOnboardingCustomer}
           onClose={() => {
             const cid = merchantOnboardingCustomer.id;
             setMerchantOnboardingCustomer(null);
             nav("customer-detail", cid);
           }}
-          onSave={(_m) => {
-            const cid = merchantOnboardingCustomer.id;
+          onSave={(merchant) => {
+            const customer = merchantOnboardingCustomer;
             setMerchantOnboardingCustomer(null);
+            if (can("Jobs.Create")) {
+              setJobPrompt({ customer, merchant });
+            } else {
+              nav("customer-detail", customer.id);
+            }
+          }}
+        />
+      )}
+      {jobPrompt && (
+        <MerchantJobPromptModal
+          merchant={jobPrompt.merchant}
+          onCancel={() => {
+            const cid = jobPrompt.customer.id;
+            setJobPrompt(null);
             nav("customer-detail", cid);
           }}
+          onProceed={() => {
+            setInstallationJob(jobPrompt);
+            setJobPrompt(null);
+          }}
+        />
+      )}
+      {installationJob && can("Jobs.Create") && (
+        <CreateJobModal
+          onClose={() => {
+            const cid = installationJob.customer.id;
+            setInstallationJob(null);
+            nav("customer-detail", cid);
+          }}
+          onCreate={(job) => {
+            setInstallationJob(null);
+            nav("job-detail", job.id);
+          }}
+          nav={nav}
+          presetCustomer={installationJob.customer}
+          presetMerchant={installationJob.merchant}
+          presetType="Installation"
         />
       )}
     </div>
@@ -373,8 +509,11 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [linkedLoading, setLinkedLoading] = useState(true);
   const [showAddMerchant, setShowAddMerchant] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [jobPrompt, setJobPrompt] = useState<MerchantOut | null>(null);
+  const [installationJobMerchant, setInstallationJobMerchant] = useState<MerchantOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  
   useEffect(() => {
     api.customers.get(id)
       .then(setCustomer)
@@ -410,13 +549,17 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
     setToast("Merchant " + m.name + " added");
     setTimeout(() => setToast(null), 2800);
     loadLinkedMerchants();
+    if (can("Jobs.Create")) setJobPrompt(m);
   }
+
+  const customerAddress = formatCustomerAddress(customer);
+  const customerAddressDetailRows = customerAddressRows(customer);
 
   return (
     <div>
       <PageHead
         title={customer.name}
-        sub={customer.id + " · " + customer.type}
+        sub={customer.id + (customer.reg_no ? " · " + customer.reg_no : "")}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("customers")}>Back</Btn>
           {can("Customers.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>}
@@ -425,7 +568,6 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
         <CustomerStatus status={customer.status} />
-        <Chip cls="chip-neutral">{customer.type}</Chip>
       </div>
 
       <div className="customer-detail-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
@@ -434,7 +576,6 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
             {[
               ["Customer ID",      customer.id],
               ["Registered Name",  customer.name],
-              ["Type",             customer.type],
               ["Registration No.", customer.reg_no || "—"],
               ["TIN No.",          customer.tin || "—"],
               ["Onboarded",        customer.onboarded_date],
@@ -461,10 +602,22 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 11, fontSize: 13 }}>
               {customer.email   && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail"   size={15} style={{ color: "var(--ink-3)" }} />{customer.email}</div>}
               {customer.phone   && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone"  size={15} style={{ color: "var(--ink-3)" }} />{customer.phone}</div>}
-              {customer.address && <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mapPin" size={15} style={{ color: "var(--ink-3)" }} />{customer.address}</div>}
             </div>
           </div>
         </Card>
+
+        {customerAddress && (
+          <Card title="Address" icon="mapPin">
+            <div style={{ padding: "4px 20px 16px" }}>
+              <dl className="kv" style={{ margin: 0 }}>
+                {customerAddressDetailRows.flatMap(([label, value]) => [
+                  <dt key={`${label}-label`}>{label}</dt>,
+                  <dd key={`${label}-value`}>{value}</dd>,
+                ])}
+              </dl>
+            </div>
+          </Card>
+        )}
       </div>
 
       <Card
@@ -524,6 +677,32 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
           onSave={handleAddMerchant}
           customerId={customer.id}
           customerName={customer.name}
+          customer={customer}
+        />
+      )}
+
+      {jobPrompt && (
+        <MerchantJobPromptModal
+          merchant={jobPrompt}
+          onCancel={() => setJobPrompt(null)}
+          onProceed={() => {
+            setInstallationJobMerchant(jobPrompt);
+            setJobPrompt(null);
+          }}
+        />
+      )}
+
+      {installationJobMerchant && can("Jobs.Create") && (
+        <CreateJobModal
+          onClose={() => setInstallationJobMerchant(null)}
+          onCreate={(job) => {
+            setInstallationJobMerchant(null);
+            nav("job-detail", job.id);
+          }}
+          nav={nav}
+          presetCustomer={customer}
+          presetMerchant={installationJobMerchant}
+          presetType="Installation"
         />
       )}
 

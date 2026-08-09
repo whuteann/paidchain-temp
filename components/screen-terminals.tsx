@@ -1,12 +1,106 @@
 /* PaidChain — Terminal inventory + detail */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
 import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
+import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
+
+function tidMidsSummary(tid: TerminalTidOut) {
+  return tid.mids?.length ? tid.mids.map((m) => m.mid).join(", ") : "No MID";
+}
+
+function EntitySearchSelect<T extends { id: string }>({
+  label, hint, placeholder, value, onSelect, fetchResults, renderOption, getLabel, disabled, disabledHint, dropdownPlacement = "down",
+}: {
+  label: string;
+  hint?: string;
+  placeholder: string;
+  value: T | null;
+  onSelect: (item: T | null) => void;
+  fetchResults: (query: string) => Promise<T[]>;
+  renderOption: (item: T) => React.ReactNode;
+  getLabel: (item: T) => string;
+  disabled?: boolean;
+  disabledHint?: string;
+  dropdownPlacement?: "down" | "up";
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function runSearch(v: string) {
+    setLoading(true);
+    fetchResults(v).then(setResults).catch(console.error).finally(() => setLoading(false));
+  }
+
+  function handleChange(v: string) {
+    setQuery(v);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => runSearch(v), 300);
+  }
+
+  function handleFocus() {
+    setOpen(true);
+    if (!loading && results.length === 0) runSearch(query);
+  }
+
+  return (
+    <Field label={label} hint={hint}>
+      <div style={{ position: "relative" }}>
+        {value ? (
+          <div className="input" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-2, #f5f5f5)" }}>
+            <span>{getLabel(value)}</span>
+            <button type="button" className="icon-btn" onClick={() => { onSelect(null); setQuery(""); setResults([]); }}>
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+        ) : (
+          <input
+            className="input"
+            placeholder={disabled ? disabledHint : placeholder}
+            value={query}
+            disabled={disabled}
+            onChange={(e) => handleChange(e.target.value)}
+            onFocus={handleFocus}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+          />
+        )}
+        {open && !value && !disabled && (
+          <div style={{
+            position: "absolute",
+            ...(dropdownPlacement === "up" ? { bottom: "calc(100% + 4px)" } : { top: "calc(100% + 4px)" }),
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            background: "#fff", border: "1px solid var(--line)", borderRadius: 10,
+            boxShadow: "var(--sh-sm)", maxHeight: 220, overflowY: "auto",
+          }}>
+            {loading ? (
+              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>Searching...</div>
+            ) : results.length === 0 ? (
+              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>No matches</div>
+            ) : (
+              results.map((item) => (
+                <div
+                  key={item.id}
+                  className="search-opt"
+                  onMouseDown={() => { onSelect(item); setQuery(""); setOpen(false); }}
+                >
+                  {renderOption(item)}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </Field>
+  );
+}
 
 /* =================== REGISTER DEVICE MODAL =================== */
 function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
@@ -16,23 +110,13 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
 }) {
   const [settings, setSettings] = useState<TermSettingOut[]>([]);
   const [storedSims, setStoredSims] = useState<SimCardOut[]>([]);
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [settingId, setSettingId] = useState(initialSettingId ?? "");
   const [serialNo, setSerialNo] = useState("");
-  const [bank, setBank] = useState(BANKS[0]);
   const [location, setLocation] = useState("KL Warehouse");
   const [selectedSimId, setSelectedSimId] = useState("");
   const [registering, setRegistering] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  // TID step state
-  const [pendingTids, setPendingTids] = useState<TerminalTidCreate[]>([]);
-  const [tidTid, setTidTid] = useState("");
-  const [tidMid, setTidMid] = useState("");
-  const [tidBank, setTidBank] = useState("");
-  const [tidStatus, setTidStatus] = useState("Active");
-  const [tidEffDate, setTidEffDate] = useState("");
-  const [tidErr, setTidErr] = useState<string | null>(null);
 
   useEffect(() => {
     api.termSettings.list({ active: true }).then(setSettings).catch(console.error);
@@ -42,28 +126,11 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
   const setting = settings.find((s) => s.id === settingId);
   const selectedSim = storedSims.find((s) => s.id === selectedSimId);
 
-  function addTid() {
-    if (!tidTid.trim()) { setTidErr("TID is required"); return; }
-    setPendingTids((prev) => [...prev, {
-      tid: tidTid.trim(),
-      mid: tidMid.trim() || null,
-      bank: tidBank || null,
-      status: tidStatus,
-      effective_date: tidEffDate || null,
-    }]);
-    setTidTid(""); setTidMid(""); setTidBank(""); setTidStatus("Active"); setTidEffDate(""); setTidErr(null);
-  }
-
-  function removeTid(index: number) {
-    setPendingTids((prev) => prev.filter((_, i) => i !== index));
-  }
-
   async function register(linkSim: boolean) {
     if (!setting || !serialNo.trim()) return;
     setRegistering(true); setErr(null);
     const body: TerminalCreate = {
       serial_no: serialNo.trim(),
-      bank,
       brand: setting.brand, model: setting.model, location,
       rental_rate: setting.monthly_rental, rental_plan: "Monthly Rental",
       sim: linkSim && selectedSimId ? "4G + WiFi" : "WiFi only",
@@ -71,9 +138,6 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
     };
     try {
       const result = await api.terminals.create(body);
-      if (pendingTids.length > 0) {
-        await Promise.all(pendingTids.map((t) => api.terminals.createTid(terminalSerial(result), t)));
-      }
       if (linkSim && selectedSimId) {
         await api.terminals.linkSim({ terminal_serial: terminalSerial(result), simcard_id: selectedSimId });
       }
@@ -95,16 +159,9 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
           <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
           <Btn variant="primary" iconRight="chevRight" disabled={!settingId || !serialNo.trim()} onClick={() => setStep(2)}>Create Device</Btn>
         </>
-      ) : step === 2 ? (
-        <>
-          <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>
-          <div className="mf-spacer" />
-          <Btn variant="ghost" onClick={() => setStep(3)}>Skip — No TIDs</Btn>
-          <Btn variant="primary" iconRight="chevRight" onClick={() => setStep(3)}>Next</Btn>
-        </>
       ) : (
         <>
-          <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(2)}>Back</Btn>
+          <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>
           <div className="mf-spacer" />
           <Btn variant="ghost" disabled={registering} onClick={() => register(false)}>Skip — No SIM</Btn>
           <Btn variant="primary" icon="check" disabled={registering} onClick={() => register(true)}>
@@ -134,18 +191,11 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
               {setting.deposit > 0 && <Chip cls="chip-neutral">Deposit RM {setting.deposit}</Chip>}
             </div>
           )}
-          <div className="field-row">
-            <Field label="Bank">
-              <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
-                {BANKS.map((b) => <option key={b}>{b}</option>)}
-              </select>
-            </Field>
-            <Field label="Initial location">
-              <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
-                {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
-              </select>
-            </Field>
-          </div>
+          <Field label="Initial location">
+            <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
+              {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
+            </select>
+          </Field>
           <Field label="Serial number" hint="required">
             <input
               className="input"
@@ -154,67 +204,6 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
               onChange={(e) => setSerialNo(e.target.value)}
             />
           </Field>
-        </>
-      ) : step === 2 ? (
-        <>
-          <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 14 }}>
-            Optionally add one or more TID mappings for this device. You can also manage TIDs later from the device detail page.
-          </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 2 }}>
-              <Field label="TID" hint="required">
-                <input className="input" value={tidTid} onChange={(e) => setTidTid(e.target.value)} placeholder="e.g. 12345678" />
-              </Field>
-            </div>
-            <div style={{ flex: 2 }}>
-              <Field label="MID">
-                <input className="input" value={tidMid} onChange={(e) => setTidMid(e.target.value)} placeholder="Optional" />
-              </Field>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 2 }}>
-              <Field label="Bank">
-                <select className="input" value={tidBank} onChange={(e) => setTidBank(e.target.value)}>
-                  <option value="">— None —</option>
-                  {BANKS.map((b) => <option key={b}>{b}</option>)}
-                </select>
-              </Field>
-            </div>
-            <div style={{ flex: 1 }}>
-              <Field label="Status">
-                <select className="input" value={tidStatus} onChange={(e) => setTidStatus(e.target.value)}>
-                  {["Active", "Inactive", "Terminated"].map((s) => <option key={s}>{s}</option>)}
-                </select>
-              </Field>
-            </div>
-            <div style={{ flex: 2 }}>
-              <Field label="Effective date">
-                <input className="input" type="date" value={tidEffDate} onChange={(e) => setTidEffDate(e.target.value)} />
-              </Field>
-            </div>
-          </div>
-          {tidErr && <div style={{ fontSize: 12.5, color: "var(--bad)", marginBottom: 6 }}>{tidErr}</div>}
-          <Btn variant="ghost" sm icon="plus" onClick={addTid} style={{ marginBottom: 16 }}>Add TID</Btn>
-          {pendingTids.length === 0 && (
-            <div style={{ padding: "10px 12px", marginBottom: 8, borderRadius: 6, border: "1px dashed var(--line)", fontSize: 12, color: "var(--ink-3)", textAlign: "center" }}>
-              No TIDs added yet — fill in the fields above and click Add TID
-            </div>
-          )}
-          {pendingTids.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {pendingTids.map((t, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 8, fontSize: 13 }}>
-                  <span className="mono" style={{ fontWeight: 600, flex: 1 }}>{t.tid}</span>
-                  {t.mid && <span style={{ color: "var(--ink-2)" }}>{t.mid}</span>}
-                  {t.bank && <Chip cls="chip-neutral">{t.bank}</Chip>}
-                  <Chip cls={t.status === "Active" ? "chip-ok" : "chip-neutral"}>{t.status}</Chip>
-                  {t.effective_date && <span style={{ color: "var(--ink-3)", fontSize: 12 }}>{t.effective_date}</span>}
-                  <Btn variant="ghost" sm icon="x" onClick={() => removeTid(i)} style={{ color: "var(--bad)", padding: "2px 6px" }} />
-                </div>
-              ))}
-            </div>
-          )}
         </>
       ) : (
         <>
@@ -283,7 +272,6 @@ function BulkUploadModal({ onClose, onComplete }: {
 }) {
   const [settings, setSettings] = useState<TermSettingOut[]>([]);
   const [settingId, setSettingId] = useState("");
-  const [bank, setBulkBank] = useState(BANKS[0]);
   const [location, setLocation] = useState("KL Warehouse");
   const [file, setFile] = useState<File | null>(null);
   const [serialCount, setSerialCount] = useState(0);
@@ -327,7 +315,6 @@ function BulkUploadModal({ onClose, onComplete }: {
       const body: TerminalBulkCreate = {
         term_setting_id: settingId,
         serial_numbers: serialNumbers,
-        bank: bank || null,
         initial_location: location,
         sim_type: "WiFi only",
       };
@@ -373,18 +360,11 @@ function BulkUploadModal({ onClose, onComplete }: {
           {setting.deposit > 0 && <Chip cls="chip-neutral">Deposit RM {setting.deposit}</Chip>}
         </div>
       )}
-      <div className="field-row">
-        <Field label="Bank">
-          <select className="input" value={bank} onChange={(e) => setBulkBank(e.target.value)}>
-            {BANKS.map((b) => <option key={b}>{b}</option>)}
-          </select>
-        </Field>
-        <Field label="Initial location">
-          <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
-            {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
-          </select>
-        </Field>
-      </div>
+      <Field label="Initial location">
+        <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
+          {["KL Warehouse", "Repair Center", "In Transit"].map((l) => <option key={l}>{l}</option>)}
+        </select>
+      </Field>
       <Field label="Serial number CSV" hint="required">
         <input
           className="input"
@@ -884,101 +864,303 @@ export function Terminals({
 
 /* =================== DETAIL =================== */
 /* =================== TID MODAL =================== */
-function TidModal({ serial, existing, onClose, onSaved }: {
-  serial: string;
-  existing?: TerminalTidOut;
+// function TidModal({ serial, existing, onClose, onSaved }: {
+//   serial: string;
+//   existing?: TerminalTidOut;
+//   onClose: () => void;
+//   onSaved: (tid: TerminalTidOut) => void;
+// }) {
+//   const isEdit = !!existing;
+//   const [tid, setTid] = useState(existing?.tid ?? "");
+//   const [mid, setMid] = useState(existing?.mid ?? "");
+//   const [bank, setBank] = useState(existing?.bank ?? "");
+//   const [status, setStatus] = useState(existing?.status ?? "Active");
+//   const [effectiveDate, setEffectiveDate] = useState(existing?.effective_date ?? "");
+//   const [terminationDate, setTerminationDate] = useState(existing?.termination_date ?? "");
+//   const [remarks, setRemarks] = useState(existing?.remarks ?? "");
+//   const [saving, setSaving] = useState(false);
+//   const [err, setErr] = useState<string | null>(null);
+
+//   async function save() {
+//     if (!tid.trim()) { setErr("TID is required"); return; }
+//     setSaving(true); setErr(null);
+//     try {
+//       let result: TerminalTidOut;
+//       if (isEdit) {
+//         const body: TerminalTidUpdate = {
+//           tid: tid.trim(),
+//           mid: mid.trim() || null,
+//           bank: bank || null,
+//           status,
+//           effective_date: effectiveDate || null,
+//           termination_date: terminationDate || null,
+//           remarks: remarks.trim() || null,
+//         };
+//         result = await api.terminals.updateTid(existing!.id, body);
+//       } else {
+//         const body: TerminalTidCreate = {
+//           tid: tid.trim(),
+//           mid: mid.trim() || null,
+//           bank: bank || null,
+//           status,
+//           effective_date: effectiveDate || null,
+//           remarks: remarks.trim() || null,
+//         };
+//         result = await api.terminals.createTid(serial, body);
+//       }
+//       onSaved(result);
+//       onClose();
+//     } catch (e) {
+//       setErr(e instanceof ApiError ? e.message : "Failed to save TID");
+//       setSaving(false);
+//     }
+//   }
+
+//   return (
+//     <Modal
+//       title={isEdit ? "Edit TID" : "Add TID"}
+//       sub={serial}
+//       icon="terminal"
+//       size="slim"
+//       onClose={onClose}
+//       foot={<>
+//         <div className="mf-spacer" />
+//         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+//         <Btn variant="primary" icon="check" disabled={saving || !tid.trim()} onClick={save}>
+//           {saving ? "Saving…" : isEdit ? "Save Changes" : "Add TID"}
+//         </Btn>
+//       </>}
+//     >
+//       <Field label="TID" hint="required">
+//         <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="e.g. 12345678" />
+//       </Field>
+//       <Field label="MID">
+//         <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="Merchant ID (optional)" />
+//       </Field>
+//       <Field label="Bank">
+//         <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
+//           <option value="">— None —</option>
+//           {BANKS.map((b) => <option key={b}>{b}</option>)}
+//         </select>
+//       </Field>
+//       <Field label="Status">
+//         <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+//           {["Active", "Inactive", "Terminated"].map((s) => <option key={s}>{s}</option>)}
+//         </select>
+//       </Field>
+//       <Field label="Effective date">
+//         <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+//       </Field>
+//       {isEdit && (
+//         <Field label="Termination date">
+//           <input className="input" type="date" value={terminationDate} onChange={(e) => setTerminationDate(e.target.value)} />
+//         </Field>
+//       )}
+//       <Field label="Remarks">
+//         <input className="input" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional notes…" />
+//       </Field>
+//       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
+//     </Modal>
+//   );
+// }
+
+function LinkTidModal({ terminal, merchantId, onClose, onLinked }: {
+  terminal: TerminalOut;
+  merchantId: string;
   onClose: () => void;
-  onSaved: (tid: TerminalTidOut) => void;
+  onLinked: (tid: TerminalTidOut) => void;
 }) {
-  const isEdit = !!existing;
-  const [tid, setTid] = useState(existing?.tid ?? "");
-  const [mid, setMid] = useState(existing?.mid ?? "");
-  const [bank, setBank] = useState(existing?.bank ?? "");
-  const [status, setStatus] = useState(existing?.status ?? "Active");
-  const [effectiveDate, setEffectiveDate] = useState(existing?.effective_date ?? "");
-  const [terminationDate, setTerminationDate] = useState(existing?.termination_date ?? "");
-  const [remarks, setRemarks] = useState(existing?.remarks ?? "");
+  const serial = terminalSerial(terminal);
+  const [merchantTids, setMerchantTids] = useState<TerminalTidOut[]>([]);
+  const [selectedTidId, setSelectedTidId] = useState("");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function save() {
-    if (!tid.trim()) { setErr("TID is required"); return; }
+  useEffect(() => {
+    api.merchants.listTids(merchantId)
+      .then((rows) => {
+        setMerchantTids(rows);
+        const firstAvailable = rows.find((tid) => !tid.terminal_serial);
+        setSelectedTidId(firstAvailable?.id ?? "");
+      })
+      .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load merchant TIDs"))
+      .finally(() => setLoading(false));
+  }, [merchantId]);
+
+  const availableTids = merchantTids.filter((tid) => !tid.terminal_serial);
+
+  async function submit() {
+    if (!selectedTidId) return;
     setSaving(true); setErr(null);
     try {
-      let result: TerminalTidOut;
-      if (isEdit) {
-        const body: TerminalTidUpdate = {
-          tid: tid.trim(),
-          mid: mid.trim() || null,
-          bank: bank || null,
-          status,
-          effective_date: effectiveDate || null,
-          termination_date: terminationDate || null,
-          remarks: remarks.trim() || null,
-        };
-        result = await api.terminals.updateTid(existing!.id, body);
-      } else {
-        const body: TerminalTidCreate = {
-          tid: tid.trim(),
-          mid: mid.trim() || null,
-          bank: bank || null,
-          status,
-          effective_date: effectiveDate || null,
-          remarks: remarks.trim() || null,
-        };
-        result = await api.terminals.createTid(serial, body);
-      }
-      onSaved(result);
+      const result = await api.terminals.assignTid(selectedTidId, { terminal_serial: serial });
+      onLinked(result);
       onClose();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Failed to save TID");
+      setErr(e instanceof ApiError ? e.message : "Failed to link TID");
       setSaving(false);
     }
   }
 
   return (
     <Modal
-      title={isEdit ? "Edit TID" : "Add TID"}
+      title="Link TID"
       sub={serial}
-      icon="terminal"
+      icon="tag"
       size="slim"
       onClose={onClose}
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || !tid.trim()} onClick={save}>
-          {saving ? "Saving…" : isEdit ? "Save Changes" : "Add TID"}
+        <Btn variant="primary" icon="check" disabled={saving || loading || !selectedTidId} onClick={submit}>
+          {saving ? "Linking…" : "Link TID"}
         </Btn>
       </>}
     >
-      <Field label="TID" hint="required">
-        <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="e.g. 12345678" />
-      </Field>
-      <Field label="MID">
-        <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="Merchant ID (optional)" />
-      </Field>
-      <Field label="Bank">
-        <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
-          <option value="">— None —</option>
-          {BANKS.map((b) => <option key={b}>{b}</option>)}
+      <Field label="Merchant TID" hint="required">
+        <select
+          className="input"
+          value={selectedTidId}
+          onChange={(e) => setSelectedTidId(e.target.value)}
+          disabled={loading || availableTids.length === 0}
+        >
+          <option value="">{loading ? "Loading TIDs…" : "Select TID…"}</option>
+          {availableTids.map((tid) => (
+            <option key={tid.id} value={tid.id}>
+              {tid.tid} · {tidMidsSummary(tid)} · {tid.id}
+            </option>
+          ))}
         </select>
       </Field>
-      <Field label="Status">
-        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-          {["Active", "Inactive", "Terminated"].map((s) => <option key={s}>{s}</option>)}
-        </select>
-      </Field>
-      <Field label="Effective date">
-        <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-      </Field>
-      {isEdit && (
-        <Field label="Termination date">
-          <input className="input" type="date" value={terminationDate} onChange={(e) => setTerminationDate(e.target.value)} />
-        </Field>
+      {!loading && availableTids.length === 0 && (
+        <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 8 }}>
+          No available unassigned TIDs for this merchant.
+        </div>
       )}
-      <Field label="Remarks">
-        <input className="input" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional notes…" />
+      {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function AssignMerchantModal({ terminal, onClose, onAssigned }: {
+  terminal: TerminalOut;
+  onClose: () => void;
+  onAssigned: (updated: TerminalOut, tid: TerminalTidOut) => void;
+}) {
+  const serial = terminalSerial(terminal);
+  const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(null);
+  const [merchantTids, setMerchantTids] = useState<TerminalTidOut[]>([]);
+  const [selectedTidId, setSelectedTidId] = useState("");
+  const [tidsLoading, setTidsLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedMerchant) {
+      setMerchantTids([]);
+      setSelectedTidId("");
+      return;
+    }
+
+    let cancelled = false;
+    setTidsLoading(true);
+    setErr(null);
+    api.merchants.listTids(selectedMerchant.id)
+      .then((rows) => {
+        if (cancelled) return;
+        const available = rows.filter((tid) => !tid.terminal_serial && tid.status !== "Inactive");
+        setMerchantTids(available);
+        setSelectedTidId(available[0]?.id ?? "");
+      })
+      .catch((e) => {
+        if (!cancelled) setErr(e instanceof ApiError ? e.message : "Failed to load merchant TIDs");
+      })
+      .finally(() => {
+        if (!cancelled) setTidsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMerchant]);
+
+  const selectedTid = merchantTids.find((tid) => tid.id === selectedTidId) ?? null;
+
+  async function submit() {
+    if (!selectedMerchant || !selectedTid) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      const updated = await api.terminals.assignMerchant(serial, {
+        merchant_id: selectedMerchant.id,
+        terminal_tid_id: selectedTid.id,
+      });
+      onAssigned(updated, { ...selectedTid, terminal_serial: serial });
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to assign merchant");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Assign to Merchant"
+      sub={serial}
+      icon="merchants"
+      size="overflow-visible"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !selectedMerchant || !selectedTid} onClick={submit}>
+          {saving ? "Assigning..." : "Assign to Merchant"}
+        </Btn>
+      </>}
+    >
+      <EntitySearchSelect<MerchantOut>
+        label="Merchant"
+        hint="required"
+        placeholder="Search merchant name, MID or ID..."
+        value={selectedMerchant}
+        onSelect={(merchant) => {
+          setSelectedMerchant(merchant);
+          setMerchantTids([]);
+          setSelectedTidId("");
+        }}
+        fetchResults={(query) => api.merchants.list({ query, per_page: 8 }).then((p) => p.items)}
+        getLabel={(merchant) => merchant.name + (merchant.mid ? " · " + merchant.mid : "")}
+        dropdownPlacement="down"
+        renderOption={(merchant) => (
+          <div className="cell-2">
+            <span className="td-strong">{merchant.name}</span>
+            <span className="c2-sub mono">{merchant.id}{merchant.mid ? " · " + merchant.mid : ""}</span>
+          </div>
+        )}
+      />
+      <Field label="Available TID" hint="required">
+        <select
+          className="input"
+          value={selectedTidId}
+          onChange={(e) => setSelectedTidId(e.target.value)}
+          disabled={!selectedMerchant || tidsLoading || merchantTids.length === 0}
+        >
+          <option value="">
+            {!selectedMerchant ? "Select merchant first..." : tidsLoading ? "Loading TIDs..." : "Select TID..."}
+          </option>
+          {merchantTids.map((tid) => (
+            <option key={tid.id} value={tid.id}>
+              {tid.tid} · {tidMidsSummary(tid)} · {tid.id}
+            </option>
+          ))}
+        </select>
       </Field>
+      {selectedMerchant && !tidsLoading && merchantTids.length === 0 && (
+        <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 8 }}>
+          No available unassigned TIDs for this merchant.
+        </div>
+      )}
       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
     </Modal>
   );
@@ -1007,18 +1189,20 @@ export function TerminalDetail({
   const [statusSaving, setStatusSaving] = useState(false);
   const [showSimModal, setShowSimModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const linkedSim = linkedSimOverride === undefined ? initialLinkedSim : linkedSimOverride;
+  const linkedSim = linkedSimOverride === undefined ? (terminal?.simcard ?? initialLinkedSim) : linkedSimOverride;
+  const linkedSimLoaded = linkedSimOverride !== undefined || Boolean(terminal?.simcard) || simLoaded;
 
   // TID state
   const [tids, setTids] = useState<TerminalTidOut[]>([]);
   const [tidsLoading, setTidsLoading] = useState(true);
-  const [showAddTid, setShowAddTid] = useState(false);
-  const [editingTid, setEditingTid] = useState<TerminalTidOut | null>(null);
+  const [showLinkTid, setShowLinkTid] = useState(false);
+  const [showAssignMerchant, setShowAssignMerchant] = useState(false);
 
   useEffect(() => {
     api.terminals.get(id)
       .then((t) => {
         setTerminal(t);
+        if (t.tids?.length) setTids(t.tids);
         setPendingStatus(t.status);
         if (t.term_setting_id) {
           api.termSettings.get(t.term_setting_id).then(setTermSetting).catch(console.error);
@@ -1048,6 +1232,34 @@ export function TerminalDetail({
   );
 
   const openJobs = terminal.open_jobs ?? [];
+  const terminalModel = [terminal.brand, terminal.model].filter(Boolean).join(" ");
+  const terminalSubtitle = [
+    terminalModel,
+    terminal.sim,
+    terminal.merchant?.name,
+  ].filter(Boolean).join(" · ");
+  const connectedTid = tids[0] ?? terminal.tids?.[0] ?? null;
+  const visibleTidsLoading = tidsLoading && !(terminal.tids?.length);
+  const assignedMerchant = terminal.merchant;
+  const assignedCustomer = terminal.customer ?? assignedMerchant?.customer ?? null;
+
+  function flash(message: string) {
+    setToast(message);
+    setTimeout(() => setToast(null), 2600);
+  }
+
+  function openLinkTid() {
+    if (!terminal) return;
+    if (terminal.status !== "Installed") {
+      flash("Tid can only be assigned to installed device");
+      return;
+    }
+    if (!terminal.merchant?.id) {
+      flash("TID can only be assigned after the device is installed at a merchant");
+      return;
+    }
+    setShowLinkTid(true);
+  }
 
   async function applyStatus() {
     if (!terminal) return;
@@ -1124,7 +1336,7 @@ export function TerminalDetail({
               <h1 className="page-title mono">{terminalSerial(terminal)}</h1>
               <TerminalStatus status={terminal.status} />
             </div>
-            <p className="page-sub">{terminal.brand + " " + terminal.model + " · " + terminal.sim + (terminal.merchant ? " · " + terminal.merchant.name : " · Unassigned")}</p>
+            <p className="page-sub">{terminalSubtitle}</p>
           </div>
         </div>
         <div className="page-head-actions">
@@ -1174,48 +1386,106 @@ export function TerminalDetail({
               </div>
             )}
           </Card>
-          {/* TID Mappings */}
+          {/* Connected TID */}
           <Card
-            title={"TID Mappings" + (tids.length ? ` (${tids.length})` : "")}
+            title="Connected TID"
             icon="terminal"
-            actions={can("Terminals.Edit") ? <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddTid(true)}>Add TID</Btn> : undefined}
+            actions={can("Terminals.Edit") && !connectedTid ? (
+              <>
+                <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>
+                {terminal.status === "Installed" && terminal.merchant?.id && (
+                  <Btn variant="ghost" sm icon="plus" onClick={openLinkTid}>Link TID</Btn>
+                )}
+              </>
+            ) : undefined}
           >
-            {tidsLoading ? (
+            {visibleTidsLoading ? (
               <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
-            ) : tids.length === 0 ? (
+            ) : !connectedTid ? (
               <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>
-                No TIDs linked to this device.
-                {can("Terminals.Edit") && <Btn variant="ghost" sm icon="plus" style={{ marginTop: 10, display: "flex" }} onClick={() => setShowAddTid(true)}>Add TID</Btn>}
+                No TID connected to this device.
+                {can("Terminals.Edit") && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>
+                    {terminal.status === "Installed" && terminal.merchant?.id && (
+                      <Btn variant="ghost" sm icon="plus" onClick={openLinkTid}>Link TID</Btn>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="tbl-wrap">
-                <table className="tbl">
-                  <thead>
-                    <tr>{["TID", "MID", "Bank", "Status", "Effective", "Termination", ""].map((h) => <th key={h}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {tids.map((t) => (
-                      <tr key={t.id}>
-                        <td className="td-mono td-strong">{t.tid}</td>
-                        <td className="td-mono">{t.mid || "—"}</td>
-                        <td>{t.bank || "—"}</td>
-                        <td>
-                          <Chip cls={t.status === "Active" ? "chip-ok" : t.status === "Terminated" ? "chip-bad" : "chip-neutral"} dot>
-                            {t.status}
-                          </Chip>
-                        </td>
-                        <td className="td-mut">{t.effective_date || "—"}</td>
-                        <td className="td-mut">{t.termination_date || "—"}</td>
-                        <td>
-                          {can("Terminals.Edit") && <Btn variant="ghost" sm icon="edit" onClick={() => setEditingTid(t)} />}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="card-pad">
+                <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
+                  <dt>ID</dt><dd className="mono">{connectedTid.id}</dd>
+                  <dt>TID</dt><dd className="mono">{connectedTid.tid}</dd>
+                  <dt>Merchant ID</dt><dd className="mono">{connectedTid.merchant_id || terminal.merchant?.id || "—"}</dd>
+                </dl>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 8 }}>MIDs</div>
+                  {connectedTid.mids?.length ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {connectedTid.mids.map((mid) => (
+                        <div key={mid.id} style={{ padding: "6px 8px", background: "var(--bg-2, #f5f5f5)", borderRadius: 5 }}>
+                          <div className="mono" style={{ fontWeight: 600 }}>
+                            {mid.mid}{" "}
+                            {mid.status && <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
+                          </div>
+                          <div className="td-mut" style={{ fontSize: 12 }}>
+                            {mid.mdr_rate ? `${mid.mdr_rate.type} · ${mid.mdr_rate.rate}% · ${mid.mdr_rate.network}` : "No MDR rate"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No MIDs linked.</div>
+                  )}
+                </div>
               </div>
             )}
           </Card>
+
+          {assignedMerchant && (
+            <Card
+              title="Assigned Merchant"
+              icon="merchants"
+              actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("merchant-detail", assignedMerchant.id)}>View</Btn>}
+            >
+              <div className="card-pad">
+                <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
+                  <dt>Name</dt><dd>{assignedMerchant.name}</dd>
+                  <dt>Merchant ID</dt><dd className="mono">{assignedMerchant.id}</dd>
+                  {assignedMerchant.type && <><dt>Type</dt><dd>{assignedMerchant.type}</dd></>}
+                  {assignedMerchant.status && <><dt>Status</dt><dd><Chip cls={assignedMerchant.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{assignedMerchant.status}</Chip></dd></>}
+                  {assignedMerchant.contact && <><dt>Contact</dt><dd>{assignedMerchant.contact}</dd></>}
+                  {assignedMerchant.phone && <><dt>Phone</dt><dd>{assignedMerchant.phone}</dd></>}
+                  {assignedMerchant.email && <><dt>Email</dt><dd>{assignedMerchant.email}</dd></>}
+                  {assignedMerchant.bank && <><dt>Bank</dt><dd>{assignedMerchant.bank}</dd></>}
+                  {assignedMerchant.mcc_code && <><dt>MCC Code</dt><dd className="mono">{assignedMerchant.mcc_code}</dd></>}
+                </dl>
+              </div>
+            </Card>
+          )}
+
+          {assignedCustomer && (
+            <Card
+              title="Billing Customer"
+              icon="building"
+              actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("customer-detail", assignedCustomer.id)}>View</Btn>}
+            >
+              <div className="card-pad">
+                <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
+                  <dt>Name</dt><dd>{assignedCustomer.name}</dd>
+                  <dt>Customer ID</dt><dd className="mono">{assignedCustomer.id}</dd>
+                  {assignedCustomer.status && <><dt>Status</dt><dd><Chip cls={assignedCustomer.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{assignedCustomer.status}</Chip></dd></>}
+                  {assignedCustomer.reg_no && <><dt>Reg No.</dt><dd className="mono">{assignedCustomer.reg_no}</dd></>}
+                  {assignedCustomer.tin && <><dt>TIN</dt><dd className="mono">{assignedCustomer.tin}</dd></>}
+                  {assignedCustomer.contact && <><dt>Contact</dt><dd>{assignedCustomer.contact}</dd></>}
+                  {assignedCustomer.phone && <><dt>Phone</dt><dd>{assignedCustomer.phone}</dd></>}
+                  {assignedCustomer.email && <><dt>Email</dt><dd>{assignedCustomer.email}</dd></>}
+                </dl>
+              </div>
+            </Card>
+          )}
 
           {/* <Card title="Photos & Inspection Forms" icon="image">
             <div className="card-pad">
@@ -1239,7 +1509,7 @@ export function TerminalDetail({
                 {/* <dt>TID</dt><dd className="mono">{terminal.tid || "—"}</dd> */}
                 <dt>Brand</dt><dd>{terminal.brand}</dd>
                 <dt>Model</dt><dd>{terminal.model}</dd>
-                <dt>Bank</dt><dd>{terminal.bank}</dd>
+                {terminal.installation_status && <><dt>Installation</dt><dd>{terminal.installation_status}</dd></>}
                 {/* <dt>Connectivity</dt><dd>{terminal.sim}</dd> */}
                 <dt>Location</dt><dd>{terminal.location}</dd>
                 <dt>Condition</dt><dd style={{ fontWeight: 400 }}>{terminal.condition_note}</dd>
@@ -1278,16 +1548,16 @@ export function TerminalDetail({
             </>
           }>
             <div className="card-pad">
-              {!simLoaded ? (
+              {!linkedSimLoaded ? (
                 <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading linked SIM card…</div>
               ) : linkedSim ? (
                 <>
                   <dl className="kv" style={{ gridTemplateColumns: "100px 1fr" }}>
                     <dt>ICCID</dt><dd className="mono" style={{ fontSize: 12 }}>{linkedSim.iccid}</dd>
                     <dt>MSISDN</dt><dd className="mono">{linkedSim.msisdn || "—"}</dd>
-                    <dt>Carrier</dt><dd>{linkedSim.carrier}</dd>
-                    <dt>Plan</dt><dd>{linkedSim.plan}</dd>
-                    <dt>Data</dt><dd>{linkedSim.data_allowance}</dd>
+                    {linkedSim.carrier && <><dt>Carrier</dt><dd>{linkedSim.carrier}</dd></>}
+                    {linkedSim.plan && <><dt>Plan</dt><dd>{linkedSim.plan}</dd></>}
+                    {linkedSim.data_allowance && <><dt>Data</dt><dd>{linkedSim.data_allowance}</dd></>}
                     <dt>Status</dt><dd><Chip cls="chip-ok" dot>{linkedSim.status}</Chip></dd>
                   </dl>
                   {can("Terminals.Edit") && (
@@ -1314,13 +1584,7 @@ export function TerminalDetail({
               <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
                 <dt>Plan</dt><dd>{terminal.rental_plan}</dd>
                 <dt>Monthly</dt><dd>RM {terminal.rental_rate}.00</dd>
-                <dt>Merchant</dt><dd>{terminal.merchant ? terminal.merchant.name : "—"}</dd>
               </dl>
-              {terminal.merchant && (
-                <Btn variant="ghost" sm iconRight="chevRight" style={{ marginTop: 14, width: "100%" }} onClick={() => nav("merchant-detail", terminal.merchant!.id)}>
-                  View merchant
-                </Btn>
-              )}
             </div>
           </Card>
 
@@ -1377,22 +1641,29 @@ export function TerminalDetail({
 
       {showSimModal && can("Terminals.Edit") && <SimLinkModal terminal={terminal} hasExisting={!!linkedSim} onClose={() => setShowSimModal(false)} onLink={handleLinkSim} />}
 
-      {showAddTid && can("Terminals.Edit") && (
-        <TidModal
-          serial={terminalSerial(terminal)}
-          onClose={() => setShowAddTid(false)}
-          onSaved={(t) => setTids((prev) => [...prev, t])}
+      {showLinkTid && can("Terminals.Edit") && terminal.merchant?.id && (
+        <LinkTidModal
+          terminal={terminal}
+          merchantId={terminal.merchant.id}
+          onClose={() => setShowLinkTid(false)}
+          onLinked={(linkedTid) => {
+            setTids([linkedTid]);
+            setTerminal((prev) => prev ? { ...prev, tid: prev.tid || linkedTid.tid } : prev);
+            flash("TID linked to device");
+          }}
         />
       )}
 
-      {editingTid && can("Terminals.Edit") && (
-        <TidModal
-          serial={terminalSerial(terminal)}
-          existing={editingTid}
-          onClose={() => setEditingTid(null)}
-          onSaved={(updated) => {
-            setTids((prev) => prev.map((t) => t.id === updated.id ? updated : t));
-            setEditingTid(null);
+      {showAssignMerchant && can("Terminals.Edit") && (
+        <AssignMerchantModal
+          terminal={terminal}
+          onClose={() => setShowAssignMerchant(false)}
+          onAssigned={(updated, linkedTid) => {
+            setTerminal((prev) => prev ? { ...prev, ...updated, tid: updated.tid || prev.tid || linkedTid.tid } : updated);
+            setPendingStatus(updated.status);
+            setPendingLocation(updated.location);
+            setTids(updated.tids?.length ? updated.tids : [linkedTid]);
+            flash("Terminal assigned to merchant");
           }}
         />
       )}

@@ -10,6 +10,7 @@ export interface AuthUser {
   last_active: string | null;
   open_jobs_count: number;
   permissions?: string[];
+  banks?: string[];
 }
 
 interface AuthState {
