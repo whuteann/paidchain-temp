@@ -189,6 +189,7 @@ export interface MerchantRef {
   id: string;
   name: string;
   mid?: string | null;
+  bank_id?: string | null;
   type?: string | null;
   status?: string | null;
   contact?: string | null;
@@ -387,6 +388,7 @@ export interface CustomerMerchantOut {
   name: string;
   type: string;
   mid: string;
+  bank_id?: string | null;
   bank: string;
   status: string;
   finance_status: string;
@@ -422,6 +424,7 @@ export interface MerchantOut {
   name: string;
   type: string;
   mid: string;
+  bank_id?: string | null;
   mcc_code?: string | null;
   bank: string;
   status: string;
@@ -469,10 +472,16 @@ export interface MerchantCommercialProfileIn {
   effective_date?: string | null;
 }
 
+export interface TerminalTidMidIn {
+  mid: string;
+  mdr_rate_id?: string | null;
+}
+
 export interface MerchantCreate {
   customer_id: string;
   name: string;
   type: string;
+  bank_id?: string | null;
   mcc_code?: string | null;
   bank: string;
   contact: string;
@@ -496,6 +505,7 @@ export interface MerchantCreate {
 export interface MerchantUpdate {
   name?: string | null;
   type?: string | null;
+  bank_id?: string | null;
   mcc_code?: string | null;
   bank?: string | null;
   contact?: string | null;
@@ -515,6 +525,7 @@ export interface MerchantUpdate {
   secondary_mid?: string | null;
   status?: string | null;
   finance_status?: string | null;
+  tids?: TerminalTidCreate[];
 }
 
 export interface MerchantListParams {
@@ -523,6 +534,7 @@ export interface MerchantListParams {
   query?: string;
   status?: string;
   bank?: string;
+  bank_id?: string;
   customer_id?: string;
 }
 
@@ -609,6 +621,35 @@ export const merchants = {
     req<TerminalTidOut>("PATCH", `/merchants/${merchantId}/tids/${tidId}`, { body }),
 };
 
+// ─── Banks ───────────────────────────────────────────────────────────────────
+
+export interface BankOut {
+  id: string;
+  name: string;
+  code: string | null;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BankCreate {
+  name: string;
+  code: string;
+}
+
+export interface BankUpdate {
+  name?: string | null;
+  code?: string | null;
+  status?: string | null;
+}
+
+export const banks = {
+  list: () => req<BankOut[]>("GET", "/banks"),
+  create: (body: BankCreate) => req<BankOut>("POST", "/banks", { body }),
+  update: (bankId: string, body: BankUpdate) => req<BankOut>("PATCH", `/banks/${bankId}`, { body }),
+  remove: (bankId: string) => req<BankOut>("DELETE", `/banks/${bankId}`),
+};
+
 // ─── Terminal Settings ────────────────────────────────────────────────────────
 
 export interface TermSettingOut {
@@ -616,7 +657,6 @@ export interface TermSettingOut {
   brand: string;
   model: string;
   category: string;
-  bank: string;
   monthly_rental: number;
   deposit: number;
   setup_fee: number;
@@ -628,7 +668,6 @@ export interface TermSettingCreate {
   brand: string;
   model: string;
   category: string;
-  bank: string;
   monthly_rental: number;
   deposit: number;
   setup_fee: number;
@@ -741,6 +780,7 @@ export interface TerminalTidOut {
   id: string;
   terminal_serial: string | null;
   tid: string;
+  bank_id?: string | null;
   bank: string;
   merchant_id: string | null;
   status?: string | null;
@@ -789,14 +829,17 @@ export interface TerminalTidAssign {
 
 export interface TerminalTidCreate {
   tid: string;
-  bank: string;
+  bank_id?: string | null;
+  bank?: string | null;
   merchant_id?: string | null;
   mid?: string | null;
   mdr_rate_id?: string | null;
+  mids?: TerminalTidMidIn[];
 }
 
 export interface TerminalTidUpdate {
   tid?: string | null;
+  bank_id?: string | null;
   bank?: string | null;
   merchant_id?: string | null;
 }
@@ -1645,6 +1688,7 @@ export interface UserOut {
   status: string;
   last_active: string | null;
   jobs: number;
+  bank_ids?: string[];
   banks?: string[];
 }
 
@@ -1653,6 +1697,7 @@ export interface UserCreate {
   email: string;
   role_id: string;
   password: string;
+  bank_ids?: string[];
   banks?: string[];
 }
 
@@ -1661,6 +1706,7 @@ export interface UserUpdate {
   email?: string;
   role_id?: string;
   status?: string;
+  bank_ids?: string[];
   banks?: string[];
 }
 
@@ -1827,6 +1873,7 @@ export const api = {
   dashboard,
   customers,
   merchants,
+  banks,
   termSettings,
   terminals,
   jobs,

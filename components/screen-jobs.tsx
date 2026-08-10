@@ -7,7 +7,7 @@ import type { DropzoneFile } from "./components";
 import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, TerminalTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, TerminalTidOut, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -95,6 +95,94 @@ function EntitySearchSelect<T extends { id: string }>({
         )}
       </div>
     </Field>
+  );
+}
+
+function JobTidMidModal({ tid, merchantName, existing, onClose, onSaved }: {
+  tid: TerminalTidOut;
+  merchantName: string;
+  existing?: TerminalTidMidOut | null;
+  onClose: () => void;
+  onSaved: (mid: TerminalTidMidOut) => void;
+}) {
+  const editing = Boolean(existing);
+  const [mid, setMid] = useState(existing?.mid ?? "");
+  const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
+  const [reason, setReason] = useState("");
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.mdr.list().then(setMdrRates).catch(console.error);
+  }, []);
+
+  async function submit() {
+    if (!mid.trim()) {
+      setErr("MID is required");
+      return;
+    }
+    setSaving(true); setErr(null);
+    try {
+      const result = editing
+        ? await api.terminals.updateTidMid(tid.id, existing!.id, {
+          mid: mid.trim(),
+          mdr_rate_id: mdrRateId || null,
+          reason: mid.trim() !== existing?.mid ? (reason.trim() || null) : null,
+        } satisfies TerminalTidMidUpdate)
+        : await api.terminals.createTidMid(tid.id, {
+          mid: mid.trim(),
+          mdr_rate_id: mdrRateId || null,
+        } satisfies TerminalTidMidCreate);
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save MID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit MID" : "Add MID"}
+      sub={`${merchantName} · ${tid.tid}`}
+      icon="tag"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !mid.trim()} onClick={submit}>
+          {saving ? "Saving…" : editing ? "Save Changes" : "Add MID"}
+        </Btn>
+      </>}
+    >
+      <Field label="MID" hint="required">
+        <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="MID123456" />
+      </Field>
+      <Field label="MDR rate">
+        <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+          <option value="">No MDR rate</option>
+          {mdrRates.map((rate) => (
+            <option key={rate.id} value={rate.id}>
+              {rate.id} · {rate.type} {rate.rate}%
+            </option>
+          ))}
+        </select>
+      </Field>
+      {editing && (
+        <Field label="MID change reason" hint="optional">
+          <textarea
+            className="textarea"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason for changing the MID..."
+            rows={3}
+          />
+        </Field>
+      )}
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
   );
 }
 
@@ -248,6 +336,8 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
   const [serviceTerminals, setServiceTerminals] = useState<ServiceTerminalDraft[]>([newServiceTerminalDraft()]);
   const [merchantTids, setMerchantTids] = useState<TerminalTidOut[]>(presetMerchant?.tids ?? []);
   const [merchantTidsLoading, setMerchantTidsLoading] = useState(Boolean(presetMerchant?.id));
+  const [midLoadingTidIds, setMidLoadingTidIds] = useState<string[]>([]);
+  const [midModal, setMidModal] = useState<{ tidId: string; midId?: string | null; rowIndex: number } | null>(null);
   const [termSettingsList, setTermSettingsList] = useState<TermSettingOut[]>([]);
   const [adminUsers, setAdminUsers] = useState<UserOut[]>([]);
   const [form, setForm] = useState({
@@ -280,12 +370,18 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
         if (!cancelled) {
           setMerchantTids([]);
           setMerchantTidsLoading(false);
+          setMidLoadingTidIds([]);
+          setMidModal(null);
+          setInstallationTerminals([newInstallationTerminalDraft()]);
         }
         return;
       }
 
       setMerchantTidsLoading(true);
       setMerchantTids(selectedMerchantInitialTids ?? []);
+      setMidLoadingTidIds([]);
+      setMidModal(null);
+      setInstallationTerminals([newInstallationTerminalDraft()]);
 
       api.merchants.get(selectedMerchantId)
         .then((merchant) => {
@@ -327,7 +423,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
   const selectedInstallationTidIds = installationTerminals.map((row) => row.terminal_tid_id).filter(Boolean);
   const hasDuplicateInstallationTids = new Set(selectedInstallationTidIds).size !== selectedInstallationTidIds.length;
   const installationTerminalsComplete = installationTerminals.length > 0 && installationTerminals.every((row) =>
-    row.terminal_setting_id && row.terminal_tid_id && row.mid.trim() && row.mdr_rate_id
+    row.terminal_setting_id && row.terminal_tid_id && row.terminal_tid_mid_id && row.mid.trim() && row.mdr_rate_id
   );
   const selectedServiceTerminalIds = serviceTerminals.map((row) => row.terminal_id).filter(Boolean);
   const hasDuplicateServiceTerminals = new Set(selectedServiceTerminalIds).size !== selectedServiceTerminalIds.length;
@@ -350,16 +446,49 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
     setInstallationTerminals((rows) => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
   }
 
+  function isActiveMid(mid: TerminalTidMidOut) {
+    return (mid.status ?? "Active").toLowerCase() !== "inactive";
+  }
+
+  async function loadTidMids(tidId: string, force = false): Promise<TerminalTidMidOut[]> {
+    const existing = merchantTids.find((item) => item.id === tidId);
+    if (!force && existing?.mids) return existing.mids;
+    setMidLoadingTidIds((ids) => ids.includes(tidId) ? ids : [...ids, tidId]);
+    try {
+      const mids = await api.terminals.listTidMids(tidId);
+      setMerchantTids((items) => items.map((item) => item.id === tidId ? { ...item, mids } : item));
+      return mids;
+    } finally {
+      setMidLoadingTidIds((ids) => ids.filter((id) => id !== tidId));
+    }
+  }
+
   function selectInstallationTid(index: number, tidId: string) {
-    const tid = merchantTids.find((item) => item.id === tidId);
-    const activeMids = tid?.mids?.filter((m) => (m.status ?? "Active") !== "Inactive") ?? [];
-    const firstMid = activeMids[0];
     setInstallationTerminalRow(index, {
       terminal_tid_id: tidId,
-      terminal_tid_mid_id: firstMid?.id ?? "",
-      mid: firstMid?.mid ?? "",
-      mdr_rate_id: firstMid?.mdr_rate_id ?? "",
+      terminal_tid_mid_id: "",
+      mid: "",
+      mdr_rate_id: "",
     });
+    if (!tidId) return;
+
+    void loadTidMids(tidId, true)
+      .then((mids) => {
+        const firstMid = mids.filter(isActiveMid)[0] ?? mids[0];
+        setInstallationTerminals((rows) => rows.map((row, i) => {
+          if (i !== index || row.terminal_tid_id !== tidId) return row;
+          return {
+            ...row,
+            terminal_tid_mid_id: firstMid?.id ?? "",
+            mid: firstMid?.mid ?? "",
+            mdr_rate_id: firstMid?.mdr_rate_id ?? "",
+          };
+        }));
+      })
+      .catch((e) => {
+        console.error(e);
+        setErr("Failed to load MIDs for the selected TID.");
+      });
   }
 
   function selectInstallationMid(index: number, tidId: string, midId: string) {
@@ -370,6 +499,32 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       mid: mid?.mid ?? "",
       mdr_rate_id: mid?.mdr_rate_id ?? "",
     });
+  }
+
+  function handleInstallationMidSaved(savedMid: TerminalTidMidOut) {
+    const tidId = midModal?.tidId ?? savedMid.terminal_tid_id;
+    setMerchantTids((items) => items.map((item) => {
+      if (item.id !== tidId) return item;
+      const mids = item.mids ?? [];
+      const exists = mids.some((mid) => mid.id === savedMid.id);
+      return {
+        ...item,
+        mids: exists
+          ? mids.map((mid) => mid.id === savedMid.id ? savedMid : mid)
+          : [...mids, savedMid],
+      };
+    }));
+    if (!midModal) return;
+    setInstallationTerminals((rows) => rows.map((row, index) => {
+      if (index !== midModal.rowIndex || row.terminal_tid_id !== tidId) return row;
+      if (midModal.midId && row.terminal_tid_mid_id !== savedMid.id) return row;
+      return {
+        ...row,
+        terminal_tid_mid_id: savedMid.id,
+        mid: savedMid.mid,
+        mdr_rate_id: savedMid.mdr_rate_id ?? "",
+      };
+    }));
   }
 
   function addInstallationTerminalRow() {
@@ -447,24 +602,30 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
     }
   }
 
+  const midModalTid = midModal ? merchantTids.find((tid) => tid.id === midModal.tidId) : null;
+  const midModalExisting = midModalTid && midModal?.midId
+    ? midModalTid.mids?.find((mid) => mid.id === midModal.midId) ?? null
+    : null;
+
   return (
-    <Modal
-      title="Create Job"
-      sub={step === 1 ? "Select a workflow to begin" : (type || "")}
-      icon="plus"
-      size="wide"
-      onClose={onClose}
-      foot={<>
-        {step === 2 && !presetTypeLocked && <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>}
-        <div className="mf-spacer" />
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        {step === 1
-          ? <Btn variant="primary" iconRight="chevRight" disabled={!type} onClick={() => setStep(2)}>Continue</Btn>
-          : <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
-            {saving ? "Creating…" : "Create Job"}
-          </Btn>}
-      </>}
-    >
+    <>
+      <Modal
+        title="Create Job"
+        sub={step === 1 ? "Select a workflow to begin" : (type || "")}
+        icon="plus"
+        size="wide"
+        onClose={onClose}
+        foot={<>
+          {step === 2 && !presetTypeLocked && <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep(1)}>Back</Btn>}
+          <div className="mf-spacer" />
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+          {step === 1
+            ? <Btn variant="primary" iconRight="chevRight" disabled={!type} onClick={() => setStep(2)}>Continue</Btn>
+            : <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+              {saving ? "Creating…" : "Create Job"}
+            </Btn>}
+        </>}
+      >
       {step === 1 ? (
         <div className="type-grid">
           {types.map((jobType) => (
@@ -658,11 +819,16 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
                 {installationTerminals.map((row, index) => {
+                  
+
+                  console.log("Jello")
+                  console.log(row)
                   const duplicateTid = !!row.terminal_tid_id && installationTerminals.some((other, otherIndex) =>
                     otherIndex !== index && other.terminal_tid_id === row.terminal_tid_id
                   );
                   const rowTid = merchantTids.find((tid) => tid.id === row.terminal_tid_id);
-                  const rowMids = rowTid?.mids?.filter((m) => (m.status ?? "Active") !== "Inactive") ?? [];
+                  const rowMidLoading = !!row.terminal_tid_id && midLoadingTidIds.includes(row.terminal_tid_id);
+                  const rowMids = rowTid?.mids ?? [];
                   const selectedMid = rowMids.find((m) => m.id === row.terminal_tid_mid_id);
                   const mdrLabel = selectedMid?.mdr_rate
                     ? `${selectedMid.mdr_rate.id} · ${selectedMid.mdr_rate.type} ${selectedMid.mdr_rate.rate}%`
@@ -708,17 +874,17 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                         </Field>
                       </div>
                       <div className="field-row" style={{ marginBottom: 0 }}>
-                        <Field label="MID" hint={!rowTid ? "select a TID first" : rowMids.length === 0 ? "no active MIDs — add one from the merchant page" : undefined}>
+                        <Field label="MID" hint={!rowTid ? "select a TID first" : rowMidLoading ? "loading linked MIDs" : rowMids.length === 0 ? "no connected MIDs" : "linked to selected TID"}>
                           <select
                             className="input"
                             value={row.terminal_tid_mid_id}
                             onChange={(e) => selectInstallationMid(index, row.terminal_tid_id, e.target.value)}
-                            disabled={!rowTid || rowMids.length === 0}
+                            disabled={!rowTid || rowMidLoading || rowMids.length === 0}
                           >
-                            <option value="">{!rowTid ? "Select TID first…" : rowMids.length ? "Select MID…" : "No active MIDs"}</option>
+                            <option value="">{!rowTid ? "Select TID first…" : rowMidLoading ? "Loading MIDs…" : rowMids.length ? "Select MID…" : "No connected MIDs"}</option>
                             {rowMids.map((mid) => (
                               <option key={mid.id} value={mid.id}>
-                                {mid.mid}
+                                {mid.mid} · {mid.id}{mid.status ? ` · ${mid.status}` : ""}
                               </option>
                             ))}
                           </select>
@@ -727,6 +893,43 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                           <input className="input" value={mdrLabel} disabled readOnly />
                         </Field>
                       </div>
+                      {rowTid && (
+                        <div style={{ marginTop: 10, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-2, #f5f5f5)" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                            <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
+                              {rowMids.length ? `${rowMids.length} MID${rowMids.length === 1 ? "" : "s"} connected to this TID.` : "No MID is connected to this TID yet."}
+                            </span>
+                            <Btn variant="ghost" sm icon="plus" disabled={rowMidLoading} onClick={() => setMidModal({ tidId: rowTid.id, rowIndex: index })}>Add MID</Btn>
+                          </div>
+                          {rowMids.length > 0 && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                              {rowMids.map((mid) => {
+                                const selected = mid.id === row.terminal_tid_mid_id;
+                                const midMdrLabel = mid.mdr_rate
+                                  ? `${mid.mdr_rate.id} · ${mid.mdr_rate.type} ${mid.mdr_rate.rate}%`
+                                  : mid.mdr_rate_id || "No MDR rate";
+                                return (
+                                  <div key={mid.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 8px", border: selected ? "1px solid var(--green-500)" : "1px solid var(--line)", borderRadius: 7, background: "var(--surface)" }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => selectInstallationMid(index, rowTid.id, mid.id)}
+                                      style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", flex: 1, minWidth: 0 }}
+                                    >
+                                      <span className="mono" style={{ display: "block", fontWeight: 700 }}>{mid.mid} · {mid.id}</span>
+                                      <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 3, fontSize: 12, color: "var(--ink-3)" }}>
+                                        <span>{midMdrLabel}</span>
+                                        {mid.status && <Chip cls={isActiveMid(mid) ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
+                                        {selected && <Chip cls="chip-ok">Selected</Chip>}
+                                      </span>
+                                    </button>
+                                    <Btn variant="ghost" sm icon="edit" disabled={rowMidLoading} onClick={() => setMidModal({ tidId: rowTid.id, midId: mid.id, rowIndex: index })}>Edit</Btn>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -808,7 +1011,17 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
           {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
         </div>
       )}
-    </Modal>
+      </Modal>
+      {midModal && midModalTid && selectedMerchant && (
+        <JobTidMidModal
+          tid={midModalTid}
+          merchantName={selectedMerchant.name}
+          existing={midModalExisting}
+          onClose={() => setMidModal(null)}
+          onSaved={handleInstallationMidSaved}
+        />
+      )}
+    </>
   );
 }
 
@@ -1604,7 +1817,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       <Card className="job-stepper-card">
         <div className="card-pad" style={{ paddingTop: 26, paddingBottom: 24 }}>
-          <Stepper stages={stages} current={currentIndex} />
+          <Stepper stages={stages} current={currentIndex} complete={done} />
         </div>
       </Card>
 
@@ -1669,8 +1882,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                     const assignedSerial = terminal.terminal_serial || terminal.terminal?.serial || terminal.terminal?.serial_no || "";
                     const serviceSerial = terminal.service_terminal_serial || terminal.service_terminal?.serial || terminal.service_terminal?.serial_no || "";
                     const rowNeedsAssignment = jobTerminalAssignmentRequired;
+                    const tidMids = terminal.tid?.mids ?? [];
 
-                    console.log(index, ": ", terminal)
                     return (
                       <div key={terminal.id} style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
@@ -1698,8 +1911,31 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                           {terminal.terminal_setting_id && (<><dt>Brand & Model</dt><dd className="mono">{terminal.term_setting?.brand} {terminal.term_setting?.model}</dd></>)}
                           {job.type === "Installation" && (<>
                             <dt>TID</dt><dd className="mono">{terminal.tid?.tid || terminal.terminal_tid_id || "—"}</dd>
-                            <dt>MID</dt><dd className="mono">{terminal.mid || terminal.tid?.mids?.[0]?.mid || "—"}</dd>
-                            <dt>MDR</dt><dd className="mono">{terminal.mdr_rate_id || terminal.tid?.mids?.[0]?.mdr_rate_id || "—"}</dd>
+                            <dt>MIDs</dt>
+                            <dd>
+                              {tidMids.length ? (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                  {tidMids.map((mid) => {
+                                    const mdrLabel = mid.mdr_rate
+                                      ? `${mid.mdr_rate.id} · ${mid.mdr_rate.type} ${mid.mdr_rate.rate}%`
+                                      : mid.mdr_rate_id || "No MDR";
+                                    return (
+                                      <div key={mid.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 7, background: "var(--surface)" }}>
+                                        <div style={{ minWidth: 0 }}>
+                                          <div className="mono" style={{ fontWeight: 700 }}>{mid.mid}</div>
+                                          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{mdrLabel}</div>
+                                        </div>
+                                        <div style={{ display: "inline-flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                                          {mid.status && <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <span className="mono">{terminal.mid || "—"}</span>
+                              )}
+                            </dd>
                           </>)}
                           {rowNeedsAssignment && (<><dt>{job.type === "Replacement" ? "New serial" : "Serial"}</dt><dd className="mono">{assignedSerial || "—"}</dd></>)}
                           {terminal.previous_terminal_status && (<><dt>Old status</dt><dd>{terminal.previous_terminal_status}</dd></>)}
