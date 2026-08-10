@@ -923,19 +923,20 @@ export function Merchants({ nav }: { nav: NavFn }) {
 /* =================== COMMERCIAL PROFILE MODAL =================== */
 function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   merchantId: string;
-  existing: MerchantCommercialProfileOut;
+  existing?: MerchantCommercialProfileOut | null;
   onClose: () => void;
   onSaved: (cp: MerchantCommercialProfileOut) => void;
 }) {
   const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
+  const editing = Boolean(existing);
 
   const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
   const [rentalPlansLoading, setRentalPlansLoading] = useState(true);
   const [f, setF] = useState({
-    rental_plan_id:  existing.rental_plan_id  ?? "",
-    rental_price:    existing.rental_price != null ? String(existing.rental_price) : "",
-    plan_period:     existing.plan_period    ?? "Monthly",
-    effective_date:  existing.effective_date ?? "",
+    rental_plan_id:  existing?.rental_plan_id  ?? "",
+    rental_price:    existing?.rental_price != null ? String(existing.rental_price) : "",
+    plan_period:     existing?.plan_period    ?? "Monthly",
+    effective_date:  existing?.effective_date ?? "",
   });
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const [saving, setSaving] = useState(false);
@@ -954,7 +955,7 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
     api.rentalPlans.list({ active: true })
       .then((plans) => {
         setRentalPlans(plans);
-        const plan = plans.find((p) => p.id === existing.rental_plan_id);
+        const plan = plans.find((p) => p.id === existing?.rental_plan_id);
         if (plan) {
           setF((prev) => ({
             ...prev,
@@ -965,7 +966,7 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
       })
       .catch(console.error)
       .finally(() => setRentalPlansLoading(false));
-  }, [existing.rental_plan_id]);
+  }, [existing?.rental_plan_id]);
 
   async function save() {
     setSaving(true); setErr(null);
@@ -987,15 +988,15 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
 
   return (
     <Modal
-      title="Edit Commercial Profile"
-      sub="Update rental and billing terms"
+      title={editing ? "Edit Commercial Profile" : "Set Up Commercial Profile"}
+      sub={editing ? "Update rental and billing terms" : "Configure rental plan and billing terms"}
       icon="percent"
       onClose={onClose}
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" disabled={saving} onClick={save}>
-          {saving ? "Saving…" : "Save Changes"}
+          {saving ? "Saving…" : editing ? "Save Changes" : "Set Up Profile"}
         </Btn>
       </>}
     >
@@ -1201,7 +1202,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         />
       )}
 
-      {showEditCommercial && can("Merchants.Edit") && merchant.commercial_profile && (
+      {showEditCommercial && can("Merchants.Edit") && (
         <CommercialProfileModal
           merchantId={merchant.id}
           existing={merchant.commercial_profile}
