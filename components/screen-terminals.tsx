@@ -400,10 +400,34 @@ function SimLinkModal({ terminal, hasExisting, onClose, onLink }: {
 }) {
   const [storedSims, setStoredSims] = useState<SimCardOut[]>([]);
   const [selected, setSelected] = useState("");
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    api.simCards.list({ status: "In Storage" }).then((p) => setStoredSims(p.items)).catch(console.error);
-  }, []);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setErr(null);
+      api.simCards.list({ status: "In Storage", query: query.trim() || undefined, per_page: 12 })
+        .then((p) => {
+          if (cancelled) return;
+          setStoredSims(p.items);
+          setSelected((current) => p.items.some((sim) => sim.id === current) ? current : "");
+        })
+        .catch((e) => {
+          if (!cancelled) setErr(e instanceof ApiError ? e.message : "Failed to load SIM cards");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
 
   return (
     <Modal
@@ -419,8 +443,24 @@ function SimLinkModal({ terminal, hasExisting, onClose, onLink }: {
         </Btn>
       </>}
     >
-      {storedSims.length === 0 ? (
-        <Empty icon="phone" title="No SIM cards in storage" sub="All available SIMs are already linked to devices" />
+      <Field label="Search SIM card" hint="ICCID, MSISDN, carrier or plan">
+        <input
+          className="input"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search SIM card..."
+          autoFocus
+        />
+      </Field>
+      {err && <div style={{ marginBottom: 10, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
+      {loading ? (
+        <div style={{ padding: "16px 0", fontSize: 13, color: "var(--ink-3)" }}>Loading SIM cards...</div>
+      ) : storedSims.length === 0 ? (
+        <Empty
+          icon="phone"
+          title={query.trim() ? "No SIM cards match" : "No SIM cards in storage"}
+          sub={query.trim() ? "Try another ICCID, MSISDN, carrier or plan" : "All available SIMs are already linked to devices"}
+        />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {storedSims.map((s) => {
