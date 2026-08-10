@@ -4,7 +4,7 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { AddressIn, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, TerminalTidCreate, TerminalTidUpdate, TerminalTidOut, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, TerminalTidMidHistoryOut, MdrOut } from "@/lib/api";
+import type { AddressIn, BankOut, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, TerminalTidCreate, TerminalTidUpdate, TerminalTidOut, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, TerminalTidMidHistoryOut, MdrOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
 import { useCan } from "@/lib/use-permissions";
@@ -21,7 +21,13 @@ interface CreateMerchantModalProps {
 
 type MerchantTidDraft = {
   tid: string;
-  bank: string;
+  bank_id: string;
+  mids: MerchantTidMidDraft[];
+};
+
+type MerchantTidMidDraft = {
+  mid: string;
+  mdr_rate_id: string;
 };
 
 type MerchantAddressForm = {
@@ -91,6 +97,37 @@ function tidSimLabel(tid: TerminalTidOut) {
   return [sim.carrier, sim.msisdn || sim.iccid, sim.plan].filter(Boolean).join(" · ");
 }
 
+function activeBanks(banks: BankOut[]) {
+  return banks.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
+}
+
+function bankIdForName(banks: BankOut[], name?: string | null) {
+  return banks.find((bank) => bank.name === name)?.id ?? "";
+}
+
+function bankNameForId(banks: BankOut[], id?: string | null) {
+  return banks.find((bank) => bank.id === id)?.name ?? "";
+}
+
+function blankMerchantTidMidDraft(): MerchantTidMidDraft {
+  return { mid: "", mdr_rate_id: "" };
+}
+
+function blankMerchantTidDraft(bankId = ""): MerchantTidDraft {
+  return { tid: "", bank_id: bankId, mids: [blankMerchantTidMidDraft()] };
+}
+
+function merchantTidDraftsFromMerchant(merchant: MerchantOut | null): MerchantTidDraft[] {
+  if (!merchant?.tids?.length) return [blankMerchantTidDraft(merchant?.bank_id ?? "")];
+  return merchant.tids.map((tid) => ({
+    tid: tid.tid ?? "",
+    bank_id: tid.bank_id ?? merchant.bank_id ?? "",
+    mids: tid.mids?.length
+      ? tid.mids.map((mid) => ({ mid: mid.mid ?? "", mdr_rate_id: mid.mdr_rate_id ?? "" }))
+      : [blankMerchantTidMidDraft()],
+  }));
+}
+
 export function CreateMerchantModal({ onClose, onSave, customerId, customerName, customer = null, existingMerchant = null }: CreateMerchantModalProps) {
   const MERCHANT_TYPES = ['Retail', 'Corporate'];
   const ACCOUNT_TYPES = ["Current", "Savings"];
@@ -100,6 +137,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     name: existingMerchant?.name ?? "",
     type: existingMerchant?.type ?? MERCHANT_TYPES[0],
     mccCode: existingMerchant?.mcc_code ?? "",
+    bankId: existingMerchant?.bank_id ?? "",
     bank: existingMerchant?.bank ?? BANKS[0],
     contact: existingMerchant?.contact ?? "",
     phone: existingMerchant?.phone ?? "",
@@ -109,7 +147,11 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
   const [address, setAddress] = useState<MerchantAddressForm>(() => merchantInitialAddressForm(existingMerchant, customer));
-  const [tidRows, setTidRows] = useState<MerchantTidDraft[]>([{ tid: "", bank: BANKS[0] }]);
+  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [tidRows, setTidRows] = useState<MerchantTidDraft[]>(() => merchantTidDraftsFromMerchant(existingMerchant));
+  const [tidRowsTouched, setTidRowsTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -129,27 +171,127 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   const setC = (k: string, v: string) => setCommercial((p) => ({ ...p, [k]: v }));
   const [linkingSaving, setLinkingSaving] = useState(false);
   const hasCustomerLink = Boolean(customerId && customerName);
-  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim());
+  const selectedTidBankIds = new Set(tidRows.map((row) => row.bank_id).filter(Boolean));
+  const selectableBanks = bankOptions.filter((bank) =>
+    (bank.status ?? "Active").toLowerCase() === "active" || bank.id === f.bankId || selectedTidBankIds.has(bank.id)
+  );
+  const selectedBankName = bankNameForId(bankOptions, f.bankId) || f.bank;
+  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim() && f.bankId);
 
-  function setTidRow(index: number, key: keyof MerchantTidDraft, value: string) {
+  useEffect(() => {
+    let cancelled = false;
+    api.banks.list()
+      .then((items) => {
+        if (cancelled) return;
+        setBankOptions(items);
+        const options = activeBanks(items);
+        const resolvedBankId = existingMerchant?.bank_id || bankIdForName(options, existingMerchant?.bank) || options[0]?.id || "";
+        const resolvedBankName = bankNameForId(items, resolvedBankId) || existingMerchant?.bank || options[0]?.name || BANKS[0];
+        setF((prev) => ({ ...prev, bankId: prev.bankId || resolvedBankId, bank: resolvedBankName }));
+        setTidRows((rows) => rows.map((row) => ({ ...row, bank_id: row.bank_id || resolvedBankId })));
+      })
+      .catch((e) => {
+        console.error(e);
+        if (!cancelled) {
+          setF((prev) => ({ ...prev, bank: prev.bank || BANKS[0] }));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBanksLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [existingMerchant?.bank, existingMerchant?.bank_id]);
+
+  useEffect(() => {
+    api.mdr.list().then(setMdrRates).catch(console.error);
+  }, []);
+
+  function setTidRow(index: number, key: "tid" | "bank_id", value: string) {
+    setTidRowsTouched(true);
     setTidRows((rows) => rows.map((row, i) => i === index ? { ...row, [key]: value } : row));
   }
 
+  function setTidMidRow(tidIndex: number, midIndex: number, key: keyof MerchantTidMidDraft, value: string) {
+    setTidRowsTouched(true);
+    setTidRows((rows) => rows.map((row, i) => {
+      if (i !== tidIndex) return row;
+      return {
+        ...row,
+        mids: row.mids.map((mid, j) => j === midIndex ? { ...mid, [key]: value } : mid),
+      };
+    }));
+  }
+
   function addTidRow() {
-    setTidRows((rows) => [...rows, { tid: "", bank: BANKS[0] }]);
+    setTidRowsTouched(true);
+    setTidRows((rows) => [...rows, blankMerchantTidDraft(f.bankId)]);
   }
 
   function removeTidRow(index: number) {
+    setTidRowsTouched(true);
     setTidRows((rows) => {
       const next = rows.filter((_, i) => i !== index);
-      return next.length ? next : [{ tid: "", bank: BANKS[0] }];
+      return next.length ? next : [blankMerchantTidDraft(f.bankId)];
     });
+  }
+
+  function addTidMidRow(tidIndex: number) {
+    setTidRowsTouched(true);
+    setTidRows((rows) => rows.map((row, i) =>
+      i === tidIndex ? { ...row, mids: [...row.mids, blankMerchantTidMidDraft()] } : row
+    ));
+  }
+
+  function removeTidMidRow(tidIndex: number, midIndex: number) {
+    setTidRowsTouched(true);
+    setTidRows((rows) => rows.map((row, i) => {
+      if (i !== tidIndex) return row;
+      const mids = row.mids.filter((_, j) => j !== midIndex);
+      return { ...row, mids: mids.length ? mids : [blankMerchantTidMidDraft()] };
+    }));
   }
 
   function buildTidPayload(): TerminalTidCreate[] {
     return tidRows
-      .map((row) => ({ tid: row.tid.trim(), bank: row.bank }))
+      .map((row) => ({
+        tid: row.tid.trim(),
+        bank_id: row.bank_id,
+        bank: bankNameForId(bankOptions, row.bank_id) || selectedBankName,
+        mids: row.mids
+          .map((mid) => ({ mid: mid.mid.trim(), mdr_rate_id: mid.mdr_rate_id || null }))
+          .filter((mid) => mid.mid),
+      }))
       .filter((row) => row.tid);
+  }
+
+  function directAddressFields() {
+    return {
+      address_line_1: address.addressLine1.trim() || null,
+      address_line_2: address.addressLine2.trim() || null,
+      city: address.city.trim() || null,
+      state: address.state.trim() || null,
+      postcode: address.postcode.trim() || null,
+    };
+  }
+
+  function shouldSubmitTidPayload() {
+    if (!editing) return Boolean(buildTidPayload().length);
+    return tidRowsTouched;
+  }
+
+  function tidValidationError() {
+    const filledTidRows = tidRows
+      .map((row, index) => ({ index, tid: row.tid.trim(), bank_id: row.bank_id, mids: row.mids }))
+      .filter((row) => row.tid || row.mids.some((mid) => mid.mid.trim()));
+    const tids = filledTidRows.map((row) => row.tid).filter(Boolean);
+    if (tids.length !== new Set(tids).size) return "Duplicate TIDs are not allowed in one merchant.";
+    for (const row of filledTidRows) {
+      if (!row.tid) return `TID is required for Terminal ID row ${row.index + 1}.`;
+      if (!row.bank_id) return `Bank is required for Terminal ID row ${row.index + 1}.`;
+      const mids = row.mids.map((mid) => mid.mid.trim()).filter(Boolean);
+      if (mids.length !== new Set(mids).size) return `Duplicate MIDs are not allowed under TID ${row.tid}.`;
+    }
+    return null;
   }
 
   function buildBaseBody(): MerchantCreate {
@@ -158,11 +300,13 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       name: f.name.trim(),
       type: f.type,
       mcc_code: f.mccCode.trim() || null,
-      bank: f.bank,
+      bank_id: f.bankId,
+      bank: selectedBankName,
       contact: f.contact.trim(),
       phone: f.phone.trim(),
       email: f.email.trim(),
       addresses: buildMerchantAddressPayload(address),
+      ...directAddressFields(),
       bank_account_name: f.bankAccountName.trim() || f.name.trim(),
       bank_account_number: f.bankAccountNumber.trim(),
       bank_account_type: f.bankAccountType,
@@ -173,16 +317,23 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   // Edit-only: save changes directly
   async function submit() {
     if (!valid || !existingMerchant) return;
+    const tidError = shouldSubmitTidPayload() ? tidValidationError() : null;
+    if (tidError) {
+      setErr(tidError);
+      return;
+    }
     setSaving(true); setErr(null);
     try {
       const updateBody: MerchantUpdate = {
-        name: f.name.trim(), type: f.type, mcc_code: f.mccCode.trim() || null, bank: f.bank,
+        name: f.name.trim(), type: f.type, mcc_code: f.mccCode.trim() || null, bank_id: f.bankId, bank: selectedBankName,
         contact: f.contact.trim(), phone: f.phone.trim(),
         email: f.email.trim(),
         addresses: buildMerchantAddressPayload(address),
+        ...directAddressFields(),
         bank_account_name: f.bankAccountName.trim() || f.name.trim(),
         bank_account_number: f.bankAccountNumber.trim(),
         bank_account_type: f.bankAccountType,
+        ...(shouldSubmitTidPayload() ? { tids: buildTidPayload() } : {}),
       };
       const m = await api.merchants.update(existingMerchant.id, updateBody);
       onSave(m);
@@ -200,6 +351,11 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       return;
     }
     if (!valid) return;
+    const tidError = tidValidationError();
+    if (tidError) {
+      setErr(tidError);
+      return;
+    }
     setRentalPlansLoading(true);
     api.rentalPlans.list({ active: true })
       .then(setRentalPlans)
@@ -224,6 +380,12 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     }
     setLinkingSaving(true); setErr(null);
     try {
+      const tidError = tidValidationError();
+      if (tidError) {
+        setErr(tidError);
+        setLinkingSaving(false);
+        return;
+      }
       const body: MerchantCreate = {
         ...buildBaseBody(),
         commercial_profile: {
@@ -248,6 +410,12 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     }
     setLinkingSaving(true); setErr(null);
     try {
+      const tidError = tidValidationError();
+      if (tidError) {
+        setErr(tidError);
+        setLinkingSaving(false);
+        return;
+      }
       const m = await api.merchants.create(buildBaseBody());
       onSave(m);
     } catch (e) {
@@ -337,20 +505,27 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
             </div>
           </Field>
 
-          {!editing && (
-            <Field label="Terminal IDs" hint="optional · add MIDs from the merchant page after creation">
-              <div style={{ display: "grid", gap: 10 }}>
-                {tidRows.map((row, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: tidRows.length > 1 ? "minmax(0, 1fr) minmax(0, 1fr) auto" : "minmax(0, 1fr) minmax(0, 1fr)",
-                      gap: 14,
-                      alignItems: "start",
-                    }}
-                  >
-                    <Field label={i === 0 ? "TID" : undefined}>
+          <Field label="Terminal IDs" hint="optional · each TID can have multiple MIDs">
+            <div style={{ display: "grid", gap: 10 }}>
+              {tidRows.map((row, i) => (
+                <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12, background: "var(--surface)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>TID {i + 1}</div>
+                    {tidRows.length > 1 && (
+                      <Btn
+                        variant="ghost"
+                        sm
+                        icon="x"
+                        title="Remove TID"
+                        onClick={() => removeTidRow(i)}
+                        style={{ color: "var(--bad)" }}
+                      >
+                        Remove
+                      </Btn>
+                    )}
+                  </div>
+                  <div className="field-row" style={{ marginBottom: 10 }}>
+                    <Field label="TID">
                       <input
                         className="input"
                         placeholder="e.g. 12345678"
@@ -358,35 +533,79 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
                         onChange={(e) => setTidRow(i, "tid", e.target.value)}
                       />
                     </Field>
-                    <Field label={i === 0 ? "Bank" : undefined}>
-                      <select className="input" value={row.bank} onChange={(e) => setTidRow(i, "bank", e.target.value)}>
-                        {BANKS.map((b) => <option key={b}>{b}</option>)}
+                    <Field label="Bank">
+                      <select className="input" value={row.bank_id} onChange={(e) => setTidRow(i, "bank_id", e.target.value)} disabled={banksLoading}>
+                        <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
+                        {selectableBanks.map((bank) => (
+                          <option key={bank.id} value={bank.id}>{bank.name}</option>
+                        ))}
                       </select>
                     </Field>
-                    {tidRows.length > 1 && (
-                      <div style={{ paddingTop: i === 0 ? 24 : 0 }}>
-                        <Btn
-                          variant="ghost"
-                          sm
-                          icon="x"
-                          title="Remove TID"
-                          onClick={() => removeTidRow(i)}
-                          style={{ color: "var(--bad)", height: 40 }}
-                        />
-                      </div>
-                    )}
                   </div>
-                ))}
-                <Btn variant="ghost" sm icon="plus" onClick={addTidRow} style={{ justifySelf: "start" }}>
-                  Add TID
-                </Btn>
-              </div>
-            </Field>
-          )}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>MIDs</span>
+                    <Btn variant="ghost" sm icon="plus" onClick={() => addTidMidRow(i)}>Add MID</Btn>
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {row.mids.map((mid, j) => (
+                      <div key={j} style={{ display: "grid", gridTemplateColumns: row.mids.length > 1 ? "minmax(0, 1fr) minmax(0, 1fr) auto" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
+                        <Field label={j === 0 ? "MID" : undefined}>
+                          <input
+                            className="input"
+                            placeholder="e.g. MID001"
+                            value={mid.mid}
+                            onChange={(e) => setTidMidRow(i, j, "mid", e.target.value)}
+                          />
+                        </Field>
+                        <Field label={j === 0 ? "MDR rate" : undefined}>
+                          <select className="input" value={mid.mdr_rate_id} onChange={(e) => setTidMidRow(i, j, "mdr_rate_id", e.target.value)}>
+                            <option value="">No MDR rate</option>
+                            {mdrRates.map((rate) => (
+                              <option key={rate.id} value={rate.id}>
+                                {rate.id} · {rate.type} {rate.rate}%
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        {row.mids.length > 1 && (
+                          <div style={{ paddingTop: j === 0 ? 24 : 0 }}>
+                            <Btn
+                              variant="ghost"
+                              sm
+                              icon="x"
+                              title="Remove MID"
+                              onClick={() => removeTidMidRow(i, j)}
+                              style={{ color: "var(--bad)", height: 40 }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <Btn variant="ghost" sm icon="plus" onClick={addTidRow} style={{ justifySelf: "start" }}>
+                Add TID
+              </Btn>
+            </div>
+          </Field>
 
           <Field label="Bank">
-            <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
-              {BANKS.map((b) => <option key={b}>{b}</option>)}
+            <select
+              className="input"
+              value={f.bankId}
+              disabled={banksLoading}
+              onChange={(e) => {
+                const bankId = e.target.value;
+                const name = bankNameForId(bankOptions, bankId);
+                setF((prev) => ({ ...prev, bankId, bank: name || prev.bank }));
+                setTidRows((rows) => rows.map((row) => ({ ...row, bank_id: row.bank_id || bankId })));
+              }}
+            >
+              <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
+              {selectableBanks.map((bank) => (
+                <option key={bank.id} value={bank.id}>{bank.name}</option>
+              ))}
             </select>
           </Field>
 
@@ -570,7 +789,8 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [merchantList, setMerchantList] = useState<MerchantOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [bank, setBank] = useState("All");
+  const [bankId, setBankId] = useState("All");
+  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
@@ -578,6 +798,10 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [createCustomer, setCreateCustomer] = useState<CustomerOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.banks.list().then(setBankOptions).catch(console.error);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -588,7 +812,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
         per_page: MERCHANTS_PAGE_SIZE,
         query: q.trim() || undefined,
         status: status !== "All" ? status : undefined,
-        bank: bank !== "All" ? bank : undefined,
+        bank_id: bankId !== "All" ? bankId : undefined,
       })
         .then((p) => {
           if (cancelled) return;
@@ -606,7 +830,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [page, q, status, bank]);
+  }, [page, q, status, bankId]);
 
   function handleMerchantCreated(merchant: MerchantOut) {
     setMerchantList((prev) => [merchant, ...prev]);
@@ -631,8 +855,9 @@ export function Merchants({ nav }: { nav: NavFn }) {
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
             {["All","Active","Onboarding","Suspended","Inactive"].map((s) => <option key={s}>{s}</option>)}
           </select>
-          <select className="select" value={bank} onChange={(e) => { setBank(e.target.value); resetPage(); }}>
-            {["All", ...BANKS].map((s) => <option key={s} value={s}>{s === "All" ? "All Banks" : s}</option>)}
+          <select className="select" value={bankId} onChange={(e) => { setBankId(e.target.value); resetPage(); }}>
+            <option value="All">All Banks</option>
+            {bankOptions.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
           </select>
           <span className="tb-meta">{loading ? "Loading..." : `${total} results`}</span>
         </Toolbar>
@@ -1038,7 +1263,10 @@ function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
 }) {
   const editing = Boolean(existing);
   const [tid, setTid] = useState(existing?.tid ?? "");
-  const [bank, setBank] = useState(existing?.bank ?? merchant.bank ?? BANKS[0]);
+  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
+  const [bankId, setBankId] = useState(existing?.bank_id ?? merchant.bank_id ?? "");
+  const [bank, setBank] = useState(existing?.bank ?? merchant.bank ?? "");
   const [mid, setMid] = useState("");
   const [mdrRateId, setMdrRateId] = useState("");
   const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
@@ -1050,6 +1278,28 @@ function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
     api.mdr.list().then(setMdrRates).catch(console.error);
   }, [editing]);
 
+  useEffect(() => {
+    let cancelled = false;
+    api.banks.list()
+      .then((items) => {
+        if (cancelled) return;
+        setBankOptions(items);
+        const options = activeBanks(items);
+        const resolvedBankId = existing?.bank_id || merchant.bank_id || bankIdForName(options, existing?.bank ?? merchant.bank) || options[0]?.id || "";
+        const resolvedBankName = bankNameForId(items, resolvedBankId) || existing?.bank || merchant.bank || options[0]?.name || "";
+        setBankId((current) => current || resolvedBankId);
+        setBank((current) => current || resolvedBankName);
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) setBanksLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [existing?.bank, existing?.bank_id, merchant.bank, merchant.bank_id]);
+
+  const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === bankId);
+  const selectedBankName = bankNameForId(bankOptions, bankId) || bank;
+
   async function submit() {
     if (!tid.trim()) {
       setErr("TID is required");
@@ -1060,11 +1310,13 @@ function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
       const result = editing
         ? await api.merchants.updateTid(merchant.id, existing!.id, {
           tid: tid.trim(),
-          bank,
+          bank_id: bankId,
+          bank: selectedBankName,
         } satisfies TerminalTidUpdate)
         : await api.merchants.createTid(merchant.id, {
           tid: tid.trim(),
-          bank,
+          bank_id: bankId,
+          bank: selectedBankName,
           mid: mid.trim() || null,
           mdr_rate_id: mdrRateId || null,
         } satisfies TerminalTidCreate);
@@ -1086,7 +1338,7 @@ function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || !tid.trim()} onClick={submit}>
+        <Btn variant="primary" icon="check" disabled={saving || !tid.trim() || !bankId} onClick={submit}>
           {saving ? "Saving…" : editing ? "Save Changes" : "Add TID"}
         </Btn>
       </>}
@@ -1095,8 +1347,18 @@ function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
         <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="TID123456" />
       </Field>
       <Field label="Bank" hint="required">
-        <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
-          {BANKS.map((b) => <option key={b}>{b}</option>)}
+        <select
+          className="input"
+          value={bankId}
+          disabled={banksLoading}
+          onChange={(e) => {
+            const nextBankId = e.target.value;
+            setBankId(nextBankId);
+            setBank(bankNameForId(bankOptions, nextBankId));
+          }}
+        >
+          <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
+          {selectableBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
         </select>
       </Field>
       {!editing && (
@@ -1445,9 +1707,7 @@ function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>MIDs</span>
                         {canEdit && (
-                          <button className="icon-btn" title="Add MID" onClick={() => { setMidModalTid(tid); setEditingMid(null); }}>
-                            <Icon name="plus" size={14} />
-                          </button>
+                          <Btn variant="ghost" sm icon="plus" onClick={() => { setMidModalTid(tid); setEditingMid(null); }}>Add MID</Btn>
                         )}
                       </div>
                       {tid.mids?.length ? (

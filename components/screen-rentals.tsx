@@ -2,12 +2,12 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
-import { RENTAL_PLANS, RENTAL_STATUS, BANKS } from "./data";
+import { RENTAL_PLANS, RENTAL_STATUS } from "./data";
 import { useCustomers } from "./customers-context";
 import { useMerchants } from "./merchants-context";
 import { useTerminals } from "./terminals-context";
 import { api, ApiError } from "@/lib/api";
-import type { RentalOut } from "@/lib/api";
+import type { BankOut, RentalOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
 
@@ -158,8 +158,13 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function ExportRentalsModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ query: "", status: "", bank: "", date_from: "", date_to: "", date_field: "start_date" });
+  const [banks, setBanks] = useState<BankOut[]>([]);
   const [exporting, setExporting] = useState(false);
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    api.banks.list().then(setBanks).catch(console.error);
+  }, []);
 
   async function submit() {
     setExporting(true);
@@ -206,7 +211,7 @@ function ExportRentalsModal({ onClose }: { onClose: () => void }) {
         <Field label="Bank">
           <select className="input" value={form.bank} onChange={(e) => set("bank", e.target.value)}>
             <option value="">All Banks</option>
-            {BANKS.map((b) => <option key={b}>{b}</option>)}
+            {banks.map((bank) => <option key={bank.id} value={bank.name}>{bank.name}</option>)}
           </select>
         </Field>
       </div>

@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
-import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS, BANKS } from "./data";
+import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
 import { NavFn } from "./shell";
@@ -452,7 +452,6 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
     brand: existing?.brand ?? brandKeys[0],
     model: existing?.model ?? "",
     category: existing?.category ?? "Countertop",
-    bank: existing?.bank ?? BANKS[0],
     monthly_rental: existing?.monthly_rental?.toString() ?? "",
     deposit: existing?.deposit?.toString() ?? "",
     setup_fee: existing?.setup_fee?.toString() ?? "",
@@ -468,7 +467,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
     setSaving(true);
     setErr(null);
     const body: TermSettingCreate = {
-      brand: f.brand, model: f.model, category: f.category, bank: f.bank,
+      brand: f.brand, model: f.model, category: f.category,
       monthly_rental: +f.monthly_rental, deposit: +f.deposit || 0, setup_fee: +f.setup_fee || 0, active: f.active,
     };
     try {
@@ -510,11 +509,6 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
       <div className="field-row">
         <Field label="Model name" hint="required">
           <input className="input" placeholder="e.g. A920 Pro" value={f.model} onChange={(e) => set("model", e.target.value)} />
-        </Field>
-        <Field label="Bank">
-          <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
-            {BANKS.map((b) => <option key={b}>{b}</option>)}
-          </select>
         </Field>
       </div>
       <div className="field-row">
@@ -609,7 +603,7 @@ function TerminalSettingsTab() {
         <div className="tbl-wrap">
           <table className="tbl">
             <thead>
-              <tr>{["Brand / Model", "Bank", "Category", "Monthly Rental", "Deposit", "Setup Fee", "Units", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
+              <tr>{["Brand / Model", "Category", "Monthly Rental", "Deposit", "Setup Fee", "Units", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {!loading && filtered.map((r) => (
@@ -620,9 +614,6 @@ function TerminalSettingsTab() {
                       <div><div className="ent-name">{r.brand}</div><div className="ent-sub">{r.model}</div></div>
                     </div>
                   </td>
-                  <td><span style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                    <Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{r.bank}
-                  </span></td>
                   <td><Chip cls={r.category === "Portable" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
                   <td className="td-strong">RM {r.monthly_rental}.00 <span className="td-mut" style={{ fontWeight: 400 }}>/mo</span></td>
                   <td className="td-mut">RM {r.deposit}</td>
@@ -863,106 +854,6 @@ export function Terminals({
 }
 
 /* =================== DETAIL =================== */
-/* =================== TID MODAL =================== */
-// function TidModal({ serial, existing, onClose, onSaved }: {
-//   serial: string;
-//   existing?: TerminalTidOut;
-//   onClose: () => void;
-//   onSaved: (tid: TerminalTidOut) => void;
-// }) {
-//   const isEdit = !!existing;
-//   const [tid, setTid] = useState(existing?.tid ?? "");
-//   const [mid, setMid] = useState(existing?.mid ?? "");
-//   const [bank, setBank] = useState(existing?.bank ?? "");
-//   const [status, setStatus] = useState(existing?.status ?? "Active");
-//   const [effectiveDate, setEffectiveDate] = useState(existing?.effective_date ?? "");
-//   const [terminationDate, setTerminationDate] = useState(existing?.termination_date ?? "");
-//   const [remarks, setRemarks] = useState(existing?.remarks ?? "");
-//   const [saving, setSaving] = useState(false);
-//   const [err, setErr] = useState<string | null>(null);
-
-//   async function save() {
-//     if (!tid.trim()) { setErr("TID is required"); return; }
-//     setSaving(true); setErr(null);
-//     try {
-//       let result: TerminalTidOut;
-//       if (isEdit) {
-//         const body: TerminalTidUpdate = {
-//           tid: tid.trim(),
-//           mid: mid.trim() || null,
-//           bank: bank || null,
-//           status,
-//           effective_date: effectiveDate || null,
-//           termination_date: terminationDate || null,
-//           remarks: remarks.trim() || null,
-//         };
-//         result = await api.terminals.updateTid(existing!.id, body);
-//       } else {
-//         const body: TerminalTidCreate = {
-//           tid: tid.trim(),
-//           mid: mid.trim() || null,
-//           bank: bank || null,
-//           status,
-//           effective_date: effectiveDate || null,
-//           remarks: remarks.trim() || null,
-//         };
-//         result = await api.terminals.createTid(serial, body);
-//       }
-//       onSaved(result);
-//       onClose();
-//     } catch (e) {
-//       setErr(e instanceof ApiError ? e.message : "Failed to save TID");
-//       setSaving(false);
-//     }
-//   }
-
-//   return (
-//     <Modal
-//       title={isEdit ? "Edit TID" : "Add TID"}
-//       sub={serial}
-//       icon="terminal"
-//       size="slim"
-//       onClose={onClose}
-//       foot={<>
-//         <div className="mf-spacer" />
-//         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-//         <Btn variant="primary" icon="check" disabled={saving || !tid.trim()} onClick={save}>
-//           {saving ? "Saving…" : isEdit ? "Save Changes" : "Add TID"}
-//         </Btn>
-//       </>}
-//     >
-//       <Field label="TID" hint="required">
-//         <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="e.g. 12345678" />
-//       </Field>
-//       <Field label="MID">
-//         <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="Merchant ID (optional)" />
-//       </Field>
-//       <Field label="Bank">
-//         <select className="input" value={bank} onChange={(e) => setBank(e.target.value)}>
-//           <option value="">— None —</option>
-//           {BANKS.map((b) => <option key={b}>{b}</option>)}
-//         </select>
-//       </Field>
-//       <Field label="Status">
-//         <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-//           {["Active", "Inactive", "Terminated"].map((s) => <option key={s}>{s}</option>)}
-//         </select>
-//       </Field>
-//       <Field label="Effective date">
-//         <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-//       </Field>
-//       {isEdit && (
-//         <Field label="Termination date">
-//           <input className="input" type="date" value={terminationDate} onChange={(e) => setTerminationDate(e.target.value)} />
-//         </Field>
-//       )}
-//       <Field label="Remarks">
-//         <input className="input" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional notes…" />
-//       </Field>
-//       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
-//     </Modal>
-//   );
-// }
 
 function LinkTidModal({ terminal, merchantId, onClose, onLinked }: {
   terminal: TerminalOut;
@@ -1523,7 +1414,6 @@ export function TerminalDetail({
                 <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
                   <dt>Setting ID</dt><dd className="mono">{termSetting.id}</dd>
                   <dt>Category</dt><dd>{termSetting.category}</dd>
-                  <dt>Bank</dt><dd>{termSetting.bank}</dd>
                   <dt>Monthly rate</dt><dd>RM {termSetting.monthly_rental}</dd>
                   <dt>Deposit</dt><dd>RM {termSetting.deposit}</dd>
                   {termSetting.setup_fee > 0 && <><dt>Setup fee</dt><dd>RM {termSetting.setup_fee}</dd></>}

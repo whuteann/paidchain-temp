@@ -4,18 +4,18 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pagination } from "./components";
 import { ROLES, PERMISSION_MODULES, BANKS } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
+import type { BankOut, BankCreate, BankUpdate, UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
 
 /* =================== SETTINGS =================== */
 export function TerminalSettings() {
-  const [tab, setTab] = useState<"sla" | "referral">("sla");
+  const [tab, setTab] = useState<"sla" | "banks" | "referral">("sla");
 
   return (
     <div>
       <PageHead title="Settings" />
       <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--line)", paddingBottom: 0 }}>
-        {([["sla", "clock", "Job SLA"], ["referral", "star", "Referral Bonus"]] as const).map(([key, icon, label]) => (
+        {([["sla", "clock", "Job SLA"], ["banks", "bank", "Banks"], ["referral", "star", "Referral Bonus"]] as const).map(([key, icon, label]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -33,6 +33,7 @@ export function TerminalSettings() {
         ))}
       </div>
       {tab === "sla" && <JobSlaSettings />}
+      {tab === "banks" && <BankSettings />}
       {tab === "referral" && <ReferralBonusSettings />}
     </div>
   );
@@ -40,6 +41,184 @@ export function TerminalSettings() {
 
 function jobTypeSlug(jobType: string): string {
   return jobType.replace(/[ /]/g, "-");
+}
+
+/* =================== BANK SETTINGS =================== */
+function BankSettings() {
+  const can = useCan();
+  const [banks, setBanks] = useState<BankOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<{ open: boolean; bank?: BankOut | null }>({ open: false });
+  const [toast, setToast] = useState<string | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  function showToast(message: string) {
+    setToast(message);
+    setTimeout(() => setToast(null), 2400);
+  }
+
+  function loadBanks() {
+    setLoading(true);
+    api.banks.list()
+      .then(setBanks)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadBanks();
+  }, []);
+
+  async function deactivate(bank: BankOut) {
+    if (!can("Settings.Edit")) return;
+    setActionId(bank.id);
+    try {
+      const updated = await api.banks.remove(bank.id);
+      setBanks((rows) => rows.map((row) => row.id === updated.id ? updated : row));
+      showToast("Bank deactivated");
+    } catch {
+      showToast("Failed to deactivate bank");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+      <Card
+        title="Banks"
+        icon="bank"
+        actions={can("Settings.Edit") ? <Btn variant="primary" sm icon="plus" onClick={() => setModal({ open: true })}>New Bank</Btn> : undefined}
+      >
+        {loading ? (
+          <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading banks...</div>
+        ) : banks.length === 0 ? (
+          <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--ink-3)" }}>No banks configured.</div>
+        ) : (
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>{["Bank", "Code", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {banks.map((bank) => (
+                  <tr key={bank.id}>
+                    <td>
+                      <div className="cell-2">
+                        <span className="td-strong">{bank.name}</span>
+                        <span className="c2-sub mono">{bank.id}</span>
+                      </div>
+                    </td>
+                    <td className="td-mono">{bank.code || "-"}</td>
+                    <td>
+                      <Chip cls={(bank.status ?? "Active").toLowerCase() === "active" ? "chip-ok" : "chip-neutral"} dot>{bank.status}</Chip>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        {can("Settings.Edit") && (
+                          <button className="icon-btn" title="Edit bank" onClick={() => setModal({ open: true, bank })}>
+                            <Icon name="edit" size={14} />
+                          </button>
+                        )}
+                        {can("Settings.Edit") && (bank.status ?? "Active").toLowerCase() === "active" && (
+                          <button className="icon-btn" title="Deactivate bank" disabled={actionId === bank.id} onClick={() => deactivate(bank)}>
+                            <Icon name="x" size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      {modal.open && can("Settings.Edit") && (
+        <BankModal
+          existing={modal.bank ?? null}
+          onClose={() => setModal({ open: false })}
+          onSave={(bank) => {
+            setBanks((rows) => rows.some((row) => row.id === bank.id)
+              ? rows.map((row) => row.id === bank.id ? bank : row)
+              : [bank, ...rows]);
+            setModal({ open: false });
+            showToast(modal.bank ? "Bank updated" : "Bank created");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function BankModal({ existing, onClose, onSave }: {
+  existing?: BankOut | null;
+  onClose: () => void;
+  onSave: (bank: BankOut) => void;
+}) {
+  const editing = Boolean(existing);
+  const [f, setF] = useState({
+    name: existing?.name ?? "",
+    code: existing?.code ?? "",
+    status: existing?.status ?? "Active",
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof typeof f, v: string) => setF((prev) => ({ ...prev, [k]: v }));
+  const valid = Boolean(f.name.trim() && f.code.trim());
+
+  async function submit() {
+    if (!valid) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      const body = {
+        name: f.name.trim(),
+        code: f.code.trim(),
+        ...(editing ? { status: f.status } : {}),
+      };
+      const result = editing
+        ? await api.banks.update(existing!.id, body satisfies BankUpdate)
+        : await api.banks.create(body satisfies BankCreate);
+      onSave(result);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save bank");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit Bank" : "New Bank"}
+      sub={editing ? existing?.id : "Create a bank for dropdowns and bank-scoped access"}
+      icon="bank"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+          {saving ? "Saving..." : editing ? "Save Changes" : "Create Bank"}
+        </Btn>
+      </>}
+    >
+      <Field label="Bank name" hint="required">
+        <input className="input" value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Maybank" />
+      </Field>
+      <Field label="Bank code" hint="required">
+        <input className="input" value={f.code} onChange={(e) => set("code", e.target.value)} placeholder="MBB" />
+      </Field>
+      {editing && (
+        <Field label="Status">
+          <select className="input" value={f.status} onChange={(e) => set("status", e.target.value)}>
+            {["Active", "Inactive"].map((status) => <option key={status}>{status}</option>)}
+          </select>
+        </Field>
+      )}
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
 }
 
 /* =================== REFERRAL BONUS SETTINGS =================== */
@@ -907,26 +1086,49 @@ function UserModal({ onClose, onSave, existing, roles }: {
     role: existing
       ? roles.find((r) => r.name === existing.role)?.id ?? ""
       : roles.find((r) => r.name === "Operations")?.id ?? roles[0]?.id ?? "",
-    bank: existing?.banks?.[0] ?? BANKS[0],
+    bankId: existing?.bank_ids?.[0] ?? "",
+    bank: existing?.banks?.[0] ?? "",
     password: "",
   }));
+  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
   const [resetPw, setResetPw] = useState("");
   const [resetOk, setResetOk] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = !!(f.name && f.email.includes("@") && (existing || f.password));
+  const valid = !!(f.name && f.email.includes("@") && f.bankId && (existing || f.password));
   const roleIcons: Record<string, string> = { Admin: "shield", Finance: "payouts", Warehouse: "box", Viewer: "eye", Operations: "wrench" };
+  const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === f.bankId);
+  const selectedBankName = bankOptions.find((bank) => bank.id === f.bankId)?.name ?? f.bank;
+
+  useEffect(() => {
+    let cancelled = false;
+    api.banks.list()
+      .then((items) => {
+        if (cancelled) return;
+        setBankOptions(items);
+        const options = items.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
+        const existingBankId = existing?.bank_ids?.[0] || items.find((bank) => bank.name === existing?.banks?.[0])?.id || options[0]?.id || "";
+        const existingBankName = items.find((bank) => bank.id === existingBankId)?.name || existing?.banks?.[0] || options[0]?.name || BANKS[0];
+        setF((prev) => ({ ...prev, bankId: prev.bankId || existingBankId, bank: prev.bank || existingBankName }));
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) setBanksLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [existing?.bank_ids, existing?.banks]);
 
   async function submit() {
     if (!valid) return;
     if (existing ? !can("Users.Edit") : !can("Users.Invite")) return;
     setSaving(true); setErr(null);
     try {
-      const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder", banks: [f.bank] };
+      const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder", bank_ids: f.bankId ? [f.bankId] : [], banks: selectedBankName ? [selectedBankName] : [] };
       const result = existing
-        ? await api.users.update(existing.id, { name: f.name, email: f.email, role_id: f.role, banks: [f.bank] })
+        ? await api.users.update(existing.id, { name: f.name, email: f.email, role_id: f.role, bank_ids: f.bankId ? [f.bankId] : [], banks: selectedBankName ? [selectedBankName] : [] })
         : await api.users.create(body);
       onSave(result);
     } catch (e) {
@@ -990,8 +1192,18 @@ function UserModal({ onClose, onSave, existing, roles }: {
         </div>
       </Field>
       <Field label="Bank">
-        <select className="input" value={f.bank} onChange={(e) => set("bank", e.target.value)}>
-          {BANKS.map((b) => <option key={b}>{b}</option>)}
+        <select
+          className="input"
+          value={f.bankId}
+          disabled={banksLoading}
+          onChange={(e) => {
+            const bankId = e.target.value;
+            const name = bankOptions.find((bank) => bank.id === bankId)?.name ?? "";
+            setF((prev) => ({ ...prev, bankId, bank: name }));
+          }}
+        >
+          <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
+          {selectableBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
         </select>
       </Field>
       {existing && can("Users.Edit") && (

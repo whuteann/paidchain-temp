@@ -136,16 +136,17 @@ export function Card({ title, actions, children, pad, className = "", icon, styl
 }
 
 /* ---------- Stepper ---------- */
-export function Stepper({ stages, current }: { stages: string[]; current: number }) {
+export function Stepper({ stages, current, complete = false }: { stages: string[]; current: number; complete?: boolean }) {
   return (
     <div className="stepper">
       {stages.map((s, i) => {
-        const cls = i < current ? "done" : i === current ? "active" : "";
+        const completed = i < current || (complete && i === current);
+        const cls = completed ? "done" : i === current ? "active" : "";
         return (
           <div className={"step " + cls} key={s}>
             <div className="step-line" />
             <div className="step-dot">
-              {i < current ? <Icon name="check" size={16} /> : (i + 1)}
+              {completed ? <Icon name="check" size={16} /> : (i + 1)}
             </div>
             <div className="step-label">{s}</div>
           </div>
