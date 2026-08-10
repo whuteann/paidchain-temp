@@ -7,7 +7,7 @@ import type { DropzoneFile } from "./components";
 import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, TerminalTidOut, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, TerminalTidOut, TerminalTidCreate, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut, BankOut } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -186,6 +186,177 @@ function JobTidMidModal({ tid, merchantName, existing, onClose, onSaved }: {
   );
 }
 
+type JobTidMidDraft = {
+  mid: string;
+  mdr_rate_id: string;
+};
+
+function blankJobTidMidDraft(): JobTidMidDraft {
+  return { mid: "", mdr_rate_id: "" };
+}
+
+function JobMerchantTidModal({ merchant, existingTids, onClose, onSaved }: {
+  merchant: MerchantOut;
+  existingTids: TerminalTidOut[];
+  onClose: () => void;
+  onSaved: (tid: TerminalTidOut) => void;
+}) {
+  const [tid, setTid] = useState("");
+  const [bankId, setBankId] = useState(merchant.bank_id ?? "");
+  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [mids, setMids] = useState<JobTidMidDraft[]>([blankJobTidMidDraft()]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.banks.list()
+      .then((items) => {
+        if (cancelled) return;
+        setBankOptions(items);
+        const active = items.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
+        setBankId((current) => current || active[0]?.id || "");
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) setBanksLoading(false);
+      });
+    api.mdr.list().then(setMdrRates).catch(console.error);
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedBankName = bankOptions.find((bank) => bank.id === bankId)?.name ?? merchant.bank ?? "";
+  const selectableBanks = bankOptions.filter((bank) =>
+    (bank.status ?? "Active").toLowerCase() === "active" || bank.id === bankId
+  );
+
+  function setMidRow(index: number, patch: Partial<JobTidMidDraft>) {
+    setMids((rows) => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
+  }
+
+  function addMidRow() {
+    setMids((rows) => [...rows, blankJobTidMidDraft()]);
+  }
+
+  function removeMidRow(index: number) {
+    setMids((rows) => {
+      const next = rows.filter((_, i) => i !== index);
+      return next.length ? next : [blankJobTidMidDraft()];
+    });
+  }
+
+  async function submit() {
+    const tidValue = tid.trim();
+    const filledMids = mids
+      .map((row) => ({ mid: row.mid.trim(), mdr_rate_id: row.mdr_rate_id || null }))
+      .filter((row) => row.mid);
+    if (!tidValue) {
+      setErr("TID is required");
+      return;
+    }
+    if (!bankId) {
+      setErr("Bank is required");
+      return;
+    }
+    if (existingTids.some((row) => row.tid === tidValue)) {
+      setErr("This merchant already has that TID.");
+      return;
+    }
+    if (filledMids.length === 0) {
+      setErr("At least one MID is required for installation.");
+      return;
+    }
+    if (filledMids.length !== new Set(filledMids.map((row) => row.mid)).size) {
+      setErr("Duplicate MIDs are not allowed under one TID.");
+      return;
+    }
+
+    setSaving(true); setErr(null);
+    try {
+      const createdTid = await api.merchants.createTid(merchant.id, {
+        tid: tidValue,
+        bank_id: bankId,
+        bank: selectedBankName,
+      } satisfies TerminalTidCreate);
+      const createdMids: TerminalTidMidOut[] = [];
+      for (const mid of filledMids) {
+        createdMids.push(await api.terminals.createTidMid(createdTid.id, mid));
+      }
+      onSaved({ ...createdTid, mids: createdMids });
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to add TID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Add TID"
+      sub={merchant.name}
+      icon="tag"
+      size="wide"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !tid.trim() || !bankId} onClick={submit}>
+          {saving ? "Saving…" : "Add TID"}
+        </Btn>
+      </>}
+    >
+      <div className="field-row">
+        <Field label="TID" hint="required">
+          <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="TID123456" />
+        </Field>
+        <Field label="Bank" hint="required">
+          <select className="input" value={bankId} disabled={banksLoading} onChange={(e) => setBankId(e.target.value)}>
+            <option value="">{banksLoading ? "Loading banks…" : "Select bank…"}</option>
+            {selectableBanks.map((bank) => (
+              <option key={bank.id} value={bank.id}>{bank.name}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>MIDs</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>required · add one or more MID rows</div>
+        </div>
+        <Btn variant="ghost" sm icon="plus" onClick={addMidRow}>Add MID</Btn>
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {mids.map((row, index) => (
+          <div key={index} style={{ display: "grid", gridTemplateColumns: mids.length > 1 ? "minmax(0, 1fr) minmax(0, 1fr) auto" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
+            <Field label={index === 0 ? "MID" : undefined}>
+              <input className="input" value={row.mid} onChange={(e) => setMidRow(index, { mid: e.target.value })} placeholder="MID001" />
+            </Field>
+            <Field label={index === 0 ? "MDR rate" : undefined}>
+              <select className="input" value={row.mdr_rate_id} onChange={(e) => setMidRow(index, { mdr_rate_id: e.target.value })}>
+                <option value="">No MDR rate</option>
+                {mdrRates.map((rate) => (
+                  <option key={rate.id} value={rate.id}>
+                    {rate.id} · {rate.type} {rate.rate}%
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {mids.length > 1 && (
+              <div style={{ paddingTop: index === 0 ? 24 : 0 }}>
+                <Btn variant="ghost" sm icon="x" title="Remove MID" onClick={() => removeMidRow(index)} style={{ color: "var(--bad)", height: 40 }} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
 const TYPE_META: Record<string, string> = {
   "Installation": "Deploy a terminal and create the rental after admin sign-off",
   "Repair/Maintenance": "Resolve a merchant device issue and close with maintenance proof",
@@ -338,6 +509,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
   const [merchantTidsLoading, setMerchantTidsLoading] = useState(Boolean(presetMerchant?.id));
   const [midLoadingTidIds, setMidLoadingTidIds] = useState<string[]>([]);
   const [midModal, setMidModal] = useState<{ tidId: string; midId?: string | null; rowIndex: number } | null>(null);
+  const [showAddTid, setShowAddTid] = useState(false);
   const [termSettingsList, setTermSettingsList] = useState<TermSettingOut[]>([]);
   const [adminUsers, setAdminUsers] = useState<UserOut[]>([]);
   const [form, setForm] = useState({
@@ -372,6 +544,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
           setMerchantTidsLoading(false);
           setMidLoadingTidIds([]);
           setMidModal(null);
+          setShowAddTid(false);
           setInstallationTerminals([newInstallationTerminalDraft()]);
         }
         return;
@@ -381,6 +554,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       setMerchantTids(selectedMerchantInitialTids ?? []);
       setMidLoadingTidIds([]);
       setMidModal(null);
+      setShowAddTid(false);
       setInstallationTerminals([newInstallationTerminalDraft()]);
 
       api.merchants.get(selectedMerchantId)
@@ -525,6 +699,26 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
         mdr_rate_id: savedMid.mdr_rate_id ?? "",
       };
     }));
+  }
+
+  function handleInstallationTidSaved(savedTid: TerminalTidOut) {
+    setMerchantTids((items) => {
+      const exists = items.some((item) => item.id === savedTid.id);
+      return exists ? items.map((item) => item.id === savedTid.id ? savedTid : item) : [...items, savedTid];
+    });
+    const firstMid = savedTid.mids?.filter(isActiveMid)[0] ?? savedTid.mids?.[0];
+    if (!firstMid) return;
+    setInstallationTerminals((rows) => {
+      const targetIndex = rows.findIndex((row) => !row.terminal_tid_id);
+      if (targetIndex < 0) return rows;
+      return rows.map((row, index) => index === targetIndex ? {
+        ...row,
+        terminal_tid_id: savedTid.id,
+        terminal_tid_mid_id: firstMid.id,
+        mid: firstMid.mid,
+        mdr_rate_id: firstMid.mdr_rate_id ?? "",
+      } : row);
+    });
   }
 
   function addInstallationTerminalRow() {
@@ -814,15 +1008,14 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                   <div style={{ fontWeight: 700, fontSize: 13 }}>Terminal lines</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)" }}>required · one line per installation device</div>
                 </div>
-                <Btn variant="ghost" sm icon="plus" onClick={addInstallationTerminalRow}>Add Line</Btn>
+                <div style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  <Btn variant="ghost" sm icon="tag" disabled={!selectedMerchant} onClick={() => setShowAddTid(true)}>Add TID</Btn>
+                  <Btn variant="ghost" sm icon="plus" onClick={addInstallationTerminalRow}>Add Line</Btn>
+                </div>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
                 {installationTerminals.map((row, index) => {
-                  
-
-                  console.log("Jello")
-                  console.log(row)
                   const duplicateTid = !!row.terminal_tid_id && installationTerminals.some((other, otherIndex) =>
                     otherIndex !== index && other.terminal_tid_id === row.terminal_tid_id
                   );
@@ -919,7 +1112,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                                       <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 3, fontSize: 12, color: "var(--ink-3)" }}>
                                         <span>{midMdrLabel}</span>
                                         {mid.status && <Chip cls={isActiveMid(mid) ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
-                                        {selected && <Chip cls="chip-ok">Selected</Chip>}
+                                        {/* {selected && <Chip cls="chip-ok">Selected</Chip>} */}
                                       </span>
                                     </button>
                                     <Btn variant="ghost" sm icon="edit" disabled={rowMidLoading} onClick={() => setMidModal({ tidId: rowTid.id, midId: mid.id, rowIndex: index })}>Edit</Btn>
@@ -1019,6 +1212,14 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
           existing={midModalExisting}
           onClose={() => setMidModal(null)}
           onSaved={handleInstallationMidSaved}
+        />
+      )}
+      {showAddTid && selectedMerchant && (
+        <JobMerchantTidModal
+          merchant={selectedMerchant}
+          existingTids={merchantTids}
+          onClose={() => setShowAddTid(false)}
+          onSaved={handleInstallationTidSaved}
         />
       )}
     </>
