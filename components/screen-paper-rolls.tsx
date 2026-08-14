@@ -23,6 +23,7 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
     quantity: "", reference: "", note: "",
     date: new Date().toISOString().slice(0, 10),
   });
+  const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -42,7 +43,7 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
     };
     setSaving(true); setErr(null);
     try {
-      const entry = await api.paperRolls.create(body);
+      const entry = await api.paperRolls.create(body, file);
       onSave(entry);
       onClose();
     } catch (e) {
@@ -105,6 +106,19 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
       <Field label="Note">
         <input className="input" placeholder="Optional note" value={f.note} onChange={(e) => set("note", e.target.value)} />
       </Field>
+      <Field label="Attachment">
+        <input
+          className="input"
+          type="file"
+          onChange={(e) => { setFile(e.target.files?.[0] ?? null); setErr(null); }}
+        />
+      </Field>
+      {file && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: -4 }}>
+          <Chip cls="chip-neutral">{file.name}</Chip>
+          <Chip cls="chip-neutral">{(file.size / 1024).toFixed(0)} KB</Chip>
+        </div>
+      )}
 
       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
     </Modal>
@@ -123,7 +137,7 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function PaperRolls({ nav: _ }: { nav: NavFn }) {
+export function PaperRolls({}: { nav: NavFn }) {
   const can = useCan();
   const [entries, setEntries] = useState<PaperRollOut[]>([]);
   const [details, setDetails] = useState<PaperRollDetails | null>(null);
@@ -258,7 +272,7 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
-                <tr>{["Date","Type","Quantity","Balance","Reference","Note","Created by"].map((h) => <th key={h}>{h}</th>)}</tr>
+              <tr>{["Date","Type","Quantity","Balance","Reference","Note","Attachment","Created by"].map((h) => <th key={h}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {filtered.map((e) => (
@@ -273,6 +287,13 @@ export function PaperRolls({ nav: _ }: { nav: NavFn }) {
                     <td className="td-mono td-mut">{runningMap[e.id] ?? "—"}</td>
                     <td className="td-mut">{e.reference || "—"}</td>
                     <td className="td-mut">{e.note || "—"}</td>
+                    <td className="td-mut">
+                      {e.file_url ? (
+                        <a href={e.file_url} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}>
+                          View file
+                        </a>
+                      ) : "—"}
+                    </td>
                     <td className="td-mut">{e.created_by}</td>
                   </tr>
                 ))}
