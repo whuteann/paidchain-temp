@@ -684,6 +684,32 @@ export const termSettings = {
   remove: (id: string) => req<void>("DELETE", `/terminals/settings/${id}`),
 };
 
+// ─── SIM Settings ────────────────────────────────────────────────────────────
+
+export interface SimSettingOut {
+  id: string;
+  carrier: string;
+  plan: string;
+  active: boolean;
+  created_at?: string;
+}
+
+export interface SimSettingCreate {
+  carrier: string;
+  plan: string;
+  active?: boolean;
+}
+
+export const simSettings = {
+  list: (params?: { active?: boolean; carrier?: string }) =>
+    req<SimSettingOut[]>("GET", "/simcards/settings", { params }),
+  get: (id: string) => req<SimSettingOut>("GET", `/simcards/settings/${id}`),
+  create: (body: SimSettingCreate) => req<SimSettingOut>("POST", "/simcards/settings", { body }),
+  update: (id: string, body: Partial<SimSettingCreate>) =>
+    req<SimSettingOut>("PATCH", `/simcards/settings/${id}`, { body }),
+  remove: (id: string) => req<void>("DELETE", `/simcards/settings/${id}`),
+};
+
 // ─── Terminals ────────────────────────────────────────────────────────────────
 
 export interface TerminalOut {
@@ -1139,6 +1165,8 @@ export interface SimCardOut {
   id: string;
   iccid: string;
   msisdn: string;
+  sim_setting_id?: string | null;
+  sim_setting?: SimSettingOut | null;
   carrier: string;
   plan: string;
   data_allowance: string;
@@ -1152,13 +1180,15 @@ export interface SimCardOut {
 export interface SimCardCreate {
   iccid: string;
   msisdn: string;
-  carrier: string;
-  plan: string;
+  sim_setting_id?: string | null;
+  carrier?: string;
+  plan?: string;
   data_allowance: string;
 }
 
 export interface SimCardUpdate {
   msisdn?: string | null;
+  sim_setting_id?: string | null;
   carrier?: string | null;
   plan?: string | null;
   data_allowance?: string | null;
@@ -1197,6 +1227,12 @@ export const simCards = {
     req<SimCardOut>("PATCH", `/simcards/${id}`, { body }),
   remove: (id: string) => req<void>("DELETE", `/simcards/${id}`),
   details: () => req<SimCardDetails>("GET", "/simcards/details"),
+  bulkUpload: (file: File, sim_setting_id?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (sim_setting_id) form.append("sim_setting_id", sim_setting_id);
+    return req<BulkCreateResult>("POST", "/simcards/bulk/upload", { form });
+  },
 };
 
 // ─── Paper Rolls ──────────────────────────────────────────────────────────────
@@ -1209,6 +1245,7 @@ export interface PaperRollOut {
   note: string;
   date: string;
   created_by: string;
+  file_url?: string | null;
 }
 
 export interface PaperRollCreate {
@@ -1251,7 +1288,17 @@ export interface PaperRollBillingRow {
 
 export const paperRolls = {
   list: (p?: PaperRollListParams) => req<PaperRollOut[]>("GET", "/paper-rolls", { params: p }),
-  create: (body: PaperRollCreate) => req<PaperRollOut>("POST", "/paper-rolls/update", { body }),
+  create: (body: PaperRollCreate, file?: File | null) => {
+    if (!file) return req<PaperRollOut>("POST", "/paper-rolls/update", { body });
+    const form = new FormData();
+    form.append("type", body.type);
+    form.append("quantity", String(body.quantity));
+    form.append("reference", body.reference);
+    if (body.note) form.append("note", body.note);
+    form.append("date", body.date);
+    form.append("file", file, file.name);
+    return req<PaperRollOut>("POST", "/paper-rolls/update", { form });
+  },
   details: () => req<PaperRollDetails>("GET", "/paper-rolls/details"),
   billingReport: (invoice_status?: string) =>
     req<PaperRollBillingRow[]>("GET", "/paper-rolls/billing", { params: invoice_status ? { invoice_status } : undefined }),
@@ -1875,6 +1922,7 @@ export const api = {
   merchants,
   banks,
   termSettings,
+  simSettings,
   terminals,
   jobs,
   simCards,

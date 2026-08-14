@@ -8,6 +8,8 @@ import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, Termi
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
 
+const TERMINAL_SETTING_CATEGORIES = ["Attended", "Unattended"] as const;
+
 function tidMidsSummary(tid: TerminalTidOut) {
   return tid.mids?.length ? tid.mids.map((m) => m.mid).join(", ") : "No MID";
 }
@@ -491,7 +493,9 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
   const [f, setF] = useState({
     brand: existing?.brand ?? brandKeys[0],
     model: existing?.model ?? "",
-    category: existing?.category ?? "Countertop",
+    category: TERMINAL_SETTING_CATEGORIES.includes(existing?.category as typeof TERMINAL_SETTING_CATEGORIES[number])
+      ? existing?.category ?? "Attended"
+      : "Attended",
     monthly_rental: existing?.monthly_rental?.toString() ?? "",
     deposit: existing?.deposit?.toString() ?? "",
     setup_fee: existing?.setup_fee?.toString() ?? "",
@@ -542,7 +546,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
         </Field>
         <Field label="Category">
           <select className="input" value={f.category} onChange={(e) => set("category", e.target.value)}>
-            {["Countertop", "Portable", "Mobile (mPOS)", "SoftPOS"].map((c) => <option key={c}>{c}</option>)}
+            {TERMINAL_SETTING_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
           </select>
         </Field>
       </div>
