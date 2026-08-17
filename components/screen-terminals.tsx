@@ -658,7 +658,7 @@ function TerminalSettingsTab() {
                       <div><div className="ent-name">{r.brand}</div><div className="ent-sub">{r.model}</div></div>
                     </div>
                   </td>
-                  <td><Chip cls={r.category === "Portable" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
+                  <td><Chip cls={r.category === "Attended" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
                   <td className="td-strong">RM {r.monthly_rental}.00 <span className="td-mut" style={{ fontWeight: 400 }}>/mo</span></td>
                   <td className="td-mut">RM {r.deposit}</td>
                   <td className="td-mut">{r.setup_fee ? "RM " + r.setup_fee : "Waived"}</td>
