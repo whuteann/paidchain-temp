@@ -729,6 +729,8 @@ export interface TerminalOut {
   condition_note: string;
   term_setting_id: string;
   tids?: TerminalTidOut[];
+  sim_card?: SimCardRef | null;
+  /** @deprecated Legacy frontend alias; the API returns sim_card. */
   simcard?: SimCardRef | null;
   installation_status?: string | null;
   activity_log?: ActivityOut[];

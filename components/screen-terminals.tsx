@@ -489,9 +489,8 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
   onSave: (r: TermSettingOut) => void;
   existing?: TermSettingOut;
 }) {
-  const brandKeys = Object.keys(BRANDS);
   const [f, setF] = useState({
-    brand: existing?.brand ?? brandKeys[0],
+    brand: existing?.brand ?? "",
     model: existing?.model ?? "",
     category: TERMINAL_SETTING_CATEGORIES.includes(existing?.category as typeof TERMINAL_SETTING_CATEGORIES[number])
       ? existing?.category ?? "Attended"
@@ -504,15 +503,15 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
-  const valid = !!(f.model && f.monthly_rental);
+  const valid = !!(f.brand.trim() && f.model.trim());
 
   async function submit() {
     if (!valid) return;
     setSaving(true);
     setErr(null);
     const body: TermSettingCreate = {
-      brand: f.brand, model: f.model, category: f.category,
-      monthly_rental: +f.monthly_rental, deposit: +f.deposit || 0, setup_fee: +f.setup_fee || 0, active: f.active,
+      brand: f.brand.trim(), model: f.model.trim(), category: f.category,
+      monthly_rental: +f.monthly_rental || 0, deposit: +f.deposit || 0, setup_fee: +f.setup_fee || 0, active: f.active,
     };
     try {
       const result = existing
@@ -540,9 +539,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
     >
       <div className="field-row">
         <Field label="Brand">
-          <select className="input" value={f.brand} onChange={(e) => set("brand", e.target.value)}>
-            {brandKeys.map((b) => <option key={b}>{b}</option>)}
-          </select>
+          <input className="input" placeholder="e.g. Ingenico" value={f.brand} onChange={(e) => set("brand", e.target.value)} />
         </Field>
         <Field label="Category">
           <select className="input" value={f.category} onChange={(e) => set("category", e.target.value)}>
@@ -550,13 +547,13 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
           </select>
         </Field>
       </div>
-      <div className="field-row">
+      <div className="field-row" style={{marginBottom: 20}}>
         <Field label="Model name" hint="required">
           <input className="input" placeholder="e.g. A920 Pro" value={f.model} onChange={(e) => set("model", e.target.value)} />
         </Field>
       </div>
       <div className="field-row">
-        <Field label="Monthly rental (RM)" hint="required">
+        <Field label="Monthly rental (RM)">
           <input className="input" type="number" placeholder="0.00" value={f.monthly_rental} onChange={(e) => set("monthly_rental", e.target.value)} />
         </Field>
         <Field label="Deposit (RM)">
@@ -1124,8 +1121,9 @@ export function TerminalDetail({
   const [statusSaving, setStatusSaving] = useState(false);
   const [showSimModal, setShowSimModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const linkedSim = linkedSimOverride === undefined ? (terminal?.simcard ?? initialLinkedSim) : linkedSimOverride;
-  const linkedSimLoaded = linkedSimOverride !== undefined || Boolean(terminal?.simcard) || simLoaded;
+  const terminalSim = terminal?.sim_card ?? terminal?.simcard;
+  const linkedSim = linkedSimOverride === undefined ? (terminalSim ?? initialLinkedSim) : linkedSimOverride;
+  const linkedSimLoaded = linkedSimOverride !== undefined || Boolean(terminalSim) || simLoaded;
 
   // TID state
   const [tids, setTids] = useState<TerminalTidOut[]>([]);

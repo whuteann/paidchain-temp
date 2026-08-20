@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pagination } from "./components";
-import { ROLES, PERMISSION_MODULES, BANKS } from "./data";
+import { ROLES, PERMISSION_MODULES } from "./data";
 import { api, ApiError } from "@/lib/api";
 import type { BankOut, BankCreate, BankUpdate, UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
@@ -1098,7 +1098,10 @@ function UserModal({ onClose, onSave, existing, roles }: {
   const [resetting, setResetting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const valid = !!(f.name && f.email.includes("@") && f.bankId && (existing || f.password));
+  const selectedRole = roles.find((role) => role.id === f.role);
+  const isRm = selectedRole?.id.trim().toLowerCase() === "rm"
+    || selectedRole?.name.trim().toLowerCase() === "rm";
+  const valid = !!(f.name && f.email.includes("@") && (!isRm || f.bankId) && (existing || f.password));
   const roleIcons: Record<string, string> = { Admin: "shield", Finance: "payouts", Warehouse: "box", Viewer: "eye", Operations: "wrench" };
   const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === f.bankId);
   const selectedBankName = bankOptions.find((bank) => bank.id === f.bankId)?.name ?? f.bank;
@@ -1109,9 +1112,8 @@ function UserModal({ onClose, onSave, existing, roles }: {
       .then((items) => {
         if (cancelled) return;
         setBankOptions(items);
-        const options = items.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
-        const existingBankId = existing?.bank_ids?.[0] || items.find((bank) => bank.name === existing?.banks?.[0])?.id || options[0]?.id || "";
-        const existingBankName = items.find((bank) => bank.id === existingBankId)?.name || existing?.banks?.[0] || options[0]?.name || BANKS[0];
+        const existingBankId = existing?.bank_ids?.[0] || items.find((bank) => bank.name === existing?.banks?.[0])?.id || "";
+        const existingBankName = items.find((bank) => bank.id === existingBankId)?.name || existing?.banks?.[0] || "";
         setF((prev) => ({ ...prev, bankId: prev.bankId || existingBankId, bank: prev.bank || existingBankName }));
       })
       .catch(console.error)
@@ -1191,7 +1193,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
           ))}
         </div>
       </Field>
-      <Field label="Bank">
+      <Field label="Bank" hint={isRm ? "required" : "optional"}>
         <select
           className="input"
           value={f.bankId}
