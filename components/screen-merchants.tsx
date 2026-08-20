@@ -1168,6 +1168,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
           presetCustomer={{
             id: merchant.customer_id,
             name: merchant.customer_name,
+            type: null,
             reg_no: merchant.customer_id,
             tin: null,
             contact: "",

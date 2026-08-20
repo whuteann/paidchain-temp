@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
-import { SIM_CARRIERS, SIM_PLANS, SIM_DATA_ALLOWANCES, SIM_STATUS } from "./data";
+import { SIM_DATA_ALLOWANCES, SIM_STATUS } from "./data";
 import { NavFn } from "./shell";
 import { api, ApiError } from "@/lib/api";
 import type { BulkCreateResult, SimCardOut, SimCardCreate, SimCardDetails, SimSettingCreate, SimSettingOut } from "@/lib/api";
@@ -15,6 +15,68 @@ function SimStatus({ status }: { status: string }) {
 
 function simSettingLabel(setting: SimSettingOut) {
   return `${setting.carrier} · ${setting.plan}`;
+}
+
+type SimPlanUnit = "GB" | "MB";
+
+function splitSimPlan(plan?: string): { value: string; unit: SimPlanUnit } {
+  const match = plan?.trim().match(/(\d+(?:\.\d+)?)\s*(GB|MB)\b/i);
+  return {
+    value: match?.[1] ?? "",
+    unit: match?.[2]?.toUpperCase() === "MB" ? "MB" : "GB",
+  };
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(cell);
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  cells.push(cell);
+  return cells;
+}
+
+async function validateSimCsv(file: File): Promise<string | null> {
+  if (!file.name.toLowerCase().endsWith(".csv")) return null;
+
+  const lines = (await file.text()).replace(/^\uFEFF/, "").split(/\r?\n/);
+  const headerLineIndex = lines.findIndex((line) => line.trim() !== "");
+  if (headerLineIndex === -1) return "The CSV file is empty.";
+
+  const headers = parseCsvLine(lines[headerLineIndex]).map((header) =>
+    header.trim().toLowerCase().replace(/\s+/g, "_")
+  );
+  const iccidIndex = headers.indexOf("iccid");
+  if (iccidIndex === -1) return "The CSV file must contain an iccid column.";
+
+  const invalidRows: string[] = [];
+  for (let index = headerLineIndex + 1; index < lines.length; index += 1) {
+    if (!lines[index].trim()) continue;
+    const iccid = (parseCsvLine(lines[index])[iccidIndex] ?? "").trim();
+    if (iccid.length < 22 || iccid.length > 24) {
+      invalidRows.push(`${index + 1} (${iccid ? `${iccid.length} chars` : "missing"})`);
+    }
+  }
+
+  if (invalidRows.length === 0) return null;
+  const shownRows = invalidRows.slice(0, 8).join(", ");
+  const remaining = invalidRows.length > 8 ? `, plus ${invalidRows.length - 8} more` : "";
+  return `Every ICCID must be 22-24 characters. Invalid CSV rows: ${shownRows}${remaining}.`;
 }
 
 /* =================== CREATE MODAL =================== */
@@ -132,6 +194,12 @@ function SimBulkUploadModal({ onClose, onComplete }: {
     setUploading(true);
     setErr(null);
     try {
+      const validationError = await validateSimCsv(file);
+      if (validationError) {
+        setErr(validationError);
+        setUploading(false);
+        return;
+      }
       const result = await api.simCards.bulkUpload(file, settingId);
       onComplete(result);
       onClose();
@@ -179,7 +247,7 @@ function SimBulkUploadModal({ onClose, onComplete }: {
         />
       </Field>
       <div style={{ padding: "10px 14px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, fontSize: 12.5, color: "var(--ink-2)" }}>
-        File columns should include iccid, msisdn, and data_allowance. If this modal setting is not selected, each row must include sim_setting_id.
+        Only the iccid column is required, and every ICCID must be 22-24 characters. Optional columns are msisdn and data_allowance. Carrier and plan come from the selected SIM setting.
       </div>
       {file && (
         <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -202,26 +270,24 @@ function SimSettingModal({ onClose, onSave, existing }: {
   onSave: (r: SimSettingOut) => void;
   existing?: SimSettingOut;
 }) {
-  const OTHER = "__other";
-  const knownCarrier = !existing?.carrier || SIM_CARRIERS.includes(existing.carrier);
-  const knownPlan = !existing?.plan || SIM_PLANS.includes(existing.plan);
-  const [carrierChoice, setCarrierChoice] = useState(knownCarrier ? existing?.carrier ?? SIM_CARRIERS[0] : OTHER);
-  const [planChoice, setPlanChoice] = useState(knownPlan ? existing?.plan ?? SIM_PLANS[0] : OTHER);
-  const [customCarrier, setCustomCarrier] = useState(knownCarrier ? "" : existing?.carrier ?? "");
-  const [customPlan, setCustomPlan] = useState(knownPlan ? "" : existing?.plan ?? "");
+  const initialPlan = splitSimPlan(existing?.plan);
+  const [carrier, setCarrier] = useState(existing?.carrier ?? "");
+  const [planValue, setPlanValue] = useState(initialPlan.value);
+  const [planUnit, setPlanUnit] = useState<SimPlanUnit>(initialPlan.unit);
   const [active, setActive] = useState(existing?.active ?? true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const carrier = carrierChoice === OTHER ? customCarrier.trim() : carrierChoice;
-  const plan = planChoice === OTHER ? customPlan.trim() : planChoice;
-  const valid = !!(carrier && plan);
+  const trimmedCarrier = carrier.trim();
+  const numericPlanValue = Number(planValue);
+  const plan = `${numericPlanValue}${planUnit}`;
+  const valid = !!trimmedCarrier && planValue.trim() !== "" && Number.isFinite(numericPlanValue) && numericPlanValue > 0;
 
   async function submit() {
     if (!valid) return;
     setSaving(true);
     setErr(null);
     const body: SimSettingCreate = {
-      carrier,
+      carrier: trimmedCarrier,
       plan,
       active,
     };
@@ -251,33 +317,39 @@ function SimSettingModal({ onClose, onSave, existing }: {
       </>}
     >
       <div className="field-row">
-        <Field label="Carrier">
-          <select className="input" value={carrierChoice} onChange={(e) => setCarrierChoice(e.target.value)}>
-            {SIM_CARRIERS.map((c) => <option key={c}>{c}</option>)}
-            <option value={OTHER}>Other</option>
-          </select>
+        <Field label="Carrier" hint="required">
+          <input
+            className="input"
+            placeholder="Enter carrier name"
+            value={carrier}
+            onChange={(e) => setCarrier(e.target.value)}
+          />
         </Field>
-        <Field label="Plan">
-          <select className="input" value={planChoice} onChange={(e) => setPlanChoice(e.target.value)}>
-            {SIM_PLANS.map((p) => <option key={p}>{p}</option>)}
-            <option value={OTHER}>Other</option>
-          </select>
+        <Field label="Plan" hint="required">
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              className="input"
+              type="number"
+              min="0.01"
+              step="any"
+              inputMode="decimal"
+              placeholder="e.g. 5"
+              value={planValue}
+              onChange={(e) => setPlanValue(e.target.value)}
+            />
+            <select
+              className="input"
+              aria-label="Plan unit"
+              style={{ width: 100, flexShrink: 0 }}
+              value={planUnit}
+              onChange={(e) => setPlanUnit(e.target.value as SimPlanUnit)}
+            >
+              <option value="GB">GB</option>
+              <option value="MB">MB</option>
+            </select>
+          </div>
         </Field>
       </div>
-      {(carrierChoice === OTHER || planChoice === OTHER) && (
-        <div className="field-row">
-          {carrierChoice === OTHER && (
-            <Field label="Custom carrier" hint="required">
-              <input className="input" placeholder="Enter carrier name" value={customCarrier} onChange={(e) => setCustomCarrier(e.target.value)} />
-            </Field>
-          )}
-          {planChoice === OTHER && (
-            <Field label="Custom plan" hint="required">
-              <input className="input" placeholder="Enter plan name" value={customPlan} onChange={(e) => setCustomPlan(e.target.value)} />
-            </Field>
-          )}
-        </div>
-      )}
       {existing && (
         <label style={{ display: "flex", gap: 9, alignItems: "center", fontSize: 13, fontWeight: 500 }}>
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
@@ -298,7 +370,6 @@ function SimSettingsTab() {
   const [rows, setRows] = useState<SimSettingOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [carrier, setCarrier] = useState("");
   const [active, setActive] = useState<"" | "true" | "false">("");
   const [editRow, setEditRow] = useState<SimSettingOut | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -306,13 +377,12 @@ function SimSettingsTab() {
 
   useEffect(() => {
     api.simSettings.list({
-      carrier: carrier || undefined,
       active: active === "" ? undefined : active === "true",
     })
       .then(setRows)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [carrier, active]);
+  }, [active]);
 
   function flash(message: string) {
     setToast(message);
@@ -352,10 +422,6 @@ function SimSettingsTab() {
       <Card>
         <Toolbar>
           <SearchBox value={q} onChange={setQ} placeholder="Search carrier or plan…" />
-          <select className="input" style={{ width: 150 }} value={carrier} onChange={(e) => setCarrier(e.target.value)}>
-            <option value="">All Carriers</option>
-            {SIM_CARRIERS.map((c) => <option key={c}>{c}</option>)}
-          </select>
           <select className="input" style={{ width: 120 }} value={active} onChange={(e) => setActive(e.target.value as "" | "true" | "false")}>
             <option value="">All</option>
             <option value="true">Active</option>

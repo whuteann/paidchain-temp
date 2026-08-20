@@ -7,7 +7,7 @@ import { logout, setDevMode } from "@/store/authSlice";
 import type { AppDispatch, RootState } from "@/store";
 import { canAccessPath } from "@/lib/permissions";
 
-export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "payouts" | "payout-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs";
+export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "payouts" | "payout-detail" | "profit-shares" | "profit-share-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs";
 export type NavFn = (to: Route, param?: string) => void;
 
 const NAV = [
@@ -28,6 +28,7 @@ const NAV = [
   { group: "Finance", items: [
     { id: "rentals",              label: "Rentals",             icon: "calendar" },
     { id: "payouts",           label: "Payouts",             icon: "payouts" },
+    { id: "profit-shares",     label: "Profit Shares",       icon: "cash" },
     { id: "referral-bonus-batches", label: "Referral Bonuses", icon: "cash" },
     { id: "paper-roll-billing",  label: "PR Billing",          icon: "receipt" },
     { id: "mdr",                 label: "MDR Rates",           icon: "percent" },
@@ -52,6 +53,7 @@ const NAV_PATHS: Record<string, string> = {
   "paper-rolls": "/paper-rolls",
   "paper-roll-billing": "/paper-roll-billing",
   payouts: "/payouts",
+  "profit-shares": "/profit-shares",
   "referral-bonus-batches": "/referral-bonus-batches",
   mdr: "/mdr",
   "rental-plans": "/rental-plans",
@@ -71,6 +73,7 @@ function getActiveFromPath(pathname: string): string {
   if (pathname === "/paper-rolls") return "paper-rolls";
   if (pathname === "/paper-roll-billing") return "paper-roll-billing";
   if (pathname.startsWith("/payouts")) return "payouts";
+  if (pathname.startsWith("/profit-shares")) return "profit-shares";
   if (pathname.startsWith("/referral-bonus-batches")) return "referral-bonus-batches";
   if (pathname === "/mdr") return "mdr";
   if (pathname === "/rental-plans") return "rental-plans";
@@ -104,6 +107,8 @@ function getCrumbsFromPath(pathname: string): Crumb[] {
   if (pathname.startsWith("/rentals/"))    return [{ label: "Finance" }, { label: "Rentals", href: "/rentals" }, { label: "Detail" }];
   if (pathname === "/payouts")             return [{ label: "Finance" }, { label: "Payouts" }];
   if (pathname.startsWith("/payouts/"))    return [{ label: "Finance" }, { label: "Payouts", href: "/payouts" }, { label: "Detail" }];
+  if (pathname === "/profit-shares")       return [{ label: "Finance" }, { label: "Profit Shares" }];
+  if (pathname.startsWith("/profit-shares/")) return [{ label: "Finance" }, { label: "Profit Shares", href: "/profit-shares" }, { label: "Detail" }];
   if (pathname === "/referral-bonus-batches")          return [{ label: "Finance" }, { label: "Referral Bonuses" }];
   if (pathname.startsWith("/referral-bonus-batches/")) return [{ label: "Finance" }, { label: "Referral Bonuses", href: "/referral-bonus-batches" }, { label: "Detail" }];
   if (pathname === "/paper-roll-billing")  return [{ label: "Finance" }, { label: "PR Billing" }];
@@ -127,6 +132,7 @@ export function useNav(): NavFn {
     if (to === "job-detail")      { router.push(`/jobs/${param}`); return; }
     if (to === "rental-detail")   { router.push(`/rentals/${param}`); return; }
     if (to === "payout-detail")   { router.push(`/payouts/${param}`); return; }
+    if (to === "profit-share-detail") { router.push(`/profit-shares/${param}`); return; }
     if (to === "referral-bonus-batch-detail") { router.push(`/referral-bonus-batches/${param}`); return; }
     router.push(NAV_PATHS[to] || "/dashboard");
   };
