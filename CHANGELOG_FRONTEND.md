@@ -1,5 +1,17 @@
 # Changelog Frontend
 
+## 2026-08-20 — Finance Profit Shares
+
+- Added optional customer type to create/edit customer modals and customer detail.
+- Added Finance navigation and route permission handling for Profit Shares.
+- Added profit-share report listing, filtering, upload modal, and reporting-period fields.
+- Added report detail with five type summaries, reconciliation, workbook rounding notice, and source metadata.
+- Added per-row customer review with search, link, unlink, and replacement of both automatic and manual matches.
+- Added unresolved filtering and warnings for linked customers without a Finance type.
+- Added invoice generation/download and paid confirmation/tick state.
+- Added typed Profit Shares API client contracts and production Pages Router routes.
+- Refresh role permissions once per signed-in session so newly granted navigation entries do not remain hidden by persisted client state.
+
 Source: chat implementation history and current local git records on `small-fixes`.
 
 ## Jobs & Workflows

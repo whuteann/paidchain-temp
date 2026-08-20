@@ -177,6 +177,7 @@ export interface AddressIn {
 export interface CustomerRef {
   id: string;
   name: string;
+  type?: CustomerType | null;
   reg_no?: string | null;
   tin?: string | null;
   contact?: string | null;
@@ -312,9 +313,12 @@ export const dashboard = {
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 
+export type CustomerType = "EV" | "TNBX" | "KTS" | "SWITCH" | "RETAIL";
+
 export interface CustomerOut {
   id: string;
   name: string;
+  type: CustomerType | null;
   reg_no: string | null;
   tin: string | null;
   contact: string;
@@ -329,6 +333,7 @@ export interface CustomerOut {
 
 export interface CustomerCreate {
   name: string;
+  type?: CustomerType | null;
   reg_no?: string | null;
   tin?: string | null;
   contact: string;
@@ -345,6 +350,7 @@ export interface CustomerCreate {
 
 export interface CustomerUpdate {
   name?: string | null;
+  type?: CustomerType | null;
   reg_no?: string | null;
   tin?: string | null;
   contact?: string | null;
@@ -415,6 +421,109 @@ export const customers = {
   details: () => req<CustomerDetails>("GET", "/customers/details"),
   merchants: (customerId: string, status?: string) =>
     req<CustomerMerchantOut[]>("GET", `/customers/${customerId}/merchants`, { params: { status } }),
+};
+
+// ─── Profit Shares ────────────────────────────────────────────────────────────
+
+export interface ProfitShareUserRef {
+  id: string;
+  name: string;
+}
+
+export interface ProfitShareCustomerRef {
+  id: string;
+  name: string;
+  reg_no: string | null;
+  type: CustomerType | null;
+}
+
+export interface ProfitShareLineOut {
+  id: string;
+  source_row_number: number;
+  row_label: string;
+  merchant_count: number;
+  amount: number;
+  customer_id: string | null;
+  match_method: "Auto" | "Manual" | "None";
+  match_note: string | null;
+  linked_at: string | null;
+  customer: ProfitShareCustomerRef | null;
+  resolution: "Linked" | "Unlinked" | "Untyped";
+}
+
+export interface ProfitShareTypeSummaryOut {
+  type: CustomerType;
+  amount: number;
+  line_count: number;
+  merchant_count: number;
+}
+
+export interface ProfitShareOut {
+  id: string;
+  report_name: string | null;
+  period_year: number;
+  period_month: number;
+  status: "Draft" | "Invoiced" | "Paid";
+  source_filename: string;
+  source_file_url: string;
+  total_merchant_count: number;
+  total_amount: number;
+  workbook_total_amount: number;
+  rounding_difference: number;
+  line_count: number;
+  linked_count: number;
+  unlinked_count: number;
+  untyped_count: number;
+  classified_total: number;
+  unallocated_total: number;
+  invoice_number: string | null;
+  invoice_file_url: string | null;
+  invoice_generated_at: string | null;
+  paid_at: string | null;
+  created_at: string;
+  created_by: ProfitShareUserRef | null;
+  paid_by: ProfitShareUserRef | null;
+}
+
+export interface ProfitShareDetailOut extends ProfitShareOut {
+  type_summary: ProfitShareTypeSummaryOut[];
+  lines: ProfitShareLineOut[];
+}
+
+export interface ProfitSharePage {
+  items: ProfitShareOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface ProfitShareListParams {
+  page?: number;
+  per_page?: number;
+  status?: string;
+  year?: number;
+  month?: number;
+  query?: string;
+}
+
+export const profitShares = {
+  list: (params?: ProfitShareListParams) => req<ProfitSharePage>("GET", "/profit-shares", { params }),
+  get: (id: string) => req<ProfitShareDetailOut>("GET", `/profit-shares/${id}`),
+  upload: (file: File, periodYear: number, periodMonth: number) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("period_year", String(periodYear));
+    form.append("period_month", String(periodMonth));
+    return req<ProfitShareDetailOut>("POST", "/profit-shares/upload", { form });
+  },
+  linkLine: (profitShareId: string, lineId: string, customerId: string | null) =>
+    req<ProfitShareDetailOut>("PATCH", `/profit-shares/${profitShareId}/lines/${lineId}`, {
+      body: { customer_id: customerId },
+    }),
+  generateInvoice: (id: string) => reqBlob("POST", `/profit-shares/${id}/invoice`),
+  downloadInvoice: (id: string) => reqBlob("GET", `/profit-shares/${id}/invoice`),
+  markPaid: (id: string) => req<ProfitShareDetailOut>("POST", `/profit-shares/${id}/mark-paid`),
 };
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
@@ -1931,6 +2040,7 @@ export const api = {
   paperRolls,
   rentals,
   payouts,
+  profitShares,
   referrals,
   referralBonusBatches,
   referralBonusRules,

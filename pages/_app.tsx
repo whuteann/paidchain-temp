@@ -69,6 +69,7 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
   const dispatch = useDispatch<AppDispatch>();
   const loadingMeRef = useRef(false);
   const failedMeRef = useRef(false);
+  const syncedTokenRef = useRef<string | null>(null);
 
   const isPublic = PUBLIC_PATHS.includes(pathname);
   const isAuthed = !!token || devMode;
@@ -85,6 +86,7 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
     if (isPublic || !isAuthed || devMode) {
       loadingMeRef.current = false;
       failedMeRef.current = false;
+      syncedTokenRef.current = null;
       return;
     }
 
@@ -95,14 +97,7 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
       return;
     }
 
-    if (permissionsMatchUser(authUser, permissionsRoleId, permissionsRoleName)) {
-      loadingMeRef.current = false;
-      failedMeRef.current = false;
-      if (permissionError) dispatch(clearRolePermissionsError());
-      return;
-    }
-
-    if (authUser.permissions) {
+    if (!permissionsMatchUser(authUser, permissionsRoleId, permissionsRoleName) && authUser.permissions) {
       dispatch(setRolePermissions({
         roleId: authUser.role_id,
         roleName: authUser.role,
@@ -111,6 +106,10 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
       return;
     }
 
+    // Permissions are persisted for fast startup, but roles can be changed by an
+    // administrator or migration while a user remains signed in. Refresh the
+    // current user once per access token so navigation never stays stale.
+    if (token && syncedTokenRef.current === token) return;
     if (permissionError && failedMeRef.current) return;
     if (loadingMeRef.current) return;
 
@@ -122,6 +121,7 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
       .then((me) => {
         if (cancelled) return;
         failedMeRef.current = false;
+        syncedTokenRef.current = token;
         dispatch(updateAuthUser(meToAuthUser(me, authUser)));
       })
       .catch((err) => {
@@ -136,8 +136,9 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
 
     return () => {
       cancelled = true;
+      loadingMeRef.current = false;
     };
-  }, [authUser, devMode, dispatch, isAuthed, isPublic, permissionError, permissionsRoleId, permissionsRoleName]);
+  }, [authUser, devMode, dispatch, isAuthed, isPublic, permissionError, permissionsRoleId, permissionsRoleName, token]);
 
   useEffect(() => {
     if (isPublic || !isAuthed || devMode || !authUser || permissionError || !hasCurrentRolePermissions) {

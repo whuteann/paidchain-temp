@@ -247,7 +247,7 @@ export const DEFAULT_JOB_SLA_RULES: Record<string, SlaTransitionRule[]> = {
 
 /* ---------------- Reference data ---------------- */
 export const BANKS = ["Maybank", "CIMB", "Public Bank", "RHB", "Hong Leong", "AmBank"];
-export const CUSTOMER_TYPES = ["Corporate", "SME", "Partnership"];
+export const CUSTOMER_TYPES = ["EV", "TNBX", "KTS", "SWITCH", "RETAIL"];
 export const CUSTOMER_STATUS: Record<string, StatusMeta> = {
   "Active":    { chip: "chip-ok" },
   "Inactive":  { chip: "chip-neutral" },
@@ -287,12 +287,12 @@ export const ROLES: Record<string, RoleMeta> = {
 
 /* ---------------- Customers ---------------- */
 const _custSeed: Customer[] = [
-  { id: "CUST-001", name: "Sinar Holdings Bhd",       type: "Corporate",   regNo: "201901023456", tin: "C25884732010", contact: "Datuk Ahmad Fauzi",    phone: "+60 3-2345 6789", email: "admin@sinarholdings.com.my",    address: "Level 23, Menara Sinar, Jalan Raja Chulan, KL",    status: "Active",   onboarded: "2023-01-15" },
-  { id: "CUST-002", name: "Maju Group Sdn Bhd",       type: "Corporate",   regNo: "201701045678", tin: "C19440012560", contact: "Tan Sri Wong Kah Fai", phone: "+60 3-3456 7890", email: "ceo@majugroup.com.my",          address: "Suite 12A, Plaza Maju, Petaling Jaya",             status: "Active",   onboarded: "2023-03-08" },
-  { id: "CUST-003", name: "Primula Ventures Bhd",     type: "SME",         regNo: "202001067890", tin: "",             contact: "Rajesh Kumar",         phone: "+60 3-4567 8901", email: "rajesh@primulaventures.com",   address: "Jalan Ampang, Kuala Lumpur",                       status: "Active",   onboarded: "2023-06-20" },
-  { id: "CUST-004", name: "Rakyat Holdings Group",    type: "Partnership", regNo: "201801089012", tin: "IG84001900270", contact: "Nurul Huda bt Azman",  phone: "+60 3-5678 9012", email: "nhuda@rakyatholdings.com.my",   address: "Jalan Tun Razak, Kuala Lumpur",                    status: "Active",   onboarded: "2024-01-12" },
-  { id: "CUST-005", name: "Elara Capital Sdn Bhd",    type: "SME",         regNo: "202201001234", tin: "",             contact: "Marcus Lim",           phone: "+60 3-6789 0123", email: "marcus@elaracapital.com",       address: "Persiaran KLCC, Kuala Lumpur",                     status: "Active",   onboarded: "2024-05-30" },
-  { id: "CUST-006", name: "Bintang Enterprise Bhd",   type: "Corporate",   regNo: "201601023456", tin: "C11290544330", contact: "Siti Mariam",          phone: "+60 3-7890 1234", email: "mariam@bintangenterprise.com.my", address: "Shah Alam, Selangor",                           status: "Inactive", onboarded: "2022-11-01" },
+  { id: "CUST-001", name: "Sinar Holdings Bhd",       type: "EV",     regNo: "201901023456", tin: "C25884732010", contact: "Datuk Ahmad Fauzi",    phone: "+60 3-2345 6789", email: "admin@sinarholdings.com.my",    address: "Level 23, Menara Sinar, Jalan Raja Chulan, KL",    status: "Active",   onboarded: "2023-01-15" },
+  { id: "CUST-002", name: "Maju Group Sdn Bhd",       type: "TNBX",   regNo: "201701045678", tin: "C19440012560", contact: "Tan Sri Wong Kah Fai", phone: "+60 3-3456 7890", email: "ceo@majugroup.com.my",          address: "Suite 12A, Plaza Maju, Petaling Jaya",             status: "Active",   onboarded: "2023-03-08" },
+  { id: "CUST-003", name: "Primula Ventures Bhd",     type: "KTS",    regNo: "202001067890", tin: "",             contact: "Rajesh Kumar",         phone: "+60 3-4567 8901", email: "rajesh@primulaventures.com",   address: "Jalan Ampang, Kuala Lumpur",                       status: "Active",   onboarded: "2023-06-20" },
+  { id: "CUST-004", name: "Rakyat Holdings Group",    type: "SWITCH", regNo: "201801089012", tin: "IG84001900270", contact: "Nurul Huda bt Azman",  phone: "+60 3-5678 9012", email: "nhuda@rakyatholdings.com.my",   address: "Jalan Tun Razak, Kuala Lumpur",                    status: "Active",   onboarded: "2024-01-12" },
+  { id: "CUST-005", name: "Elara Capital Sdn Bhd",    type: "RETAIL", regNo: "202201001234", tin: "",             contact: "Marcus Lim",           phone: "+60 3-6789 0123", email: "marcus@elaracapital.com",       address: "Persiaran KLCC, Kuala Lumpur",                     status: "Active",   onboarded: "2024-05-30" },
+  { id: "CUST-006", name: "Bintang Enterprise Bhd",   type: "RETAIL", regNo: "201601023456", tin: "C11290544330", contact: "Siti Mariam",          phone: "+60 3-7890 1234", email: "mariam@bintangenterprise.com.my", address: "Shah Alam, Selangor",                           status: "Inactive", onboarded: "2022-11-01" },
 ];
 export const customers: Customer[] = _custSeed;
 

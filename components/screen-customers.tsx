@@ -1,12 +1,12 @@
 /* PaidChain — Customer listing + detail + onboarding */
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";
 import { CUSTOMER_STATUS } from "./data";
 import { CreateMerchantModal } from "./screen-merchants";
 import { CreateJobModal } from "./screen-jobs";
 import { api, ApiError } from "@/lib/api";
-import type { AddressIn, CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
+import type { AddressIn, CustomerType, CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
 
@@ -14,6 +14,8 @@ function CustomerStatus({ status }: { status: string }) {
   const m = CUSTOMER_STATUS[status] || {};
   return <Chip cls={m.chip} dot>{status}</Chip>;
 }
+
+const CUSTOMER_TYPES: CustomerType[] = ["EV", "TNBX", "KTS", "SWITCH", "RETAIL"];
 
 type MerchantJobFollowUp = {
   customer: CustomerOut;
@@ -98,7 +100,7 @@ function MerchantJobPromptModal({ merchant, onCancel, onProceed }: { merchant: M
 
 /* =================== CREATE CUSTOMER MODAL =================== */
 function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCreate: (c: CustomerOut) => void }) {
-  const [f, setF] = useState({ name: "", regNo: "", tin: "", contact: "", phone: "", email: "", ...blankAddressForm() });
+  const [f, setF] = useState({ name: "", type: "", regNo: "", tin: "", contact: "", phone: "", email: "", ...blankAddressForm() });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -109,6 +111,7 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
     try {
       const body: CustomerCreate = {
         name: f.name.trim(),
+        type: f.type ? f.type as CustomerType : null,
         reg_no: f.regNo.trim() || null, tin: f.tin.trim() || null,
         contact: f.contact.trim(), phone: f.phone.trim(),
         email: f.email.trim(),
@@ -145,6 +148,12 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
       </div>
       <Field label="TIN number">
         <input className="input" placeholder="Required for eInvoice generation" value={f.tin} onChange={(e) => set("tin", e.target.value)} />
+      </Field>
+      <Field label="Customer Type" hint="optional · set by Finance">
+        <select className="input" value={f.type} onChange={(e) => set("type", e.target.value)}>
+          <option value="">Not set</option>
+          {CUSTOMER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        </select>
       </Field>
       <Field label="Primary contact name" hint="required">
         <input className="input" placeholder="e.g. Ahmad Fauzi" value={f.contact} onChange={(e) => set("contact", e.target.value)} />
@@ -183,6 +192,7 @@ function CreateCustomerModal({ onClose, onCreate }: { onClose: () => void; onCre
 function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOut; onClose: () => void; onSave: (c: CustomerOut) => void }) {
   const [f, setF] = useState<CustomerUpdate>({
     name: customer.name,
+    type: customer.type,
     reg_no: customer.reg_no || "",
     tin: customer.tin || "",
     contact: customer.contact || "",
@@ -226,6 +236,19 @@ function EditCustomerModal({ customer, onClose, onSave }: { customer: CustomerOu
       <Field label="Status">
         <select className="input" value={f.status ?? ""} onChange={(e) => set("status", e.target.value)}>
           {Object.keys(CUSTOMER_STATUS).map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
+      <Field label="Customer Type" hint="optional · used for profit-share calculation">
+        <select
+          className="input"
+          value={f.type ?? ""}
+          onChange={(e) => setF((prev) => ({
+            ...prev,
+            type: e.target.value ? e.target.value as CustomerType : null,
+          }))}
+        >
+          <option value="">Not set</option>
+          {CUSTOMER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
         </select>
       </Field>
       <div className="field-row">
@@ -326,7 +349,6 @@ export function Customers({ nav }: { nav: NavFn }) {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
     api.customers.list({
       page,
       per_page: CUSTOMERS_PAGE_SIZE,
@@ -514,21 +536,20 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [toast, setToast] = useState<string | null>(null);
 
   
+  const loadLinkedMerchants = useCallback(() => {
+    api.customers.merchants(id)
+      .then(setLinked)
+      .catch(console.error)
+      .finally(() => setLinkedLoading(false));
+  }, [id]);
+
   useEffect(() => {
     api.customers.get(id)
       .then(setCustomer)
       .catch((e) => { if (e instanceof ApiError && e.status === 404) setNotFound(true); })
       .finally(() => setLoading(false));
     loadLinkedMerchants();
-  }, [id]);
-
-  function loadLinkedMerchants() {
-    setLinkedLoading(true);
-    api.customers.merchants(id)
-      .then(setLinked)
-      .catch(console.error)
-      .finally(() => setLinkedLoading(false));
-  }
+  }, [id, loadLinkedMerchants]);
 
   if (loading) return (
     <div>
@@ -576,6 +597,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
             {[
               ["Customer ID",      customer.id],
               ["Registered Name",  customer.name],
+              ["Customer Type",    customer.type || "—"],
               ["Registration No.", customer.reg_no || "—"],
               ["TIN No.",          customer.tin || "—"],
               ["Onboarded",        customer.onboarded_date],
