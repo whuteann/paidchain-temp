@@ -1,4 +1,4 @@
-/* PaidChain — Audit Logs */
+/* Bumipay — Audit Logs */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Pagination, Empty } from "./components";

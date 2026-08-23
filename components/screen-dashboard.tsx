@@ -1,4 +1,4 @@
-/* PaidChain — Dashboard */
+/* Bumipay — Dashboard */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, MobileListItem } from "./components";
@@ -8,9 +8,6 @@ import type { DashboardOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import type { Route } from "./shell";
 import { useCan } from "@/lib/use-permissions";
-
-const money = (n: number) =>
-  "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -25,7 +22,7 @@ function relativeTime(iso: string): string {
 function activityNav(entityType: string, entityId: string, nav: NavFn) {
   const map: Record<string, string> = {
     job: "job-detail", merchant: "merchant-detail", customer: "customer-detail",
-    terminal: "terminal-detail", rental: "rental-detail", payout: "payout-detail",
+    terminal: "terminal-detail", rental: "rental-detail",
   };
   const screen = map[entityType?.toLowerCase()];
   if (screen) nav(screen as Route, entityId);
@@ -89,7 +86,7 @@ export function Dashboard({ nav }: { nav: NavFn }) {
     <div>
       <PageHead
         title="Operations Dashboard"
-        sub={isMonth ? "Monthly overview" : "Live overview of devices, jobs and payouts"}
+        sub={isMonth ? "Monthly overview" : "Live overview of devices, jobs and inventory"}
         actions={<>
           <Btn variant={isMonth ? "primary" : "ghost"} icon="calendar" onClick={() => setIsMonth((v) => !v)}>
             {isMonth ? "Month View" : "This Month"}
@@ -107,9 +104,6 @@ export function Dashboard({ nav }: { nav: NavFn }) {
             label="Active Merchants" value={data.total_active_merchants} foot="currently active" />
           <Stat icon="jobs" color="var(--warn)" bg="var(--warn-bg)"
             label="Open Jobs" value={data.open_jobs_count} foot="across all types" />
-          <Stat icon="payouts" color="var(--indigo)" bg="var(--indigo-bg)"
-            label="Pending Payouts" value={data.pending_payouts_count}
-            foot={"Net " + money(data.pending_payouts_net)} />
           <Stat icon="terminal" color="var(--bad)" bg="var(--bad-bg)"
             label="Faulty Terminals" value={faultyCount} foot="awaiting repair" />
         </div>
@@ -193,7 +187,6 @@ export function Dashboard({ nav }: { nav: NavFn }) {
               <div className="attention-list">
                 {[
                   { perm: "Jobs.View", ico: "jobs",    c: "var(--warn)",   bg: "var(--warn-bg)",   t: data.open_jobs_count + " open jobs",              s: "Pending across all types",       go: () => nav("jobs") },
-                  { perm: "Payouts.View", ico: "payouts", c: "var(--indigo)",  bg: "var(--indigo-bg)", t: data.pending_payouts_count + " pending payouts",   s: money(data.pending_payouts_net) + " net",  go: () => nav("payouts") },
                   { perm: "Terminals.View", ico: "wrench",  c: "var(--bad)",    bg: "var(--bad-bg)",    t: faultyCount + " faulty terminals",                 s: "Awaiting repair routing",        go: () => nav("terminals") },
                 ].filter((a) => can(a.perm)).map((a, i) => (
                   <MobileListItem

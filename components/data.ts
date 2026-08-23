@@ -1,4 +1,4 @@
-/* PaidChain — mock data + status metadata */
+/* Bumipay — mock data + status metadata */
 
 export interface StatusMeta { chip: string; dot?: string; label?: string }
 export interface FinanceMeta { chip: string; pct: number }
@@ -281,7 +281,7 @@ export const ROLES: Record<string, RoleMeta> = {
   "Admin":      { chip: "chip-bad",     desc: "Full access — manage everything" },
   "Operations": { chip: "chip-info",    desc: "Jobs, terminals, escalations" },
   "Warehouse":  { chip: "chip-orange",  desc: "Inventory & device preparation" },
-  "Finance":    { chip: "chip-indigo",  desc: "Payouts, MDR, e-invoices" },
+  "Finance":    { chip: "chip-indigo",  desc: "Profit shares, MDR, e-invoices" },
   "Viewer":     { chip: "chip-neutral", desc: "Read-only across modules" },
 };
 
@@ -531,7 +531,7 @@ const userSeq = ["Admin","Operations","Operations","Warehouse","Finance","Operat
 export const users: User[] = userSeq.map((role, i) => ({
   id: "U" + (201 + i),
   name: STAFF[i % STAFF.length],
-  email: STAFF[i % STAFF.length].toLowerCase().replace(/[^a-z]/g, ".").replace(/\.+/g,".") + "@paidchain.com",
+  email: STAFF[i % STAFF.length].toLowerCase().replace(/[^a-z]/g, ".").replace(/\.+/g,".") + "@bumipay.com",
   role,
   status: i === 6 ? "Invited" : (i === 9 ? "Suspended" : "Active"),
   lastActive: i === 6 ? "—" : (i % 3 === 0 ? "2 hours ago" : i % 3 === 1 ? "Yesterday" : "3 days ago"),
@@ -662,7 +662,7 @@ export const auditLogs: AuditLog[] = [
   { id: "AL-0015", actionAt: "2026-06-06 13:22:08", user: { id: "U205", name: "Nurul Huda",    role: "Finance"    }, description: "Exported payout report for period 2026-05-16 – 31",          type: "Export", entityType: "Payout"                          },
   { id: "AL-0016", actionAt: "2026-06-06 12:05:33", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Created merchant Harbour Seafood Market under Elara Capital", type: "Create", entityType: "Merchant", entityId: "M1055"     },
   { id: "AL-0017", actionAt: "2026-06-06 11:48:20", user: { id: "U202", name: "Mei Ling Tan",  role: "Operations" }, description: "Updated terminal SNVE480437 status to Maintenance",           type: "Update", entityType: "Terminal", entityId: "SNVE480437" },
-  { id: "AL-0018", actionAt: "2026-06-06 10:31:05", user: { id: "U208", name: "Joanne Lee",    role: "Admin"      }, description: "Invited user priya.nair@paidchain.com with role Finance",    type: "Create", entityType: "User"                            },
+  { id: "AL-0018", actionAt: "2026-06-06 10:31:05", user: { id: "U208", name: "Joanne Lee",    role: "Admin"      }, description: "Invited user priya.nair@bumipay.com with role Finance",      type: "Create", entityType: "User"                            },
   { id: "AL-0019", actionAt: "2026-06-06 09:44:58", user: { id: "U203", name: "Suresh Kumar",  role: "Warehouse"  }, description: "Received paper roll stock — 100 rolls (PO-BX-2026-003)",    type: "Create", entityType: "PaperRoll"                       },
   { id: "AL-0020", actionAt: "2026-06-06 09:12:37", user: { id: "U201", name: "Arif Rahman",   role: "Admin"      }, description: "Logged in",                                                  type: "Auth"                                                  },
   { id: "AL-0021", actionAt: "2026-06-05 18:03:14", user: { id: "U206", name: "Daniel Wong",   role: "Operations" }, description: "Logged out",                                                 type: "Auth"                                                  },
@@ -683,10 +683,11 @@ export const PERMISSION_MODULES: { module: string; actions: string[] }[] = [
   { module: "Merchants",   actions: ["View", "Create", "Edit", "Delete", "Export"] },
   { module: "Terminals",   actions: ["View", "Create", "Edit", "Delete", "Export"] },
   { module: "Jobs",        actions: ["View", "Create", "Edit", "Delete", "Export", "Escalate", "Close"] },
-  { module: "Payouts",     actions: ["View", "Create", "Edit", "Export", "Process"] },
   { module: "Rentals",     actions: ["View", "Create", "Edit", "Export"] },
   { module: "SIM Cards",   actions: ["View", "Create", "Edit", "Delete"] },
   { module: "Paper Rolls", actions: ["View", "Record", "Adjust", "Export"] },
+  { module: "Profit Shares", actions: ["View", "Create", "Edit", "Export", "Process"] },
+  { module: "SQL Connectors", actions: ["Manage"] },
   { module: "Users",       actions: ["View", "Invite", "Edit", "Suspend"] },
   { module: "Settings",          actions: ["View", "Edit"] },
   { module: "Audit Logs",        actions: ["View", "Export"] },
@@ -702,7 +703,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "Merchants.View",
     "Terminals.View", "Terminals.Edit",
     "Jobs.View", "Jobs.Create", "Jobs.Edit", "Jobs.Escalate", "Jobs.Close", "Jobs.Export",
-    "Payouts.View",
     "Rentals.View", "Rentals.Create", "Rentals.Edit",
     "SIM Cards.View",
     "Paper Rolls.View",
@@ -724,7 +724,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "Merchants.View",
     "Terminals.View",
     "Jobs.View",
-    "Payouts.View", "Payouts.Create", "Payouts.Process", "Payouts.Export",
     "Rentals.View", "Rentals.Create", "Rentals.Edit",
     "Users.View",
     "Settings.View",
@@ -735,7 +734,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "Merchants.View",
     "Terminals.View",
     "Jobs.View",
-    "Payouts.View",
     "Rentals.View",
     "SIM Cards.View",
     "Paper Rolls.View",

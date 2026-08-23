@@ -4,6 +4,11 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
+        <meta name="application-name" content="Bumipay Ops System" />
+        <meta name="theme-color" content="#1f272d" />
+        <link rel="icon" href="/branding/bumipay-mark.png?v=1" type="image/png" />
+        <link rel="shortcut icon" href="/branding/bumipay-mark.png?v=1" type="image/png" />
+        <link rel="apple-touch-icon" href="/branding/bumipay-mark.png" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

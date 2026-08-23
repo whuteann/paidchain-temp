@@ -2,6 +2,7 @@ import "@/styles/globals.css";
 import { useEffect, useRef } from "react";
 import type { AppProps } from "next/app";
 import { useRouter } from "next/router";
+import Head from "next/head";
 import { Provider, useSelector, useDispatch } from "react-redux";
 import { PersistGate } from "redux-persist/integration/react";
 import { store, persistor } from "@/store";
@@ -22,7 +23,6 @@ import { CustomersProvider } from "@/components/customers-context";
 import { JobSlaProvider } from "@/components/job-sla-context";
 import { MerchantsProvider } from "@/components/merchants-context";
 import { JobsProvider } from "@/components/jobs-context";
-import { PayoutsProvider } from "@/components/payouts-context";
 import { RentalsProvider } from "@/components/rentals-context";
 import { SimCardsProvider } from "@/components/simcards-context";
 import { TerminalsProvider } from "@/components/terminals-context";
@@ -216,14 +216,18 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
 
 export default function App({ Component, pageProps, router }: AppProps) {
   return (
-    <Provider store={store}>
-      <PersistGate loading={null} persistor={persistor}>
-        <AuthGuard pathname={router.pathname}>
-          <JobSlaProvider>
-            <CustomersProvider>
-              <MerchantsProvider>
-                <JobsProvider>
-                  <PayoutsProvider>
+    <>
+      <Head>
+        <title>Bumipay Ops System</title>
+        <meta name="description" content="Bumipay operations management system" />
+      </Head>
+      <Provider store={store}>
+        <PersistGate loading={null} persistor={persistor}>
+          <AuthGuard pathname={router.pathname}>
+            <JobSlaProvider>
+              <CustomersProvider>
+                <MerchantsProvider>
+                  <JobsProvider>
                     <RentalsProvider>
                       <TerminalsProvider>
                         <SimCardsProvider>
@@ -233,13 +237,13 @@ export default function App({ Component, pageProps, router }: AppProps) {
                         </SimCardsProvider>
                       </TerminalsProvider>
                     </RentalsProvider>
-                  </PayoutsProvider>
-                </JobsProvider>
-              </MerchantsProvider>
-            </CustomersProvider>
-          </JobSlaProvider>
-        </AuthGuard>
-      </PersistGate>
-    </Provider>
+                  </JobsProvider>
+                </MerchantsProvider>
+              </CustomersProvider>
+            </JobSlaProvider>
+          </AuthGuard>
+        </PersistGate>
+      </Provider>
+    </>
   );
 }

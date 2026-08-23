@@ -1,4 +1,4 @@
-/* PaidChain — Terminal inventory + detail */
+/* Bumipay — Terminal inventory + detail */
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";

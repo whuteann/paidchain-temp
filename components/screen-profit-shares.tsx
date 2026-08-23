@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import type { CustomerOut, ProfitShareDetailOut, ProfitShareLineOut, ProfitShareOut } from "@/lib/api";
+import type {
+  ConnectorDeviceOut,
+  CustomerOut,
+  CustomerType,
+  ProfitShareDetailOut,
+  ProfitShareLineOut,
+  ProfitShareOut,
+  ProfitShareSqlAccountMapping,
+} from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
 import { Btn, Card, Chip, Empty, Field, Modal, MobileListItem, PageHead, Pagination, ResponsiveTable, SearchBox, Toolbar, useToast } from "./components";
 import { Icon } from "./icons";
@@ -11,6 +19,7 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const SQL_ITEM_TYPES: CustomerType[] = ["EV", "TNBX", "KTS", "SWITCH", "RETAIL"];
 
 const money = (value?: number | null) => `RM ${Number(value || 0).toLocaleString("en-MY", {
   minimumFractionDigits: 2,
@@ -114,7 +123,7 @@ function UploadProfitShareModal({ onClose, onUploaded }: {
           <input className="input" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(Number(event.target.value))} />
         </Field>
       </div>
-      <Field label="Sales report" hint=".xlsx · up to 10 MB">
+      <Field label="Sales report" hint=".xlsx · up to 20 MB">
         <input
           className="input"
           type="file"
@@ -305,6 +314,519 @@ function LinkCustomerModal({ reportId, line, onClose, onUpdated }: {
   );
 }
 
+function sqlPostingChip(status?: string) {
+  if (status === "POSTED") return <Chip cls="chip-ok" dot><Icon name="check" size={12} />Posted</Chip>;
+  if (status === "FAILED") return <Chip cls="chip-bad" dot>Failed</Chip>;
+  if (status === "PROCESSING") return <Chip cls="chip-info" dot>Processing</Chip>;
+  if (status === "QUEUED") return <Chip cls="chip-warn" dot>Queued</Chip>;
+  return <Chip cls="chip-neutral">Not posted</Chip>;
+}
+
+function friendlySqlFailure(errorCode?: string | null, errorMessage?: string | null) {
+  const messages: Record<string, string> = {
+    SQL_CUSTOMER_NOT_FOUND: "Customer code was not found in SQL Account.",
+    SQL_ITEM_NOT_FOUND: "Item code was not found in SQL Account. Correct it or leave it blank for a free-text line.",
+    SQL_ITEM_UOM_NOT_FOUND: "The SQL item does not have a base UOM. Correct it or leave the item code blank.",
+    SQL_TERMS_FIELD_NOT_FOUND: "This SQL Account version cannot apply the terms code.",
+    SQL_EINVOICE_EXPLICIT_NOT_VERIFIED: "The selected E-Invoice setting is not supported by this SQL Account version.",
+    SQL_EXTERNAL_REFERENCE_FIELD_NOT_FOUND: "SQL Account cannot store the Bumipay invoice reference with the selected document numbering.",
+    SQL_AUTOMATION_NOT_REGISTERED: "SQL Account Automation is not registered on the connector PC.",
+    SQL_LOGIN_FAILED: "The connector could not log in to SQL Account.",
+    SQL_DOCUMENT_SAVE_FAILED: "SQL Account could not save the Sales Invoice.",
+    SQL_DOCUMENT_CREATE_FAILED: "SQL Account could not create the Sales Invoice.",
+  };
+  const code = errorCode || "";
+  const summary = messages[code];
+  if (!summary) return errorMessage || "The connector could not post this invoice.";
+  let detail = errorMessage || "";
+  while (code && detail.startsWith(`${code}:`)) detail = detail.slice(code.length + 1).trim();
+  if (detail && ["SQL_CUSTOMER_NOT_FOUND", "SQL_ITEM_NOT_FOUND", "SQL_ITEM_UOM_NOT_FOUND"].includes(code)) {
+    return `${summary.replace(/\.$/, "")}: ${detail}`;
+  }
+  return summary;
+}
+
+function emptyItemCodes(): Record<CustomerType, string> {
+  return { EV: "", TNBX: "", KTS: "", SWITCH: "", RETAIL: "" };
+}
+
+function savedLineMode(mapping: ProfitShareSqlAccountMapping | null): "SINGLE" | "BY_TYPE" {
+  if (mapping?.line_mode) return mapping.line_mode;
+  return mapping && new Set(Object.values(mapping.item_codes).filter(Boolean)).size === 1 ? "SINGLE" : "BY_TYPE";
+}
+
+function GenerateInvoiceModal({ report, regenerate = false, onClose, onGenerated }: {
+  report: ProfitShareDetailOut;
+  regenerate?: boolean;
+  onClose: () => void;
+  onGenerated: (blob: Blob) => void | Promise<void>;
+}) {
+  const saved = report.sql_account_mapping;
+  const savedCodes = saved?.item_codes || emptyItemCodes();
+  const unresolvedCount = report.unlinked_count + report.untyped_count;
+  const initialMode = saved ? savedLineMode(saved) : unresolvedCount > 0 ? "SINGLE" : "BY_TYPE";
+  const [lineMode, setLineMode] = useState<"SINGLE" | "BY_TYPE">(initialMode);
+  const [customerCode, setCustomerCode] = useState(saved?.customer_code || "");
+  const [singleItemCode, setSingleItemCode] = useState(
+    initialMode === "SINGLE" ? Object.values(savedCodes).find(Boolean) || "" : "",
+  );
+  const [itemCodes, setItemCodes] = useState<Record<CustomerType, string>>(savedCodes);
+  const [termsCode, setTermsCode] = useState(saved?.terms_code || "");
+  const [taxCode, setTaxCode] = useState(saved?.tax_code || "");
+  const [documentNumberMode, setDocumentNumberMode] = useState<"PAIDCHAIN" | "SQL_AUTO">(saved?.document_number_mode || "PAIDCHAIN");
+  const [einvoiceMode, setEinvoiceMode] = useState<"INHERIT" | "EXPLICIT">(saved?.einvoice_mode || "INHERIT");
+  const [einvoiceSubmissionType, setEinvoiceSubmissionType] = useState(saved?.einvoice_submission_type || "");
+  const [manualTypeAmounts, setManualTypeAmounts] = useState<Record<CustomerType, string>>(
+    Object.fromEntries(SQL_ITEM_TYPES.map((type) => [
+      type,
+      Number(report.type_summary.find((entry) => entry.type === type)?.amount || 0).toFixed(2),
+    ])) as Record<CustomerType, string>,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resolvedItemCodes = lineMode === "SINGLE"
+    ? Object.fromEntries(SQL_ITEM_TYPES.map((type) => [type, singleItemCode.trim()])) as Record<CustomerType, string>
+    : Object.fromEntries(SQL_ITEM_TYPES.map((type) => [type, itemCodes[type].trim()])) as Record<CustomerType, string>;
+  const splitBlocked = lineMode === "BY_TYPE" && (unresolvedCount > 0 || report.unallocated_total !== 0);
+  const manualSplitRequired = regenerate && splitBlocked;
+  const manualAmountValues = SQL_ITEM_TYPES.map((type) => manualTypeAmounts[type]);
+  const manualAmountsValid = manualAmountValues.every((value) => {
+    const amount = Number(value);
+    return value.trim() !== "" && Number.isFinite(amount) && amount >= 0;
+  });
+  const manualTotalCents = manualAmountsValid
+    ? manualAmountValues.reduce((total, value) => total + Math.round(Number(value) * 100), 0)
+    : 0;
+  const reportTotalCents = Math.round(report.total_amount * 100);
+  const manualDifference = (manualTotalCents - reportTotalCents) / 100;
+  const manualSplitComplete = !manualSplitRequired || (manualAmountsValid && manualTotalCents === reportTotalCents);
+  const complete = Boolean(
+    customerCode.trim()
+    && (einvoiceMode === "INHERIT" || einvoiceSubmissionType.trim())
+    && (!splitBlocked || manualSplitRequired)
+    && manualSplitComplete
+  );
+
+  async function generate() {
+    if (!complete) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const mapping: ProfitShareSqlAccountMapping = {
+        customer_code: customerCode.trim(),
+        item_codes: resolvedItemCodes,
+        line_mode: lineMode,
+        terms_code: termsCode.trim() || null,
+        tax_code: taxCode.trim() || null,
+        document_number_mode: documentNumberMode,
+        einvoice_mode: einvoiceMode,
+        einvoice_submission_type: einvoiceMode === "EXPLICIT" ? einvoiceSubmissionType.trim() : null,
+      };
+      const invoice = regenerate
+        ? await api.profitShares.regenerateInvoice(
+            report.id,
+            mapping,
+            manualSplitRequired
+              ? Object.fromEntries(SQL_ITEM_TYPES.map((type) => [type, Number(manualTypeAmounts[type])])) as Record<CustomerType, number>
+              : null,
+          )
+        : await api.profitShares.generateInvoice(report.id, mapping);
+      await onGenerated(invoice);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Failed to ${regenerate ? "regenerate" : "generate"} invoice`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={regenerate ? "Regenerate Invoice" : "Generate Invoice"}
+      sub={`${report.id} · ${money(report.total_amount)}`}
+      icon="invoice"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" disabled={saving} onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="invoice" disabled={!complete || saving} onClick={generate}>
+          {saving ? "Generating…" : regenerate ? "Replace & Download" : "Generate & Download"}
+        </Btn>
+      </>}
+    >
+      {regenerate && (
+        <div style={{ padding: "10px 12px", background: "var(--warn-bg)", border: "1px solid var(--warn-line)", borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, marginBottom: 14 }}>
+          This replaces the current PDF but keeps invoice number <strong>{report.invoice_number}</strong>. You can change between one total line and separate type lines. A failed SQL job will remain paused until you review the replacement and click Retry posting.
+        </div>
+      )}
+      <div style={{ padding: "10px 12px", background: "var(--info-bg)", border: "1px solid var(--info-line)", borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, marginBottom: 14 }}>
+        {lineMode === "SINGLE"
+          ? `The complete ${money(report.total_amount)} report total will be invoiced as one line. ${unresolvedCount} unresolved row${unresolvedCount === 1 ? "" : "s"} will not block generation.`
+          : "The invoice will contain separate EV, TNBX, KTS, SWITCH and RETAIL lines."}
+      </div>
+      <div className="field-row">
+        <Field label="SQL Account customer code" hint="required">
+          <input className="input mono" value={customerCode} disabled={saving} placeholder="e.g. CIMB" onChange={(event) => setCustomerCode(event.target.value)} />
+        </Field>
+        <Field label="Invoice lines" hint="required">
+          <select className="input" value={lineMode} disabled={saving} onChange={(event) => setLineMode(event.target.value as "SINGLE" | "BY_TYPE")}>
+            <option value="SINGLE">One line for the full report total</option>
+            <option value="BY_TYPE">Separate lines by profit-share type</option>
+          </select>
+        </Field>
+      </div>
+      {lineMode === "SINGLE" ? (
+        <Field label="SQL Account item code" hint="optional - blank creates a free-text invoice line">
+          <input className="input mono" value={singleItemCode} disabled={saving} placeholder="e.g. MDRPS" onChange={(event) => setSingleItemCode(event.target.value)} />
+        </Field>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+          {SQL_ITEM_TYPES.map((type) => (
+            <Field key={type} label={`${type} item code`} hint="optional - blank creates a free-text line">
+              <input className="input mono" value={itemCodes[type]} disabled={saving} placeholder={`MDR-${type}`} onChange={(event) => setItemCodes((current) => ({ ...current, [type]: event.target.value }))} />
+            </Field>
+          ))}
+        </div>
+      )}
+      {manualSplitRequired ? (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ padding: "10px 12px", background: "var(--warn-bg)", border: "1px solid var(--warn-line)", borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, marginBottom: 12 }}>
+            This report has {report.unlinked_count} unlinked row{report.unlinked_count === 1 ? "" : "s"} and {report.untyped_count} untyped row{report.untyped_count === 1 ? "" : "s"}, so Bumipay cannot calculate the five type amounts. Enter the approved split below; it must equal {money(report.total_amount)}.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+            {SQL_ITEM_TYPES.map((type) => (
+              <Field key={type} label={`${type} amount`} hint="required">
+                <input
+                  className="input mono"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualTypeAmounts[type]}
+                  disabled={saving}
+                  onChange={(event) => setManualTypeAmounts((current) => ({ ...current, [type]: event.target.value }))}
+                />
+              </Field>
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 16, fontSize: 12.5, marginTop: 8, color: manualSplitComplete ? "var(--green-700)" : "var(--bad)" }}>
+            <span>Entered: <strong>{money(manualTotalCents / 100)}</strong></span>
+            <span>Required: <strong>{money(report.total_amount)}</strong></span>
+            {!manualSplitComplete && <span>Difference: <strong>{money(manualDifference)}</strong></span>}
+          </div>
+        </div>
+      ) : splitBlocked && (
+        <div style={{ color: "var(--bad)", fontSize: 12.5, marginTop: 10 }}>
+          Type-split invoicing requires all rows to be classified. Select “One line for the full report total” to bypass this review.
+        </div>
+      )}
+      <div className="field-row" style={{ marginTop: 12 }}>
+        <Field label="SQL terms code" hint="optional · blank inherits customer">
+          <input className="input mono" value={termsCode} disabled={saving} placeholder="e.g. 30D" onChange={(event) => setTermsCode(event.target.value)} />
+        </Field>
+        <Field label="SQL tax code" hint="optional · blank inherits SQL defaults">
+          <input className="input mono" value={taxCode} disabled={saving} placeholder="e.g. SV-0" onChange={(event) => setTaxCode(event.target.value)} />
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="SQL document number" hint="required">
+          <select className="input" value={documentNumberMode} disabled={saving} onChange={(event) => setDocumentNumberMode(event.target.value as "PAIDCHAIN" | "SQL_AUTO")}>
+            <option value="PAIDCHAIN">Use Bumipay invoice number</option>
+            <option value="SQL_AUTO">Use SQL auto-number</option>
+          </select>
+        </Field>
+        <Field label="E-Invoice submission" hint="required">
+          <select className="input" value={einvoiceMode} disabled={saving} onChange={(event) => { const mode = event.target.value as "INHERIT" | "EXPLICIT"; setEinvoiceMode(mode); if (mode === "INHERIT") setEinvoiceSubmissionType(""); }}>
+            <option value="INHERIT">Inherit SQL customer default</option>
+            <option value="EXPLICIT">Set an explicit SQL submission type</option>
+          </select>
+        </Field>
+      </div>
+      {einvoiceMode === "EXPLICIT" && (
+        <Field label="SQL E-Invoice submission type" hint="required when explicit">
+          <input className="input mono" value={einvoiceSubmissionType} disabled={saving} placeholder="Enter the installed SQL Account value" onChange={(event) => setEinvoiceSubmissionType(event.target.value)} />
+        </Field>
+      )}
+      {error && <div style={{ color: "var(--bad)", fontSize: 13, marginTop: 10 }}>{error}</div>}
+    </Modal>
+  );
+}
+
+function SqlAccountSettings({ report, canEdit, onSaved, onDirtyChange }: {
+  report: ProfitShareDetailOut;
+  canEdit: boolean;
+  onSaved: (report: ProfitShareDetailOut) => void;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
+  const saved = report.sql_account_mapping;
+  const savedCodes = saved?.item_codes || emptyItemCodes();
+  const initialItemMode = savedLineMode(saved);
+  const [customerCode, setCustomerCode] = useState(saved?.customer_code || "");
+  const [itemMode, setItemMode] = useState<"SINGLE" | "BY_TYPE">(initialItemMode);
+  const [singleItemCode, setSingleItemCode] = useState(initialItemMode === "SINGLE" ? Object.values(savedCodes)[0] || "" : "");
+  const [itemCodes, setItemCodes] = useState<Record<CustomerType, string>>(savedCodes);
+  const [termsCode, setTermsCode] = useState(saved?.terms_code || "");
+  const [taxCode, setTaxCode] = useState(saved?.tax_code || "");
+  const [documentNumberMode, setDocumentNumberMode] = useState<"PAIDCHAIN" | "SQL_AUTO">(saved?.document_number_mode || "PAIDCHAIN");
+  const [einvoiceMode, setEinvoiceMode] = useState<"INHERIT" | "EXPLICIT">(saved?.einvoice_mode || "INHERIT");
+  const [einvoiceSubmissionType, setEinvoiceSubmissionType] = useState(saved?.einvoice_submission_type || "");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const failedCorrection = report.status !== "Draft" && report.sql_posting?.status === "FAILED";
+
+  function changed() {
+    setDirty(true);
+    onDirtyChange(true);
+  }
+
+  const resolvedItemCodes = itemMode === "SINGLE"
+    ? Object.fromEntries(SQL_ITEM_TYPES.map((type) => [type, singleItemCode.trim()])) as Record<CustomerType, string>
+    : Object.fromEntries(SQL_ITEM_TYPES.map((type) => [type, itemCodes[type].trim()])) as Record<CustomerType, string>;
+  const complete = Boolean(
+    customerCode.trim()
+    && (einvoiceMode === "INHERIT" || einvoiceSubmissionType.trim())
+  );
+
+  async function save() {
+    if (!complete) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const mapping: ProfitShareSqlAccountMapping = {
+        customer_code: customerCode.trim(),
+        item_codes: resolvedItemCodes,
+        line_mode: itemMode,
+        terms_code: termsCode.trim() || null,
+        tax_code: taxCode.trim() || null,
+        document_number_mode: documentNumberMode,
+        einvoice_mode: einvoiceMode,
+        einvoice_submission_type: einvoiceMode === "EXPLICIT" ? einvoiceSubmissionType.trim() : null,
+      };
+      const updated = await api.profitShares.updateSqlAccountMapping(report.id, mapping);
+      setDirty(false);
+      onDirtyChange(false);
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to save SQL Account settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (report.status !== "Draft" && !failedCorrection) {
+    if (!saved) return null;
+    const oneItem = savedLineMode(saved) === "SINGLE";
+    return (
+      <Card
+        title="SQL Account Settings"
+        icon="settings"
+        pad
+        style={{ marginBottom: 16 }}
+        actions={<Chip cls="chip-neutral">Frozen with invoice</Chip>}
+      >
+        <dl className="kv" style={{ margin: 0 }}>
+          <dt>Customer code</dt><dd className="mono">{saved.customer_code}</dd>
+          <dt>Invoice lines</dt><dd>{oneItem ? `One total line · ${saved.item_codes.EV || "Free-text line"}` : "One line per profit-share type"}</dd>
+          {!oneItem && SQL_ITEM_TYPES.map((type) => <Fragment key={type}><dt>{type}</dt><dd className="mono">{saved.item_codes[type] || "Free-text line"}</dd></Fragment>)}
+          <dt>Terms</dt><dd className="mono">{saved.terms_code || "Inherit SQL customer"}</dd>
+          <dt>Tax</dt><dd className="mono">{saved.tax_code || "Inherit SQL defaults"}</dd>
+          <dt>SQL document number</dt><dd>{saved.document_number_mode === "PAIDCHAIN" ? "Use Bumipay invoice number" : "SQL auto-number; Bumipay number as reference"}</dd>
+          <dt>E-Invoice</dt><dd>{saved.einvoice_mode === "INHERIT" ? "Inherit SQL customer default" : saved.einvoice_submission_type}</dd>
+        </dl>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      title="SQL Account Settings"
+      icon="settings"
+      pad
+      style={{ marginBottom: 16 }}
+      actions={dirty
+        ? <Chip cls="chip-warn">Unsaved changes</Chip>
+        : failedCorrection
+          ? <Chip cls="chip-warn">Correction allowed</Chip>
+          : saved
+          ? <Chip cls="chip-ok">Configured</Chip>
+          : <Chip cls="chip-neutral">Can also enter during Generate</Chip>}
+    >
+      <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--ink-3)", marginBottom: 14 }}>
+        {failedCorrection
+          ? "The SQL posting failed, so you may correct these SQL Account values. Save the correction, then use Retry below. If the invoice line layout itself is wrong, use Regenerate Invoice above."
+          : "These values identify SQL Account master records. Saving them does not create or post an SQL invoice. They are frozen after this Bumipay invoice is generated unless its SQL posting fails."}
+      </div>
+      <div className="field-row">
+        <Field label="SQL customer code" hint="required">
+          <input className="input mono" value={customerCode} disabled={!canEdit || saving} placeholder="e.g. CIMB" onChange={(event) => { setCustomerCode(event.target.value); changed(); }} />
+        </Field>
+        <Field label="Item mapping" hint="required">
+          <select className="input" value={itemMode} disabled={!canEdit || saving || failedCorrection} onChange={(event) => { setItemMode(event.target.value as "SINGLE" | "BY_TYPE"); changed(); }}>
+            <option value="SINGLE">One service item for all lines</option>
+            <option value="BY_TYPE">Separate item for each type</option>
+          </select>
+        </Field>
+      </div>
+      {itemMode === "SINGLE" ? (
+        <Field label="SQL service item code" hint="optional - blank creates a free-text total line">
+          <input className="input mono" value={singleItemCode} disabled={!canEdit || saving} placeholder="e.g. MDRPS" onChange={(event) => { setSingleItemCode(event.target.value); changed(); }} />
+        </Field>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+          {SQL_ITEM_TYPES.map((type) => (
+            <Field key={type} label={`${type} item code`} hint="optional - blank creates a free-text line">
+              <input
+                className="input mono"
+                value={itemCodes[type]}
+                disabled={!canEdit || saving}
+                placeholder={`MDR-${type}`}
+                onChange={(event) => { setItemCodes((current) => ({ ...current, [type]: event.target.value })); changed(); }}
+              />
+            </Field>
+          ))}
+        </div>
+      )}
+      <div className="field-row">
+        <Field label="SQL terms code" hint="optional · blank inherits customer">
+          <input className="input mono" value={termsCode} disabled={!canEdit || saving} placeholder="e.g. 30D" onChange={(event) => { setTermsCode(event.target.value); changed(); }} />
+        </Field>
+        <Field label="SQL tax code" hint="optional · blank inherits SQL defaults">
+          <input className="input mono" value={taxCode} disabled={!canEdit || saving} placeholder="e.g. SV-0" onChange={(event) => { setTaxCode(event.target.value); changed(); }} />
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="SQL document number" hint="required">
+          <select className="input" value={documentNumberMode} disabled={!canEdit || saving} onChange={(event) => { setDocumentNumberMode(event.target.value as "PAIDCHAIN" | "SQL_AUTO"); changed(); }}>
+            <option value="PAIDCHAIN">Use Bumipay invoice number as SQL DocNo</option>
+            <option value="SQL_AUTO">Use SQL auto-number; store Bumipay number as reference</option>
+          </select>
+        </Field>
+        <Field label="E-Invoice submission" hint="required">
+          <select className="input" value={einvoiceMode} disabled={!canEdit || saving} onChange={(event) => { const mode = event.target.value as "INHERIT" | "EXPLICIT"; setEinvoiceMode(mode); if (mode === "INHERIT") setEinvoiceSubmissionType(""); changed(); }}>
+            <option value="INHERIT">Inherit SQL customer default</option>
+            <option value="EXPLICIT">Set an explicit SQL submission type</option>
+          </select>
+        </Field>
+      </div>
+      {einvoiceMode === "EXPLICIT" && (
+        <Field label="SQL E-Invoice submission type" hint="required when explicit">
+          <input className="input mono" value={einvoiceSubmissionType} disabled={!canEdit || saving} placeholder="Enter the installed SQL Account value" onChange={(event) => { setEinvoiceSubmissionType(event.target.value); changed(); }} />
+        </Field>
+      )}
+      {error && <div style={{ color: "var(--bad)", fontSize: 13, marginTop: 10 }}>{error}</div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+        {!canEdit && <span style={{ color: "var(--ink-3)", fontSize: 12.5, alignSelf: "center" }}>You need Profit Shares.Edit permission to configure this mapping.</span>}
+        {canEdit && (
+          <Btn variant="primary" icon="check" disabled={!complete || saving || (!dirty && Boolean(saved))} onClick={save}>
+            {saving ? "Saving..." : saved ? "Save Changes" : "Save SQL Settings"}
+          </Btn>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SqlPostingCard({
+  report,
+  connectors,
+  canPost,
+  loading,
+  mappingDirty,
+  onPost,
+  onRetry,
+}: {
+  report: ProfitShareDetailOut;
+  connectors: ConnectorDeviceOut[];
+  canPost: boolean;
+  loading: boolean;
+  mappingDirty: boolean;
+  onPost: () => void;
+  onRetry: () => void;
+}) {
+  if (report.status === "Draft") return null;
+  const job = report.sql_posting;
+  const connector = job?.connector || connectors.find((item) => item.enabled && item.status !== "Revoked") || null;
+  const online = Boolean(connector?.online);
+  const waitingOffline = job?.status === "QUEUED" && !online;
+  const action = !job
+    ? (
+      <Btn
+        variant="primary"
+        icon="receipt"
+        disabled={!canPost || !connector || loading}
+        title={!connector ? "An administrator must pair an SQL Account connector first" : undefined}
+        onClick={onPost}
+      >
+        {loading ? "Queueing..." : online ? "Post to SQL Account" : "Queue for SQL Account"}
+      </Btn>
+    )
+    : job.status === "FAILED"
+      ? <Btn variant="primary" icon="refresh" disabled={!canPost || loading || mappingDirty} onClick={onRetry}>{loading ? "Queueing..." : "Retry posting"}</Btn>
+      : null;
+
+  return (
+    <Card
+      title="SQL Account Posting"
+      icon="receipt"
+      pad
+      style={{ marginBottom: 16 }}
+      actions={sqlPostingChip(job?.status)}
+    >
+      {job?.status === "FAILED" && (
+        <div style={{ padding: "10px 12px", background: "var(--warn-bg)", border: "1px solid var(--warn-line)", borderRadius: 8, marginBottom: 14, fontSize: 12.5, lineHeight: 1.5 }}>
+          Correct the SQL Account Settings above, save the changes, then retry this posting. The Bumipay invoice remains unchanged.
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+        <dl className="kv" style={{ margin: 0, flex: "1 1 520px" }}>
+          <dt>Connector</dt><dd>{connector?.name || "No connector configured"}</dd>
+          <dt>Connector status</dt>
+          <dd>
+            {connector
+              ? <Chip cls={online ? "chip-ok" : "chip-neutral"} dot>{online ? "Online" : "Offline"}</Chip>
+              : <Chip cls="chip-warn">Setup required</Chip>}
+            {connector?.last_seen_at && <span style={{ marginLeft: 8, color: "var(--ink-3)", fontSize: 12 }}>Last seen {fmtDateTime(connector.last_seen_at)}</span>}
+          </dd>
+          <dt>SQL connection</dt><dd>{connector?.sql_status || "Unknown"}{connector?.sql_company ? ` · ${connector.sql_company}` : ""}</dd>
+          <dt>Posting state</dt>
+          <dd>
+            {!job
+              ? "Ready to queue"
+              : waitingOffline
+                ? "Waiting for the Finance SQL laptop"
+                : job.status === "QUEUED"
+                  ? "Waiting for the connector"
+                  : job.status === "PROCESSING"
+                    ? "The connector is creating the Sales Invoice"
+                    : job.status === "POSTED"
+                      ? "Sales Invoice created in SQL Account"
+                      : "Posting requires attention"}
+          </dd>
+          {job && <><dt>Job</dt><dd className="mono">{job.job_id} · {job.attempt_count} attempt{job.attempt_count === 1 ? "" : "s"}</dd></>}
+          {job?.sql_doc_no && <><dt>SQL document</dt><dd className="mono">{job.sql_doc_no}</dd></>}
+          {job?.posted_at && <><dt>Posted</dt><dd>{fmtDateTime(job.posted_at)}</dd></>}
+          {job?.status === "FAILED" && (
+            <>
+              <dt>Failure</dt>
+              <dd style={{ color: "var(--bad)" }}>
+                <div>{friendlySqlFailure(job.error_code, job.error_message)}</div>
+                {job.error_code && <div className="mono" style={{ color: "var(--ink-3)", fontSize: 11.5, marginTop: 3 }}>{job.error_code}</div>}
+              </dd>
+              <dt>Last attempt</dt><dd>{fmtDateTime(job.last_attempt_at)}</dd>
+            </>
+          )}
+        </dl>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          {action}
+          {!canPost && !job && <span style={{ color: "var(--ink-3)", fontSize: 12 }}>Profit Shares.Process permission is required.</span>}
+          {job?.status === "FAILED" && mappingDirty && <span style={{ maxWidth: 260, color: "var(--ink-3)", fontSize: 12, textAlign: "right" }}>Save the SQL Account correction before retrying.</span>}
+          {waitingOffline && <span style={{ maxWidth: 260, color: "var(--ink-3)", fontSize: 12, textAlign: "right" }}>The job is safe in Bumipay and will be picked up when the laptop reconnects.</span>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
   const can = useCan();
   const [report, setReport] = useState<ProfitShareDetailOut | null>(null);
@@ -313,8 +835,11 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [query, setQuery] = useState("");
   const [resolution, setResolution] = useState("All");
   const [linkLine, setLinkLine] = useState<ProfitShareLineOut | null>(null);
+  const [showGenerateInvoice, setShowGenerateInvoice] = useState(false);
   const [showPaidConfirm, setShowPaidConfirm] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [sqlMappingDirty, setSqlMappingDirty] = useState(false);
+  const [connectors, setConnectors] = useState<ConnectorDeviceOut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [toast, showToast] = useToast();
 
@@ -327,6 +852,27 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
       })
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshSqlState = () => {
+      Promise.all([
+        api.sqlConnectors.list(),
+        api.profitShares.getSqlPosting(id),
+      ]).then(([connectorRows, posting]) => {
+        if (cancelled) return;
+        setConnectors(connectorRows);
+        setReport((current) => current ? { ...current, sql_posting: posting } : current);
+      }).catch(() => undefined);
+    };
+    refreshSqlState();
+    const activePosting = report?.sql_posting?.status === "QUEUED" || report?.sql_posting?.status === "PROCESSING";
+    const timer = window.setInterval(refreshSqlState, activePosting ? 3000 : 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [id, report?.sql_posting?.status]);
 
   const visibleLines = useMemo(() => {
     if (!report) return [];
@@ -346,20 +892,15 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
 
   const currentReport = report;
   const unresolvedCount = report.unlinked_count + report.untyped_count;
-  const canInvoice = report.status === "Draft" && unresolvedCount === 0 && report.unallocated_total === 0;
+  const regenerationAllowed = report.status === "Invoiced"
+    && (!report.sql_posting || report.sql_posting.status === "FAILED");
 
-  async function invoice(generate: boolean) {
+  async function downloadInvoice() {
     setActionLoading(true);
     setError(null);
     try {
-      const blob = generate
-        ? await api.profitShares.generateInvoice(currentReport.id)
-        : await api.profitShares.downloadInvoice(currentReport.id);
+      const blob = await api.profitShares.downloadInvoice(currentReport.id);
       downloadBlob(blob, `profit-share-invoice-${currentReport.invoice_number?.replace("/", "-") || currentReport.id}.pdf`);
-      if (generate) {
-        setReport(await api.profitShares.get(currentReport.id));
-        showToast("Invoice generated");
-      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Invoice action failed");
     } finally {
@@ -381,6 +922,22 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
     }
   }
 
+  async function postToSql(retry = false) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const posting = retry
+        ? await api.profitShares.retrySqlPosting(currentReport.id)
+        : await api.profitShares.postToSql(currentReport.id);
+      setReport((current) => current ? { ...current, sql_posting: posting } : current);
+      showToast(retry ? "SQL posting queued again" : "Invoice queued for SQL Account");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to queue the SQL Account posting");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   return (
     <div>
       <PageHead
@@ -389,8 +946,9 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
         meta={<div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{statusChip(report.status)}{report.invoice_number && <Chip cls="chip-neutral">Invoice {report.invoice_number}</Chip>}</div>}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("profit-shares")}>Back</Btn>
-          {report.invoice_file_url && can("Profit Shares.Export") && <Btn variant="ghost" icon="download" disabled={actionLoading} onClick={() => invoice(false)}>Download Invoice</Btn>}
-          {report.status === "Draft" && can("Profit Shares.Export") && <Btn variant="primary" icon="invoice" disabled={!canInvoice || actionLoading} title={!canInvoice ? `Resolve ${unresolvedCount} lines before invoicing` : undefined} onClick={() => invoice(true)}>Generate Invoice</Btn>}
+          {report.invoice_file_url && can("Profit Shares.Export") && <Btn variant="ghost" icon="download" disabled={actionLoading} onClick={downloadInvoice}>Download Invoice</Btn>}
+          {regenerationAllowed && can("Profit Shares.Export") && <Btn variant="ghost" icon="refresh" disabled={actionLoading} onClick={() => setShowGenerateInvoice(true)}>Regenerate Invoice</Btn>}
+          {report.status === "Draft" && can("Profit Shares.Export") && <Btn variant="primary" icon="invoice" disabled={actionLoading} onClick={() => setShowGenerateInvoice(true)}>Generate Invoice</Btn>}
           {report.status === "Invoiced" && can("Profit Shares.Process") && <Btn variant="primary" icon="check" disabled={actionLoading} onClick={() => setShowPaidConfirm(true)}>Mark as Paid</Btn>}
         </>}
       />
@@ -398,7 +956,7 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
       {error && <div style={{ padding: "10px 12px", background: "var(--red-050, #fef2f2)", color: "var(--bad)", borderRadius: 8, marginBottom: 14, fontSize: 13 }}>{error}</div>}
       {report.status === "Draft" && unresolvedCount > 0 && (
         <div style={{ padding: "11px 13px", background: "var(--warn-bg)", border: "1px solid var(--warn-line)", color: "var(--ink-2)", borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
-          Resolve <strong>{report.unlinked_count} unlinked</strong> and <strong>{report.untyped_count} untyped</strong> rows before generating the invoice. Automatically matched rows can also be replaced if the match is incorrect.
+          This report has <strong>{report.unlinked_count} unlinked</strong> and <strong>{report.untyped_count} untyped</strong> rows. You may review them for a category breakdown, or generate one invoice line for the complete report total without resolving them.
         </div>
       )}
       {report.rounding_difference !== 0 && (
@@ -435,6 +993,23 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
           </dl>
         </Card>
       </div>
+
+      <SqlAccountSettings
+        report={report}
+        canEdit={can("Profit Shares.Edit")}
+        onDirtyChange={setSqlMappingDirty}
+        onSaved={(updated) => { setSqlMappingDirty(false); setReport(updated); showToast("SQL Account settings saved"); }}
+      />
+
+      <SqlPostingCard
+        report={report}
+        connectors={connectors}
+        canPost={can("Profit Shares.Process")}
+        loading={actionLoading}
+        mappingDirty={sqlMappingDirty}
+        onPost={() => postToSql(false)}
+        onRetry={() => postToSql(true)}
+      />
 
       <Card title={`Sales Report Rows (${report.line_count})`} icon="receipt">
         <Toolbar>
@@ -473,6 +1048,22 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
           />
         )}
       </Card>
+
+      {showGenerateInvoice && (
+        <GenerateInvoiceModal
+          report={report}
+          regenerate={report.status === "Invoiced"}
+          onClose={() => setShowGenerateInvoice(false)}
+          onGenerated={async (blob) => {
+            const regenerated = report.status === "Invoiced";
+            downloadBlob(blob, `profit-share-invoice-${report.id}.pdf`);
+            setReport(await api.profitShares.get(report.id));
+            setSqlMappingDirty(false);
+            setShowGenerateInvoice(false);
+            showToast(regenerated ? "Invoice regenerated - review it before retrying SQL posting" : "Invoice generated");
+          }}
+        />
+      )}
 
       {linkLine && (
         <LinkCustomerModal

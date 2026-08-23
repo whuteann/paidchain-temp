@@ -1,5 +1,5 @@
 /* ============================================================
-   PaidChain Operations Dashboard — Design Tokens & Base Styles
+   Bumipay Ops System — Design Tokens & Base Styles
    ============================================================ */
 
 :root {
@@ -121,22 +121,24 @@ button { font-family: inherit; }
   height: var(--topbar-h);
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   padding: 0 18px;
   border-bottom: 1px solid rgba(255,255,255,.06);
   flex-shrink: 0;
 }
-.sb-logo {
-  width: 30px; height: 30px; border-radius: 8px;
-  background: var(--green);
-  display: grid; place-items: center;
-  flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(88,174,72,.45);
+.sb-wordmark {
+  width: 142px;
+  height: auto;
+  object-fit: contain;
 }
-.sb-logo svg { display:block; }
-.sb-brand-name { font-weight: 600; font-size: 16px; color: #fff; letter-spacing: -.01em; white-space: nowrap; }
-.sb-brand-sub { font-size: 11px; color: #7f8b94; margin-top: -2px; white-space: nowrap; }
-.collapsed .sb-brand-text { display: none; }
+.sb-mark {
+  display: none;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+.collapsed .sb-wordmark { display: none; }
+.collapsed .sb-mark { display: block; }
 .sb-drawer-close { display: none; }
 
 .sb-scroll { flex: 1; overflow-y: auto; padding: 12px 12px 24px; }
@@ -402,7 +404,7 @@ table.tbl tbody tr.clickable:hover { background: var(--green-050); }
 /* ============================================================
    Stat cards
    ============================================================ */
-.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .stat {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 16px 18px; box-shadow: var(--sh-sm); position: relative; overflow: hidden;
@@ -748,10 +750,14 @@ button.mobile-list-item {
     padding: 0 14px 0 16px;
   }
 
-  .collapsed .sb-brand-text,
+  .collapsed .sb-wordmark,
   .collapsed .sb-item-label,
   .collapsed .sb-logout-label {
     display: block;
+  }
+
+  .collapsed .sb-mark {
+    display: none;
   }
 
   .sb-drawer-close {
