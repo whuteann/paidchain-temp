@@ -570,6 +570,7 @@ export interface ProfitShareListParams {
 export const profitShares = {
   list: (params?: ProfitShareListParams) => req<ProfitSharePage>("GET", "/profit-shares", { params }),
   get: (id: string) => req<ProfitShareDetailOut>("GET", `/profit-shares/${id}`),
+  downloadTemplate: () => reqBlob("GET", "/profit-shares/template"),
   upload: (file: File, periodYear: number, periodMonth: number) => {
     const form = new FormData();
     form.append("file", file);
@@ -1068,6 +1069,7 @@ export interface TerminalTidUpdate {
 export const terminals = {
   list: (p?: TerminalListParams) => req<TerminalPage>("GET", "/terminals", { params: p }),
   get: (serial: string) => req<TerminalOut>("GET", `/terminals/${serial}`),
+  downloadTemplate: () => reqBlob("GET", "/terminals/template"),
   simCard: (serial: string) => req<SimCardOut>("GET", `/terminals/${serial}/simcard`),
   create: (body: TerminalCreate) => req<TerminalOut>("POST", "/terminals", { body }),
   bulkCreate: (body: TerminalBulkCreate) => req<BulkCreateResult>("POST", "/terminals/bulk", { body }),
@@ -1417,6 +1419,7 @@ export interface SimCardDetails {
 export const simCards = {
   list: (p?: SimCardListParams) => req<SimCardPage>("GET", "/simcards", { params: p }),
   get: (id: string) => req<SimCardOut>("GET", `/simcards/${id}`),
+  downloadTemplate: () => reqBlob("GET", "/simcards/template"),
   create: (body: SimCardCreate) => req<SimCardOut>("POST", "/simcards", { body }),
   update: (id: string, body: SimCardUpdate) =>
     req<SimCardOut>("PATCH", `/simcards/${id}`, { body }),

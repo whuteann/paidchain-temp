@@ -10,6 +10,17 @@ import { useCan } from "@/lib/use-permissions";
 
 const TERMINAL_SETTING_CATEGORIES = ["Attended", "Unattended"] as const;
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function tidMidsSummary(tid: TerminalTidOut) {
   return tid.mids?.length ? tid.mids.map((m) => m.mid).join(", ") : "No MID";
 }
@@ -721,6 +732,7 @@ export function Terminals({
   const [total, setTotal] = useState(0);
   const [showRegister, setShowRegister] = useState(initialRegister);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [templateDownloading, setTemplateDownloading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -789,6 +801,19 @@ export function Terminals({
     setTimeout(() => setToast(null), 3200);
   }
 
+  async function downloadBulkTemplate() {
+    setTemplateDownloading(true);
+    try {
+      downloadBlob(await api.terminals.downloadTemplate(), "terminal-bulk-sample.csv");
+      setToast("Terminal bulk-upload template downloaded");
+    } catch (error) {
+      setToast(error instanceof ApiError ? error.message : "Failed to download terminal template");
+    } finally {
+      setTemplateDownloading(false);
+      setTimeout(() => setToast(null), 3200);
+    }
+  }
+
   return (
     <div>
       <PageHead
@@ -799,6 +824,7 @@ export function Terminals({
         actions={tab === "inventory" ? (
           <>
             {/* <Btn variant="ghost" icon="download">Export</Btn> */}
+            {can("Terminals.Create") && <Btn variant="ghost" sm icon="download" title="Download bulk-upload template" ariaLabel="Download terminal bulk-upload template" disabled={templateDownloading} onClick={() => void downloadBulkTemplate()}>Download Sample</Btn>}
             {can("Terminals.Create") && <Btn variant="ghost" icon="upload" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Btn>}
             {can("Terminals.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowRegister(true)}>Register Device</Btn>}
           </>
