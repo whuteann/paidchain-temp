@@ -1,5 +1,10 @@
 # Changelog Frontend
 
+## 2026-08-26 — Upload Template Downloads
+
+- Added compact, accessible template-download buttons beside Terminal Bulk Upload, SIM Card Bulk Upload, and Profit Share Upload Sales Report.
+- Added authenticated blob API calls, fixed download filenames, loading protection, and download feedback for all three templates.
+
 ## 2026-08-20 — Finance Profit Shares
 
 - Added optional customer type to create/edit customer modals and customer detail.

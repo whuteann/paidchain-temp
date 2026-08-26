@@ -17,6 +17,17 @@ function simSettingLabel(setting: SimSettingOut) {
   return `${setting.carrier} · ${setting.plan}`;
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 type SimPlanUnit = "GB" | "MB";
 
 function splitSimPlan(plan?: string): { value: string; unit: SimPlanUnit } {
@@ -496,6 +507,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
   const [details, setDetails] = useState<SimCardDetails | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [templateDownloading, setTemplateDownloading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const refreshSimCards = useCallback(() => {
@@ -542,6 +554,19 @@ export function SimCards({ nav }: { nav: NavFn }) {
     setTimeout(() => setToast(null), 3200);
   }
 
+  async function downloadBulkTemplate() {
+    setTemplateDownloading(true);
+    try {
+      downloadBlob(await api.simCards.downloadTemplate(), "simcard-bulk-sample.csv");
+      setToast("SIM-card bulk-upload template downloaded");
+    } catch (error) {
+      setToast(error instanceof ApiError ? error.message : "Failed to download SIM-card template");
+    } finally {
+      setTemplateDownloading(false);
+      setTimeout(() => setToast(null), 3200);
+    }
+  }
+
   return (
     <div>
       <PageHead
@@ -551,6 +576,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
           : "Reusable carrier and plan templates for SIM cards"}
         actions={tab === "inventory" ? <>
           {/* <Btn variant="ghost" icon="download">Export</Btn> */}
+          {can("SIM Cards.Create") && <Btn variant="ghost" sm icon="download" title="Download bulk-upload template" ariaLabel="Download SIM-card bulk-upload template" disabled={templateDownloading} onClick={() => void downloadBulkTemplate()}>Download Sample</Btn>}
           {can("SIM Cards.Create") && <Btn variant="ghost" icon="upload" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Btn>}
           {can("SIM Cards.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Add SIM Card</Btn>}
         </> : undefined}

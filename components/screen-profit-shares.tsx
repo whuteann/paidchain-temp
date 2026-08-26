@@ -147,6 +147,23 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All");
   const [showUpload, setShowUpload] = useState(false);
+  const [templateDownloading, setTemplateDownloading] = useState(false);
+  const [toast, showToast] = useToast();
+
+  async function downloadUploadTemplate() {
+    setTemplateDownloading(true);
+    try {
+      downloadBlob(
+        await api.profitShares.downloadTemplate(),
+        "sample_sales_report_production_customers_aug_2026.xlsx",
+      );
+      showToast("Sales-report upload template downloaded");
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : "Failed to download sales-report template");
+    } finally {
+      setTemplateDownloading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -169,7 +186,10 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
       <PageHead
         title="Profit Shares"
         sub="Upload sales reports, review customer matches, generate invoices and track payment"
-        actions={can("Profit Shares.Create") ? <Btn variant="primary" icon="upload" onClick={() => setShowUpload(true)}>Upload Sales Report</Btn> : undefined}
+        actions={can("Profit Shares.Create") ? <>
+          <Btn variant="ghost" sm icon="download" title="Download upload template" ariaLabel="Download sales-report upload template" disabled={templateDownloading} onClick={() => void downloadUploadTemplate()}>Download Sample</Btn>
+          <Btn variant="primary" icon="upload" onClick={() => setShowUpload(true)}>Upload Sales Report</Btn>
+        </> : undefined}
       />
       <Card>
         <Toolbar>
@@ -220,6 +240,7 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
           onUploaded={(report) => { setShowUpload(false); nav("profit-share-detail", report.id); }}
         />
       )}
+      {toast}
     </div>
   );
 }

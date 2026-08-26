@@ -40,13 +40,13 @@ export function PayoutStatus({ status }: { status: string }) {
 interface BtnProps {
   variant?: string; sm?: boolean; icon?: string; iconRight?: string;
   children?: ReactNode; onClick?: () => void; disabled?: boolean;
-  className?: string; title?: string; style?: React.CSSProperties;
+  className?: string; title?: string; ariaLabel?: string; style?: React.CSSProperties;
 }
-export function Btn({ variant = "ghost", sm, icon, iconRight, children, onClick, disabled, className = "", title, style }: BtnProps) {
+export function Btn({ variant = "ghost", sm, icon, iconRight, children, onClick, disabled, className = "", title, ariaLabel, style }: BtnProps) {
   return (
     <button
       className={"btn btn-" + variant + (sm ? " btn-sm" : "") + (!children ? " btn-icon" : "") + " " + className}
-      onClick={onClick} disabled={disabled} title={title} style={style}
+      onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel} style={style}
     >
       {icon && <Icon name={icon} size={sm ? 15 : 16} />}
       {children}
