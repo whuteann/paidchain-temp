@@ -1,9 +1,9 @@
 /* PaidChain — Payout listing + upload + detail */
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, PayoutStatus, Pagination, Empty, Chip, Modal, Field } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, PayoutStatus, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";
 import { PAYOUT_METHODS } from "./data";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
 import type { PayoutOut, PayoutTransaction, BulkCreateResult, PayoutCheck, PayoutDetails, CustomerOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -153,13 +153,8 @@ function CreatePayoutModal({ onClose, onCreate }: { onClose: () => void; onCreat
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const canNext = !!customer && !!merchant && !!periodStart && !!periodEnd;
-
-  function handleFileDrop(files: FileList | null) {
-    if (files?.[0]) setFile(files[0]);
-  }
 
   async function submit() {
     if (!file) return;
@@ -255,11 +250,11 @@ function CreatePayoutModal({ onClose, onCreate }: { onClose: () => void; onCreat
             fetchResults={(query) => customer
               ? api.merchants.list({ query, customer_id: customer.id, per_page: 8 }).then((p) => p.items)
               : Promise.resolve([])}
-            getLabel={(item) => item.name + " · " + item.mid}
+            getLabel={(item) => item.name + " · " + merchantDisplayMid(item)}
             renderOption={(item) => (
               <div className="cell-2">
                 <span className="td-strong">{item.name}</span>
-                <span className="c2-sub">{item.mid}</span>
+                <span className="c2-sub">{merchantDisplayMid(item)}</span>
               </div>
             )}
             disabled={!customer}
@@ -267,9 +262,9 @@ function CreatePayoutModal({ onClose, onCreate }: { onClose: () => void; onCreat
           />
           {merchant && (
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-              <Chip cls="chip-neutral">{merchant.bank}</Chip>
-              <Chip cls="chip-neutral">MID {merchant.mid}</Chip>
-              {merchant.finance === "Ready" ? <Chip cls="chip-ok">Finance ready</Chip> : <Chip cls="chip-warn">{merchant.finance}</Chip>}
+              <Chip cls="chip-neutral">{merchantDisplayBank(merchant)}</Chip>
+              <Chip cls="chip-neutral">MID {merchantDisplayMid(merchant)}</Chip>
+              {merchant.finance_status === "Ready" ? <Chip cls="chip-ok">Finance ready</Chip> : <Chip cls="chip-warn">{merchant.finance_status}</Chip>}
             </div>
           )}
           <div className="field-row">
@@ -288,31 +283,12 @@ function CreatePayoutModal({ onClose, onCreate }: { onClose: () => void; onCreat
         </>
       ) : (
         <Field label="Transaction file" hint="Excel or CSV">
-          <div
-            className={"dropzone" + (file ? " has" : "")}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); handleFileDrop(e.dataTransfer.files); }}
-          >
-            <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
-            <div style={{ fontWeight: 600, fontSize: 13 }}>Drop file or click to upload</div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>
-              Excel (.xlsx, .xls) or CSV · Expected columns: Amount, Payment Method, Date
-            </div>
-            <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => handleFileDrop(e.target.files)} />
-          </div>
-          {file && (
-            <div className="dz-files" style={{ marginTop: 8 }}>
-              <div className="dz-file">
-                <Icon name="fileCheck" size={16} className="dzf-ico" />
-                <span className="dzf-name">{file.name}</span>
-                <span className="dzf-size">{(file.size / 1024).toFixed(0)} KB</span>
-                <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); setFile(null); }}>
-                  <Icon name="x" size={13} />
-                </button>
-              </div>
-            </div>
-          )}
+          <SingleFileDropzone
+            file={file}
+            onFile={setFile}
+            accept=".xlsx,.xls,.csv"
+            hint="Excel (.xlsx, .xls) or CSV · Expected columns: Amount, Payment Method, Date"
+          />
           {err && <div style={{ marginTop: 10, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
         </Field>
       )}
@@ -327,11 +303,6 @@ function UploadTransactionsModal({ onClose, onProcess }: { onClose: () => void; 
   const [periodEnd, setPeriodEnd] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleFileDrop(files: FileList | null) {
-    if (files?.[0]) setFile(files[0]);
-  }
 
   async function process() {
     if (!file) return;
@@ -367,31 +338,12 @@ function UploadTransactionsModal({ onClose, onProcess }: { onClose: () => void; 
         </Field>
       </div>
       <Field label="Transaction file" hint="Excel or CSV">
-        <div
-          className={"dropzone" + (file ? " has" : "")}
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => { e.preventDefault(); handleFileDrop(e.dataTransfer.files); }}
-        >
-          <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
-          <div style={{ fontWeight: 600, fontSize: 13 }}>Drop file or click to upload</div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>
-            Excel (.xlsx, .xls) or CSV · Expected columns: Merchant Name, Amount, Payment Method
-          </div>
-          <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => handleFileDrop(e.target.files)} />
-        </div>
-        {file && (
-          <div className="dz-files" style={{ marginTop: 8 }}>
-            <div className="dz-file">
-              <Icon name="fileCheck" size={16} className="dzf-ico" />
-              <span className="dzf-name">{file.name}</span>
-              <span className="dzf-size">{(file.size / 1024).toFixed(0)} KB</span>
-              <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); setFile(null); }}>
-                <Icon name="x" size={13} />
-              </button>
-            </div>
-          </div>
-        )}
+        <SingleFileDropzone
+          file={file}
+          onFile={setFile}
+          accept=".xlsx,.xls,.csv"
+          hint="Excel (.xlsx, .xls) or CSV · Expected columns: Merchant Name, Amount, Payment Method"
+        />
         {err && <div style={{ marginTop: 10, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
       </Field>
     </Modal>
@@ -587,7 +539,6 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showMarkPaid, setShowMarkPaid] = useState(false);
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const proofInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([api.payouts.get(id), api.payouts.transactions(id)])
@@ -660,29 +611,12 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
             <p style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 14 }}>
               Upload a bank transfer receipt or payment confirmation document to mark this payout as paid.
             </p>
-            <div
-              className={"dropzone" + (proofFile ? " has" : "")}
-              onClick={() => proofInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setProofFile(f); }}
-            >
-              <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
-              <div style={{ fontWeight: 600, fontSize: 13 }}>Drop file or click to upload</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>PDF, JPG or PNG · bank receipt or transfer confirmation</div>
-              <input ref={proofInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setProofFile(f); }} />
-            </div>
-            {proofFile && (
-              <div className="dz-files" style={{ marginTop: 8 }}>
-                <div className="dz-file">
-                  <Icon name="fileCheck" size={16} className="dzf-ico" />
-                  <span className="dzf-name">{proofFile.name}</span>
-                  <span className="dzf-size">{(proofFile.size / 1024).toFixed(0)} KB</span>
-                  <button className="modal-close" style={{ width: 24, height: 24 }} onClick={() => setProofFile(null)}>
-                    <Icon name="x" size={13} />
-                  </button>
-                </div>
-              </div>
-            )}
+            <SingleFileDropzone
+              file={proofFile}
+              onFile={setProofFile}
+              accept=".pdf,.jpg,.jpeg,.png"
+              hint="PDF, JPG or PNG · bank receipt or transfer confirmation"
+            />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
               <Btn variant="ghost" onClick={() => { setShowMarkPaid(false); setProofFile(null); }}>Cancel</Btn>
               <Btn variant="primary" icon="check" disabled={!proofFile || saving} onClick={handleMarkPaid}>

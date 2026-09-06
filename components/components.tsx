@@ -156,7 +156,36 @@ export function Stepper({ stages, current, complete = false }: { stages: string[
   );
 }
 
-/* ---------- Dropzone ---------- */
+/* ---------- shared drag-and-drop + clipboard-paste for file inputs ----------
+ * Every file upload in this system should support drag-and-drop and pasting
+ * a file (e.g. a copied screenshot) from the clipboard, in addition to the
+ * normal click-to-browse <input type="file">. Wire a container's
+ * onDragOver/onDrop to the returned handlers; the paste listener is global
+ * (window-scoped) for as long as the component using this hook is mounted,
+ * and only fires for actual pasted files (plain text pastes elsewhere on the
+ * page are left alone since clipboardData.files is empty for those). */
+export function useFileDropPaste(onFiles: (files: FileList) => void) {
+  const onFilesRef = useRef(onFiles);
+  onFilesRef.current = onFiles;
+
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const pastedFiles = e.clipboardData?.files;
+      if (!pastedFiles || pastedFiles.length === 0) return;
+      e.preventDefault();
+      onFilesRef.current(pastedFiles);
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
+  return {
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); onFiles(e.dataTransfer.files); },
+  };
+}
+
+/* ---------- Dropzone (multi-file) ---------- */
 export interface DropzoneFile {
   file: File;
   name: string;
@@ -173,16 +202,17 @@ export function Dropzone({ files, setFiles, hint }: { files: DropzoneFile[]; set
     }));
     setFiles((prev) => [...prev, ...next]);
   };
+  const dropHandlers = useFileDropPaste(add);
+
   return (
     <div>
       <div
         className={"dropzone" + (files.length ? " has" : "")}
         onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); add(e.dataTransfer.files); }}
+        {...dropHandlers}
       >
         <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
-        <div style={{ fontWeight: 600, fontSize: 13 }}>Drop files or click to upload</div>
+        <div style={{ fontWeight: 600, fontSize: 13 }}>Drop files, click to upload, or paste from clipboard</div>
         <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{hint || "JPG, PNG or PDF · up to 10 MB"}</div>
         <input ref={inputRef} type="file" multiple hidden onChange={(e) => e.target.files && add(e.target.files)} />
       </div>
@@ -198,6 +228,51 @@ export function Dropzone({ files, setFiles, hint }: { files: DropzoneFile[]; set
               </button>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- SingleFileDropzone ----------
+ * Same drag/drop/paste/click behavior as Dropzone, for the (more common)
+ * single-file case: bulk-upload CSV/XLSX pickers, proof-of-payment uploads,
+ * attachments, etc. Pass showSelected={false} when the caller already
+ * renders its own "selected file" summary (e.g. with extra derived info
+ * like a parsed row count) to avoid showing the filename twice. */
+export function SingleFileDropzone({ file, onFile, accept, hint, placeholder, showSelected = true }: {
+  file: File | null;
+  onFile: (file: File | null) => void;
+  accept?: string;
+  hint?: string;
+  placeholder?: string;
+  showSelected?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropHandlers = useFileDropPaste((list) => { if (list[0]) onFile(list[0]); });
+
+  return (
+    <div>
+      <div
+        className={"dropzone" + (file ? " has" : "")}
+        onClick={() => inputRef.current?.click()}
+        {...dropHandlers}
+      >
+        <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
+        <div style={{ fontWeight: 600, fontSize: 13 }}>{placeholder || "Drop a file, click to upload, or paste from clipboard"}</div>
+        {hint && <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{hint}</div>}
+        <input ref={inputRef} type="file" accept={accept} hidden onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+      </div>
+      {showSelected && file && (
+        <div className="dz-files" style={{ marginTop: 8 }}>
+          <div className="dz-file">
+            <Icon name="fileCheck" size={16} className="dzf-ico" />
+            <span className="dzf-name">{file.name}</span>
+            <span className="dzf-size">{(file.size / 1024).toFixed(0)} KB</span>
+            <button className="modal-close" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); onFile(null); }}>
+              <Icon name="x" size={13} />
+            </button>
+          </div>
         </div>
       )}
     </div>

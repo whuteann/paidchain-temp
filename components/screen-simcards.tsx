@@ -1,7 +1,7 @@
 /* PaidChain — SIM card inventory listing + detail */
 import { useState, useEffect, useCallback } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";
 import { SIM_DATA_ALLOWANCES, SIM_STATUS } from "./data";
 import { NavFn } from "./shell";
 import { api, ApiError } from "@/lib/api";
@@ -79,7 +79,7 @@ async function validateSimCsv(file: File): Promise<string | null> {
   for (let index = headerLineIndex + 1; index < lines.length; index += 1) {
     if (!lines[index].trim()) continue;
     const iccid = (parseCsvLine(lines[index])[iccidIndex] ?? "").trim();
-    if (iccid.length < 22 || iccid.length > 24) {
+    if (iccid.length < 18 || iccid.length > 20) {
       invalidRows.push(`${index + 1} (${iccid ? `${iccid.length} chars` : "missing"})`);
     }
   }
@@ -87,7 +87,7 @@ async function validateSimCsv(file: File): Promise<string | null> {
   if (invalidRows.length === 0) return null;
   const shownRows = invalidRows.slice(0, 8).join(", ");
   const remaining = invalidRows.length > 8 ? `, plus ${invalidRows.length - 8} more` : "";
-  return `Every ICCID must be 22-24 characters. Invalid CSV rows: ${shownRows}${remaining}.`;
+  return `Every ICCID must be 18-20 characters. Invalid CSV rows: ${shownRows}${remaining}.`;
 }
 
 /* =================== CREATE MODAL =================== */
@@ -109,7 +109,7 @@ function CreateSimCardModal({ onClose, onCreate }: {
   }, []);
 
   const setting = settings.find((s) => s.id === form.sim_setting_id);
-  const valid = form.iccid.trim().length >= 10 && !!form.sim_setting_id;
+  const valid = form.iccid.trim().length >= 18 && form.iccid.trim().length <= 20 && !!form.sim_setting_id;
 
   async function submit() {
     if (!valid) return;
@@ -141,7 +141,7 @@ function CreateSimCardModal({ onClose, onCreate }: {
         </Btn>
       </>}
     >
-      <Field label="ICCID" hint="required · min 19 digits">
+      <Field label="ICCID" hint="required · 18-20 digits">
         <input className="input" placeholder="e.g. 89601100001234567890"
           value={form.iccid} onChange={(e) => set("iccid", e.target.value)} />
       </Field>
@@ -250,15 +250,15 @@ function SimBulkUploadModal({ onClose, onComplete }: {
         </div>
       )}
       <Field label="SIM card file" hint="required">
-        <input
-          className="input"
-          type="file"
+        <SingleFileDropzone
+          file={file}
+          onFile={(f) => { setFile(f); setErr(null); }}
           accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={(e) => { setFile(e.target.files?.[0] ?? null); setErr(null); }}
+          showSelected={false}
         />
       </Field>
       <div style={{ padding: "10px 14px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, fontSize: 12.5, color: "var(--ink-2)" }}>
-        Only the iccid column is required, and every ICCID must be 22-24 characters. Optional columns are msisdn and data_allowance. Carrier and plan come from the selected SIM setting.
+        Only the iccid column is required, and every ICCID must be 18-20 characters. Optional columns are msisdn and data_allowance. Carrier and plan come from the selected SIM setting.
       </div>
       {file && (
         <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -885,7 +885,6 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
               {[
                 ["Merchant", connectedMerchant?.name],
                 ["Merchant ID", connectedMerchant?.id],
-                ["MID", connectedMerchant?.mid],
                 ["Customer", connectedCustomer?.name],
                 ["Customer ID", connectedCustomer?.id],
               ].filter((row): row is [string, string] => Boolean(row[1])).map(([l, v]) => (

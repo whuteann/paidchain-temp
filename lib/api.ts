@@ -189,14 +189,11 @@ export interface CustomerRef {
 export interface MerchantRef {
   id: string;
   name: string;
-  mid?: string | null;
-  bank_id?: string | null;
   type?: string | null;
   status?: string | null;
   contact?: string | null;
   phone?: string | null;
   email?: string | null;
-  bank?: string | null;
   mcc_code?: string | null;
   customer_id?: string | null;
   customer?: CustomerRef | null;
@@ -387,29 +384,8 @@ export interface CustomerDetails {
   linked_merchants: number;
 }
 
-export interface CustomerMerchantOut {
-  id: string;
-  customer_id: string;
-  customer_name: string;
-  name: string;
-  type: string;
-  mid: string;
-  bank_id?: string | null;
-  bank: string;
-  status: string;
-  finance_status: string;
-  contact: string;
-  phone: string;
-  email: string;
-  address: string;
-  onboarded_date: string;
-  mdr_plan: string;
-  bank_account_name: string;
-  bank_account_number: string;
-  bank_account_type: string;
-  terminal_count: number;
-  open_jobs_count: number;
-}
+/** The /customers/{id}/merchants endpoint returns the same shape as GET /merchants — see MerchantOut. */
+export type CustomerMerchantOut = MerchantOut;
 
 export const customers = {
   list: (p?: CustomerListParams) => req<CustomerPage>("GET", "/customers", { params: p }),
@@ -528,51 +504,158 @@ export const profitShares = {
 };
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
+//
+// Merchant -> MID model: a merchant has zero or more MIDs (MerchantMidOut), each
+// with its own bank, MID/TID value and MDR rate, plus a list of selected
+// Acceptance items (MerchantMidAcceptanceOut). An acceptance item either shares
+// its parent MID's TID/MID pair, or carries its own when uses_own_tid_mid=true.
+// See paidchain-backend/docs/merchant-mid-rework-plan.md.
+
+export interface MerchantMidAcceptanceOut {
+  id: string;
+  merchant_mid_id: string;
+  acceptance_setting_id: string;
+  acceptance_name: string;
+  requires_tid_mid: boolean;
+  uses_own_tid_mid: boolean;
+  tid_value: string | null;
+  mid_value: string | null;
+  mdr_rate_id: string | null;
+  mdr_rate: MdrOut | null;
+  terminal_serial: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MerchantMidOut {
+  id: string;
+  merchant_id: string;
+  bank_id: string;
+  bank: string;
+  mid_value: string;
+  tid_value: string;
+  mdr_rate_id: string | null;
+  mdr_rate: MdrOut | null;
+  status: string;
+  terminal_serial: string | null;
+  created_at: string;
+  updated_at: string;
+  acceptances: MerchantMidAcceptanceOut[];
+}
+
+export interface MerchantMidAcceptanceCreate {
+  acceptance_setting_id: string;
+  uses_own_tid_mid?: boolean;
+  tid_value?: string | null;
+  mid_value?: string | null;
+  mdr_rate_id?: string | null;
+}
+
+export interface MerchantMidAcceptanceUpdate {
+  uses_own_tid_mid?: boolean;
+  tid_value?: string | null;
+  mid_value?: string | null;
+  mdr_rate_id?: string | null;
+  status?: string | null;
+  reason?: string | null;
+}
+
+export interface MerchantMidCreate {
+  bank_id?: string | null;
+  bank?: string | null;
+  mid_value: string;
+  tid_value: string;
+  mdr_rate_id?: string | null;
+  acceptances?: MerchantMidAcceptanceCreate[];
+}
+
+export interface MerchantMidUpdate {
+  bank_id?: string | null;
+  bank?: string | null;
+  mid_value?: string | null;
+  tid_value?: string | null;
+  mdr_rate_id?: string | null;
+  status?: string | null;
+  reason?: string | null;
+}
+
+export interface MerchantMidHistoryOut {
+  id: string;
+  merchant_mid_id: string;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by_user_id: string | null;
+  changed_at: string;
+  reason: string | null;
+}
+
+export interface MerchantMidAcceptanceHistoryOut {
+  id: string;
+  merchant_mid_acceptance_id: string;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by_user_id: string | null;
+  changed_at: string;
+  reason: string | null;
+}
+
+/** One assignable entry in a merchant's compiled TID pool (see merchants.availableTids) —
+ * either a MID's own pair (source="mid") or an acceptance item using its own pair
+ * (source="acceptance"). Also doubles as "what's mounted on this terminal" on TerminalOut.mids. */
+export interface AvailableTidOut {
+  source: "mid" | "acceptance";
+  source_id: string;
+  tid_value: string;
+  mid_value: string | null;
+  mdr_rate_id: string | null;
+  bank_id: string;
+  bank: string;
+  acceptance_name: string | null;
+}
 
 export interface MerchantOut {
   id: string;
+  customer_id: string;
+  customer_name: string;
   name: string;
   type: string;
-  mid: string;
-  bank_id?: string | null;
-  mcc_code?: string | null;
-  bank: string;
+  mcc_code: string | null;
   status: string;
-  finance: string;
-  terminals: number;
-  terminal_count?: number;
-  open_jobs: number;
+  finance_status: string;
   contact: string;
   phone: string;
   email: string;
-  address: string;
+  address: string | null;
   addresses?: AddressOut[];
-  onboarded: string;
+  onboarded_date: string;
   bank_account_name: string;
   bank_account_number: string;
   bank_account_type: string;
-  customer_id: string;
-  customer_name: string;
-  secondary_mid?: string | null;
-  mids?: MerchantMIDOut[] | null;
-  tids?: TerminalTidOut[] | null;
+  bank_code?: string | null;
+  terminal_count: number;
+  open_jobs_count: number;
   commercial_profile?: MerchantCommercialProfileOut | null;
+  mids: MerchantMidOut[];
+  terminals?: TerminalOut[];
 }
 
-export interface MerchantMIDOut {
-  id: string;
-  mid: string;
-  bank: string;
-  status: string;
-  is_primary: boolean;
+/** The merchant's first MID, if any — a reasonable "primary" for display. */
+export function merchantPrimaryMid(m: MerchantOut): MerchantMidOut | null {
+  return m.mids?.[0] ?? null;
 }
 
-export interface MerchantMIDIn {
-  mid: string;
-  bank: string;
-  status: string;
-  is_primary?: boolean | null;
-  remarks?: string | null;
+/** Display-only MID value for list/table cells that only have room for one. */
+export function merchantDisplayMid(m: MerchantOut): string {
+  return merchantPrimaryMid(m)?.mid_value ?? "—";
+}
+
+/** Display-only bank name(s) — a merchant can span multiple banks via its MIDs. */
+export function merchantDisplayBank(m: MerchantOut): string {
+  const names = Array.from(new Set((m.mids ?? []).map((mid) => mid.bank).filter(Boolean)));
+  return names.length ? names.join(", ") : "—";
 }
 
 export interface MerchantCommercialProfileIn {
@@ -582,18 +665,11 @@ export interface MerchantCommercialProfileIn {
   effective_date?: string | null;
 }
 
-export interface TerminalTidMidIn {
-  mid: string;
-  mdr_rate_id?: string | null;
-}
-
 export interface MerchantCreate {
   customer_id: string;
   name: string;
   type: string;
-  bank_id?: string | null;
   mcc_code?: string | null;
-  bank: string;
   contact: string;
   phone: string;
   email: string;
@@ -609,15 +685,12 @@ export interface MerchantCreate {
   bank_account_type: string;
   bank_code?: string | null;
   commercial_profile?: MerchantCommercialProfileIn | null;
-  tids?: TerminalTidCreate[];
 }
 
 export interface MerchantUpdate {
   name?: string | null;
   type?: string | null;
-  bank_id?: string | null;
   mcc_code?: string | null;
-  bank?: string | null;
   contact?: string | null;
   phone?: string | null;
   email?: string | null;
@@ -631,11 +704,8 @@ export interface MerchantUpdate {
   bank_account_name?: string | null;
   bank_account_number?: string | null;
   bank_account_type?: string | null;
-  mid?: string | null;
-  secondary_mid?: string | null;
   status?: string | null;
   finance_status?: string | null;
-  tids?: TerminalTidCreate[];
 }
 
 export interface MerchantListParams {
@@ -724,11 +794,73 @@ export const merchants = {
     req<MerchantJobOut[]>("GET", `/merchants/${merchantId}/jobs`, { params: { status } }),
   updateCommercial: (merchantId: string, body: MerchantCommercialProfileIn) =>
     req<MerchantCommercialProfileOut>("PATCH", `/merchants/${merchantId}/commercial`, { body }),
-  listTids: (merchantId: string) => req<TerminalTidOut[]>("GET", `/merchants/${merchantId}/tids`),
-  createTid: (merchantId: string, body: TerminalTidCreate) =>
-    req<TerminalTidOut>("POST", `/merchants/${merchantId}/tids`, { body }),
-  updateTid: (merchantId: string, tidId: string, body: TerminalTidUpdate) =>
-    req<TerminalTidOut>("PATCH", `/merchants/${merchantId}/tids/${tidId}`, { body }),
+
+  // MID / Acceptance management
+  listMids: (merchantId: string) => req<MerchantMidOut[]>("GET", `/merchants/${merchantId}/mids`),
+  createMid: (merchantId: string, body: MerchantMidCreate) =>
+    req<MerchantMidOut>("POST", `/merchants/${merchantId}/mids`, { body }),
+  updateMid: (merchantId: string, midId: string, body: MerchantMidUpdate) =>
+    req<MerchantMidOut>("PATCH", `/merchants/${merchantId}/mids/${midId}`, { body }),
+  deactivateMid: (merchantId: string, midId: string) =>
+    req<MerchantMidOut>("DELETE", `/merchants/${merchantId}/mids/${midId}`),
+  reactivateMid: (merchantId: string, midId: string) =>
+    req<MerchantMidOut>("POST", `/merchants/${merchantId}/mids/${midId}/reactivate`),
+  midHistory: (merchantId: string, midId: string) =>
+    req<MerchantMidHistoryOut[]>("GET", `/merchants/${merchantId}/mids/${midId}/history`),
+  availableTids: (merchantId: string) =>
+    req<AvailableTidOut[]>("GET", `/merchants/${merchantId}/available-tids`),
+  addAcceptance: (merchantId: string, midId: string, body: MerchantMidAcceptanceCreate) =>
+    req<MerchantMidAcceptanceOut>("POST", `/merchants/${merchantId}/mids/${midId}/acceptances`, { body }),
+  updateAcceptance: (merchantId: string, midId: string, acceptanceId: string, body: MerchantMidAcceptanceUpdate) =>
+    req<MerchantMidAcceptanceOut>("PATCH", `/merchants/${merchantId}/mids/${midId}/acceptances/${acceptanceId}`, { body }),
+  deactivateAcceptance: (merchantId: string, midId: string, acceptanceId: string) =>
+    req<MerchantMidAcceptanceOut>("DELETE", `/merchants/${merchantId}/mids/${midId}/acceptances/${acceptanceId}`),
+  reactivateAcceptance: (merchantId: string, midId: string, acceptanceId: string) =>
+    req<MerchantMidAcceptanceOut>("POST", `/merchants/${merchantId}/mids/${midId}/acceptances/${acceptanceId}/reactivate`),
+  acceptanceHistory: (merchantId: string, midId: string, acceptanceId: string) =>
+    req<MerchantMidAcceptanceHistoryOut[]>("GET", `/merchants/${merchantId}/mids/${midId}/acceptances/${acceptanceId}/history`),
+};
+
+// Mount a MID's or acceptance item's TID onto a physical terminal (standalone, outside the Job flow).
+export const merchantMidsApi = {
+  mountOnTerminal: (midId: string, terminal_serial: string) =>
+    req<MerchantMidOut>("POST", `/merchant-mids/${midId}/terminal`, { body: { terminal_serial } }),
+};
+export const merchantMidAcceptancesApi = {
+  mountOnTerminal: (acceptanceId: string, terminal_serial: string) =>
+    req<MerchantMidAcceptanceOut>("POST", `/merchant-mid-acceptances/${acceptanceId}/terminal`, { body: { terminal_serial } }),
+};
+
+// ─── Acceptance Settings (admin catalog) ───────────────────────────────────────
+
+export interface AcceptanceSettingOut {
+  id: string;
+  name: string;
+  requires_tid_mid: boolean;
+  default_compulsory: boolean;
+  active: boolean;
+  created_at: string;
+}
+
+export interface AcceptanceSettingCreate {
+  name: string;
+  requires_tid_mid?: boolean;
+  default_compulsory?: boolean;
+}
+
+export interface AcceptanceSettingUpdate {
+  name?: string;
+  requires_tid_mid?: boolean;
+  default_compulsory?: boolean;
+  active?: boolean;
+}
+
+export const acceptanceSettings = {
+  list: () => req<AcceptanceSettingOut[]>("GET", "/settings/acceptance"),
+  create: (body: AcceptanceSettingCreate) => req<AcceptanceSettingOut>("POST", "/settings/acceptance", { body }),
+  update: (id: string, body: AcceptanceSettingUpdate) =>
+    req<AcceptanceSettingOut>("PATCH", `/settings/acceptance/${id}`, { body }),
+  remove: (id: string) => req<AcceptanceSettingOut>("DELETE", `/settings/acceptance/${id}`),
 };
 
 // ─── Banks ───────────────────────────────────────────────────────────────────
@@ -838,7 +970,8 @@ export interface TerminalOut {
   sim: string;
   condition_note: string;
   term_setting_id: string;
-  tids?: TerminalTidOut[];
+  /** MIDs/acceptance items currently mounted on this terminal. */
+  mids?: AvailableTidOut[];
   sim_card?: SimCardRef | null;
   /** @deprecated Legacy frontend alias; the API returns sim_card. */
   simcard?: SimCardRef | null;
@@ -851,26 +984,24 @@ export function terminalSerial(t: TerminalOut): string {
   return t.serial_no || t.serial || "";
 }
 
+// A terminal's TID/MID is no longer set at registration — it's registered bare (In
+// Stock, no merchant yet) and only gets a TID/MID once a MerchantMid/Acceptance is
+// mounted on it (Installation Job, or the standalone mount endpoint below).
 export interface TerminalCreate {
   serial_no: string;
-  brand: string;
-  model: string;
-  location: string;
-  rental_rate: number;
-  rental_plan: string;
-  sim: string;
-  condition_note: string;
   term_setting_id: string;
+  initial_location?: string;
+  sim_type?: string | null;
+  condition_note?: string | null;
 }
 
 export interface TerminalUpdate {
   status?: string;
-  tid?: string | null;
   merchant_id?: string | null;
   location?: string;
   rental_rate?: number;
   rental_plan?: string;
-  sim?: string;
+  sim_type?: string;
   condition_note?: string;
 }
 
@@ -897,89 +1028,21 @@ export interface SimCardLinkBody {
 
 export interface TerminalMerchantAssign {
   merchant_id: string;
-  terminal_tid_id: string;
+  /** At most one of these — which MID/acceptance TID to mount while assigning. */
+  merchant_mid_id?: string | null;
+  merchant_mid_acceptance_id?: string | null;
 }
 
 export interface TerminalBulkItem {
   serial_no: string;
-  tid?: string | null;
 }
 
 export interface TerminalBulkCreate {
   term_setting_id: string;
   serial_numbers?: string[] | null;
   terminals?: TerminalBulkItem[] | null;
-  tids?: string[] | null;
   initial_location?: string;
   sim_type?: string | null;
-}
-
-export interface TerminalTidOut {
-  id: string;
-  terminal_serial: string | null;
-  tid: string;
-  bank_id?: string | null;
-  bank: string;
-  merchant_id: string | null;
-  status?: string | null;
-  created_at?: string;
-  mids?: TerminalTidMidOut[];
-  sim_card?: SimCardRef | null;
-  simcard?: SimCardRef | null;
-}
-
-export interface TerminalTidMidOut {
-  id: string;
-  terminal_tid_id: string;
-  mid: string;
-  mdr_rate_id: string | null;
-  mdr_rate: MdrOut | null;
-  status?: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface TerminalTidMidCreate {
-  mid: string;
-  mdr_rate_id?: string | null;
-}
-
-export interface TerminalTidMidUpdate {
-  mid?: string | null;
-  mdr_rate_id?: string | null;
-  status?: string | null;
-  reason?: string | null;
-}
-
-export interface TerminalTidMidHistoryOut {
-  id: string;
-  terminal_tid_mid_id: string;
-  old_mid: string | null;
-  new_mid: string | null;
-  changed_by_user_id: string | null;
-  changed_at: string;
-  reason: string | null;
-}
-
-export interface TerminalTidAssign {
-  terminal_serial: string;
-}
-
-export interface TerminalTidCreate {
-  tid: string;
-  bank_id?: string | null;
-  bank?: string | null;
-  merchant_id?: string | null;
-  mid?: string | null;
-  mdr_rate_id?: string | null;
-  mids?: TerminalTidMidIn[];
-}
-
-export interface TerminalTidUpdate {
-  tid?: string | null;
-  bank_id?: string | null;
-  bank?: string | null;
-  merchant_id?: string | null;
 }
 
 export const terminals = {
@@ -996,31 +1059,6 @@ export const terminals = {
   activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
   linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
   unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
-  createTid: (serial: string, body: TerminalTidCreate) =>
-    req<TerminalTidOut>("POST", `/terminals/${serial}/tids`, { body }),
-  listTids: (serial: string) => req<TerminalTidOut[]>("GET", `/terminals/${serial}/tids`),
-  assignTid: (tidId: string, body: TerminalTidAssign) =>
-    req<TerminalTidOut>("POST", `/terminal-tids/${tidId}/terminal`, { body }),
-  updateTid: (tidId: string, body: TerminalTidUpdate) =>
-    req<TerminalTidOut>("PATCH", `/terminal-tids/${tidId}`, { body }),
-  deleteTid: (tidId: string) =>
-    req<TerminalTidOut>("DELETE", `/terminal-tids/${tidId}`),
-  reactivateTid: (tidId: string) =>
-    req<TerminalTidOut>("POST", `/terminal-tids/${tidId}/reactivate`),
-  tidMidHistory: (tidId: string) =>
-    req<TerminalTidMidHistoryOut[]>("GET", `/terminal-tids/${tidId}/mid-history`),
-  listTidMids: (tidId: string) =>
-    req<TerminalTidMidOut[]>("GET", `/terminal-tids/${tidId}/mids`),
-  createTidMid: (tidId: string, body: TerminalTidMidCreate) =>
-    req<TerminalTidMidOut>("POST", `/terminal-tids/${tidId}/mids`, { body }),
-  updateTidMid: (tidId: string, midId: string, body: TerminalTidMidUpdate) =>
-    req<TerminalTidMidOut>("PATCH", `/terminal-tids/${tidId}/mids/${midId}`, { body }),
-  deleteTidMid: (tidId: string, midId: string) =>
-    req<TerminalTidMidOut>("DELETE", `/terminal-tids/${tidId}/mids/${midId}`),
-  reactivateTidMid: (tidId: string, midId: string) =>
-    req<TerminalTidMidOut>("POST", `/terminal-tids/${tidId}/mids/${midId}/reactivate`),
-  tidMidSlotHistory: (tidId: string, midId: string) =>
-    req<TerminalTidMidHistoryOut[]>("GET", `/terminal-tids/${tidId}/mids/${midId}/history`),
 };
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -1064,14 +1102,16 @@ export interface JobTerminalOut {
   terminal_setting_id: string | null;
   terminal_serial: string | null;
   service_terminal_serial: string | null;
-  terminal_tid_id: string | null;
+  /** At most one of these is set — which MID/acceptance TID this line mounts. */
+  merchant_mid_id: string | null;
+  merchant_mid_acceptance_id: string | null;
   mid: string | null;
   mdr_rate_id: string | null;
   previous_terminal_status: string | null;
   term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
   terminal: { serial: string; serial_no?: string; brand: string; model: string } | null;
   service_terminal: { serial: string; serial_no?: string; brand: string; model: string } | null;
-  tid: TerminalTidOut | null;
+  mid_source: AvailableTidOut | null;
 }
 
 export interface ShipmentTrackingOut {
@@ -1100,7 +1140,7 @@ export interface JobOut {
   merchant: { id: string; name: string };
   terminal: { serial: string; brand: string; model: string } | null;
   previous_terminal: { serial: string; brand: string; model: string } | null;
-  merchant_detail: { id: string; name: string; mid: string; bank: string } | null;
+  merchant_detail: { id: string; name: string; bank: string } | null;
   term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
   job_terminals?: JobTerminalOut[];
   shipment_tracking?: ShipmentTrackingOut | null;
@@ -1136,9 +1176,11 @@ export interface JobOut {
 
 export interface JobCreateTerminal {
   terminal_setting_id: string;
-  tid: string;
-  mid: string;
-  mdr: string;
+  /** Exactly one of these — which entry from merchants.availableTids() this line mounts. */
+  merchant_mid_id?: string | null;
+  merchant_mid_acceptance_id?: string | null;
+  mid?: string | null;
+  mdr_rate_id?: string | null;
 }
 
 export interface JobServiceTerminalCreate {
@@ -2038,6 +2080,9 @@ export const api = {
   termSettings,
   simSettings,
   terminals,
+  merchantMids: merchantMidsApi,
+  merchantMidAcceptances: merchantMidAcceptancesApi,
+  acceptanceSettings,
   jobs,
   simCards,
   paperRolls,

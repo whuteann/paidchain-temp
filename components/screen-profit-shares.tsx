@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { CustomerOut, ProfitShareDetailOut, ProfitShareLineOut, ProfitShareOut } from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
-import { Btn, Card, Chip, Empty, Field, Modal, MobileListItem, PageHead, Pagination, ResponsiveTable, SearchBox, Toolbar, useToast } from "./components";
+import { Btn, Card, Chip, Empty, Field, Modal, MobileListItem, PageHead, Pagination, ResponsiveTable, SearchBox, Toolbar, useToast, SingleFileDropzone } from "./components";
 import { Icon } from "./icons";
 import type { NavFn } from "./shell";
 
@@ -115,11 +115,11 @@ function UploadProfitShareModal({ onClose, onUploaded }: {
         </Field>
       </div>
       <Field label="Sales report" hint=".xlsx · up to 10 MB">
-        <input
-          className="input"
-          type="file"
+        <SingleFileDropzone
+          file={file}
+          onFile={setFile}
           accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={(event) => setFile(event.target.files?.[0] || null)}
+          showSelected={false}
         />
       </Field>
       {file && (

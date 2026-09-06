@@ -5,7 +5,7 @@ import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal
 import { CUSTOMER_STATUS } from "./data";
 import { CreateMerchantModal } from "./screen-merchants";
 import { CreateJobModal } from "./screen-jobs";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
 import type { AddressIn, CustomerType, CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -658,8 +658,8 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
             onRowClick={(m) => nav("merchant-detail", m.id)}
             columns={[
               { key: "merchant", header: "Merchant", render: (m) => <div className="cell-2"><span className="td-strong">{m.name}</span><span className="c2-sub mono">{m.id}</span></div> },
-              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{m.mid}</span> },
-              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
+              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
               { key: "type", header: "Type", render: (m) => <span className="td-mut">{m.type}</span> },
               { key: "terminals", header: "Terminals", render: (m) => <span className="td-mut">{m.terminal_count || "—"}</span> },
               { key: "finance", header: "Finance", render: (m) => <MerchantStatus status={m.finance_status} /> },
@@ -671,8 +671,8 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
                 sub={<span className="mono">{m.id}</span>}
                 status={<MerchantStatus status={m.status} />}
                 meta={[
-                  { label: "MID", value: <span className="td-mono">{m.mid}</span> },
-                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+                  { label: "MID", value: <span className="td-mono">{merchantDisplayMid(m)}</span> },
+                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
                   { label: "Type", value: m.type },
                   { label: "Terminals", value: m.terminal_count || "—" },
                   { label: "Finance", value: <MerchantStatus status={m.finance_status} /> },

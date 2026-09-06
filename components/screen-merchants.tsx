@@ -3,8 +3,8 @@ import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
-import { api, ApiError } from "@/lib/api";
-import type { AddressIn, BankOut, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, TerminalTidCreate, TerminalTidUpdate, TerminalTidOut, TerminalTidMidOut, TerminalTidMidCreate, TerminalTidMidUpdate, TerminalTidMidHistoryOut, MdrOut } from "@/lib/api";
+import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
+import type { AddressIn, BankOut, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, MerchantMidOut, MerchantMidCreate, MerchantMidUpdate, MerchantMidAcceptanceOut, MerchantMidAcceptanceCreate, MerchantMidAcceptanceUpdate, MerchantMidHistoryOut, MerchantMidAcceptanceHistoryOut, AcceptanceSettingOut, AcceptanceSettingCreate, AcceptanceSettingUpdate, MdrOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
 import { useCan } from "@/lib/use-permissions";
@@ -18,17 +18,6 @@ interface CreateMerchantModalProps {
   customer?: CustomerOut | null;
   existingMerchant?: MerchantOut | null;
 }
-
-type MerchantTidDraft = {
-  tid: string;
-  bank_id: string;
-  mids: MerchantTidMidDraft[];
-};
-
-type MerchantTidMidDraft = {
-  mid: string;
-  mdr_rate_id: string;
-};
 
 type MerchantAddressForm = {
   addressLine1: string;
@@ -91,41 +80,12 @@ function merchantTerminalSimLabel(t: MerchantTerminalOut) {
   return [sim?.carrier, sim?.msisdn || sim?.iccid || t.sim_type].filter(Boolean).join(" · ");
 }
 
-function tidSimLabel(tid: TerminalTidOut) {
-  const sim = tid.sim_card ?? tid.simcard;
-  if (!sim) return "";
-  return [sim.carrier, sim.msisdn || sim.iccid, sim.plan].filter(Boolean).join(" · ");
-}
-
 function activeBanks(banks: BankOut[]) {
   return banks.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
 }
 
-function bankIdForName(banks: BankOut[], name?: string | null) {
-  return banks.find((bank) => bank.name === name)?.id ?? "";
-}
-
 function bankNameForId(banks: BankOut[], id?: string | null) {
   return banks.find((bank) => bank.id === id)?.name ?? "";
-}
-
-function blankMerchantTidMidDraft(): MerchantTidMidDraft {
-  return { mid: "", mdr_rate_id: "" };
-}
-
-function blankMerchantTidDraft(bankId = ""): MerchantTidDraft {
-  return { tid: "", bank_id: bankId, mids: [blankMerchantTidMidDraft()] };
-}
-
-function merchantTidDraftsFromMerchant(merchant: MerchantOut | null): MerchantTidDraft[] {
-  if (!merchant?.tids?.length) return [blankMerchantTidDraft(merchant?.bank_id ?? "")];
-  return merchant.tids.map((tid) => ({
-    tid: tid.tid ?? "",
-    bank_id: tid.bank_id ?? merchant.bank_id ?? "",
-    mids: tid.mids?.length
-      ? tid.mids.map((mid) => ({ mid: mid.mid ?? "", mdr_rate_id: mid.mdr_rate_id ?? "" }))
-      : [blankMerchantTidMidDraft()],
-  }));
 }
 
 export function CreateMerchantModal({ onClose, onSave, customerId, customerName, customer = null, existingMerchant = null }: CreateMerchantModalProps) {
@@ -137,21 +97,14 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     name: existingMerchant?.name ?? "",
     type: existingMerchant?.type ?? MERCHANT_TYPES[0],
     mccCode: existingMerchant?.mcc_code ?? "",
-    bankId: existingMerchant?.bank_id ?? "",
-    bank: existingMerchant?.bank ?? BANKS[0],
-    contact: existingMerchant?.contact ?? "",
-    phone: existingMerchant?.phone ?? "",
+    contact: existingMerchant?.contact ?? customer?.contact ?? "",
+    phone: existingMerchant?.phone ?? customer?.phone ?? "",
     email: existingMerchant?.email ?? "",
     bankAccountName: existingMerchant?.bank_account_name ?? "",
     bankAccountNumber: existingMerchant?.bank_account_number ?? "",
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
   const [address, setAddress] = useState<MerchantAddressForm>(() => merchantInitialAddressForm(existingMerchant, customer));
-  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
-  const [banksLoading, setBanksLoading] = useState(true);
-  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
-  const [tidRows, setTidRows] = useState<MerchantTidDraft[]>(() => merchantTidDraftsFromMerchant(existingMerchant));
-  const [tidRowsTouched, setTidRowsTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -171,98 +124,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   const setC = (k: string, v: string) => setCommercial((p) => ({ ...p, [k]: v }));
   const [linkingSaving, setLinkingSaving] = useState(false);
   const hasCustomerLink = Boolean(customerId && customerName);
-  const selectedTidBankIds = new Set(tidRows.map((row) => row.bank_id).filter(Boolean));
-  const selectableBanks = bankOptions.filter((bank) =>
-    (bank.status ?? "Active").toLowerCase() === "active" || bank.id === f.bankId || selectedTidBankIds.has(bank.id)
-  );
-  const selectedBankName = bankNameForId(bankOptions, f.bankId) || f.bank;
-  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim() && f.bankId);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.banks.list()
-      .then((items) => {
-        if (cancelled) return;
-        setBankOptions(items);
-        const options = activeBanks(items);
-        const resolvedBankId = existingMerchant?.bank_id || bankIdForName(options, existingMerchant?.bank) || options[0]?.id || "";
-        const resolvedBankName = bankNameForId(items, resolvedBankId) || existingMerchant?.bank || options[0]?.name || BANKS[0];
-        setF((prev) => ({ ...prev, bankId: prev.bankId || resolvedBankId, bank: resolvedBankName }));
-        setTidRows((rows) => rows.map((row) => ({ ...row, bank_id: row.bank_id || resolvedBankId })));
-      })
-      .catch((e) => {
-        console.error(e);
-        if (!cancelled) {
-          setF((prev) => ({ ...prev, bank: prev.bank || BANKS[0] }));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setBanksLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [existingMerchant?.bank, existingMerchant?.bank_id]);
-
-  useEffect(() => {
-    api.mdr.list().then(setMdrRates).catch(console.error);
-  }, []);
-
-  function setTidRow(index: number, key: "tid" | "bank_id", value: string) {
-    setTidRowsTouched(true);
-    setTidRows((rows) => rows.map((row, i) => i === index ? { ...row, [key]: value } : row));
-  }
-
-  function setTidMidRow(tidIndex: number, midIndex: number, key: keyof MerchantTidMidDraft, value: string) {
-    setTidRowsTouched(true);
-    setTidRows((rows) => rows.map((row, i) => {
-      if (i !== tidIndex) return row;
-      return {
-        ...row,
-        mids: row.mids.map((mid, j) => j === midIndex ? { ...mid, [key]: value } : mid),
-      };
-    }));
-  }
-
-  function addTidRow() {
-    setTidRowsTouched(true);
-    setTidRows((rows) => [...rows, blankMerchantTidDraft(f.bankId)]);
-  }
-
-  function removeTidRow(index: number) {
-    setTidRowsTouched(true);
-    setTidRows((rows) => {
-      const next = rows.filter((_, i) => i !== index);
-      return next.length ? next : [blankMerchantTidDraft(f.bankId)];
-    });
-  }
-
-  function addTidMidRow(tidIndex: number) {
-    setTidRowsTouched(true);
-    setTidRows((rows) => rows.map((row, i) =>
-      i === tidIndex ? { ...row, mids: [...row.mids, blankMerchantTidMidDraft()] } : row
-    ));
-  }
-
-  function removeTidMidRow(tidIndex: number, midIndex: number) {
-    setTidRowsTouched(true);
-    setTidRows((rows) => rows.map((row, i) => {
-      if (i !== tidIndex) return row;
-      const mids = row.mids.filter((_, j) => j !== midIndex);
-      return { ...row, mids: mids.length ? mids : [blankMerchantTidMidDraft()] };
-    }));
-  }
-
-  function buildTidPayload(): TerminalTidCreate[] {
-    return tidRows
-      .map((row) => ({
-        tid: row.tid.trim(),
-        bank_id: row.bank_id,
-        bank: bankNameForId(bankOptions, row.bank_id) || selectedBankName,
-        mids: row.mids
-          .map((mid) => ({ mid: mid.mid.trim(), mdr_rate_id: mid.mdr_rate_id || null }))
-          .filter((mid) => mid.mid),
-      }))
-      .filter((row) => row.tid);
-  }
+  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim());
 
   function directAddressFields() {
     return {
@@ -274,34 +136,12 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     };
   }
 
-  function shouldSubmitTidPayload() {
-    if (!editing) return Boolean(buildTidPayload().length);
-    return tidRowsTouched;
-  }
-
-  function tidValidationError() {
-    const filledTidRows = tidRows
-      .map((row, index) => ({ index, tid: row.tid.trim(), bank_id: row.bank_id, mids: row.mids }))
-      .filter((row) => row.tid || row.mids.some((mid) => mid.mid.trim()));
-    const tids = filledTidRows.map((row) => row.tid).filter(Boolean);
-    if (tids.length !== new Set(tids).size) return "Duplicate TIDs are not allowed in one merchant.";
-    for (const row of filledTidRows) {
-      if (!row.tid) return `TID is required for Terminal ID row ${row.index + 1}.`;
-      if (!row.bank_id) return `Bank is required for Terminal ID row ${row.index + 1}.`;
-      const mids = row.mids.map((mid) => mid.mid.trim()).filter(Boolean);
-      if (mids.length !== new Set(mids).size) return `Duplicate MIDs are not allowed under TID ${row.tid}.`;
-    }
-    return null;
-  }
-
   function buildBaseBody(): MerchantCreate {
     return {
       customer_id: customerId,
       name: f.name.trim(),
       type: f.type,
       mcc_code: f.mccCode.trim() || null,
-      bank_id: f.bankId,
-      bank: selectedBankName,
       contact: f.contact.trim(),
       phone: f.phone.trim(),
       email: f.email.trim(),
@@ -310,22 +150,16 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       bank_account_name: f.bankAccountName.trim() || f.name.trim(),
       bank_account_number: f.bankAccountNumber.trim(),
       bank_account_type: f.bankAccountType,
-      tids: buildTidPayload(),
     };
   }
 
   // Edit-only: save changes directly
   async function submit() {
     if (!valid || !existingMerchant) return;
-    const tidError = shouldSubmitTidPayload() ? tidValidationError() : null;
-    if (tidError) {
-      setErr(tidError);
-      return;
-    }
     setSaving(true); setErr(null);
     try {
       const updateBody: MerchantUpdate = {
-        name: f.name.trim(), type: f.type, mcc_code: f.mccCode.trim() || null, bank_id: f.bankId, bank: selectedBankName,
+        name: f.name.trim(), type: f.type, mcc_code: f.mccCode.trim() || null,
         contact: f.contact.trim(), phone: f.phone.trim(),
         email: f.email.trim(),
         addresses: buildMerchantAddressPayload(address),
@@ -333,7 +167,6 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
         bank_account_name: f.bankAccountName.trim() || f.name.trim(),
         bank_account_number: f.bankAccountNumber.trim(),
         bank_account_type: f.bankAccountType,
-        ...(shouldSubmitTidPayload() ? { tids: buildTidPayload() } : {}),
       };
       const m = await api.merchants.update(existingMerchant.id, updateBody);
       onSave(m);
@@ -351,11 +184,6 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       return;
     }
     if (!valid) return;
-    const tidError = tidValidationError();
-    if (tidError) {
-      setErr(tidError);
-      return;
-    }
     setRentalPlansLoading(true);
     api.rentalPlans.list({ active: true })
       .then(setRentalPlans)
@@ -380,12 +208,6 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     }
     setLinkingSaving(true); setErr(null);
     try {
-      const tidError = tidValidationError();
-      if (tidError) {
-        setErr(tidError);
-        setLinkingSaving(false);
-        return;
-      }
       const body: MerchantCreate = {
         ...buildBaseBody(),
         commercial_profile: {
@@ -410,12 +232,6 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     }
     setLinkingSaving(true); setErr(null);
     try {
-      const tidError = tidValidationError();
-      if (tidError) {
-        setErr(tidError);
-        setLinkingSaving(false);
-        return;
-      }
       const m = await api.merchants.create(buildBaseBody());
       onSave(m);
     } catch (e) {
@@ -505,109 +321,11 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
             </div>
           </Field>
 
-          <Field label="Terminal IDs" hint="optional · each TID can have multiple MIDs">
-            <div style={{ display: "grid", gap: 10 }}>
-              {tidRows.map((row, i) => (
-                <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12, background: "var(--surface)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>TID {i + 1}</div>
-                    {tidRows.length > 1 && (
-                      <Btn
-                        variant="ghost"
-                        sm
-                        icon="x"
-                        title="Remove TID"
-                        onClick={() => removeTidRow(i)}
-                        style={{ color: "var(--bad)" }}
-                      >
-                        Remove
-                      </Btn>
-                    )}
-                  </div>
-                  <div className="field-row" style={{ marginBottom: 10 }}>
-                    <Field label="TID">
-                      <input
-                        className="input"
-                        placeholder="e.g. 12345678"
-                        value={row.tid}
-                        onChange={(e) => setTidRow(i, "tid", e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Bank">
-                      <select className="input" value={row.bank_id} onChange={(e) => setTidRow(i, "bank_id", e.target.value)} disabled={banksLoading}>
-                        <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
-                        {selectableBanks.map((bank) => (
-                          <option key={bank.id} value={bank.id}>{bank.name}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>MIDs</span>
-                    <Btn variant="ghost" sm icon="plus" onClick={() => addTidMidRow(i)}>Add MID</Btn>
-                  </div>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {row.mids.map((mid, j) => (
-                      <div key={j} style={{ display: "grid", gridTemplateColumns: row.mids.length > 1 ? "minmax(0, 1fr) minmax(0, 1fr) auto" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
-                        <Field label={j === 0 ? "MID" : undefined}>
-                          <input
-                            className="input"
-                            placeholder="e.g. MID001"
-                            value={mid.mid}
-                            onChange={(e) => setTidMidRow(i, j, "mid", e.target.value)}
-                          />
-                        </Field>
-                        <Field label={j === 0 ? "MDR rate" : undefined}>
-                          <select className="input" value={mid.mdr_rate_id} onChange={(e) => setTidMidRow(i, j, "mdr_rate_id", e.target.value)}>
-                            <option value="">No MDR rate</option>
-                            {mdrRates.map((rate) => (
-                              <option key={rate.id} value={rate.id}>
-                                {rate.id} · {rate.type} {rate.rate}%
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        {row.mids.length > 1 && (
-                          <div style={{ paddingTop: j === 0 ? 24 : 0 }}>
-                            <Btn
-                              variant="ghost"
-                              sm
-                              icon="x"
-                              title="Remove MID"
-                              onClick={() => removeTidMidRow(i, j)}
-                              style={{ color: "var(--bad)", height: 40 }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <Btn variant="ghost" sm icon="plus" onClick={addTidRow} style={{ justifySelf: "start" }}>
-                Add TID
-              </Btn>
+          {!editing && (
+            <div style={{ padding: "10px 14px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, fontSize: 12.5, color: "var(--ink-2)" }}>
+              MIDs (and their bank, TID and Acceptance items) are added from the merchant's detail page once it's created.
             </div>
-          </Field>
-
-          <Field label="Bank">
-            <select
-              className="input"
-              value={f.bankId}
-              disabled={banksLoading}
-              onChange={(e) => {
-                const bankId = e.target.value;
-                const name = bankNameForId(bankOptions, bankId);
-                setF((prev) => ({ ...prev, bankId, bank: name || prev.bank }));
-                setTidRows((rows) => rows.map((row) => ({ ...row, bank_id: row.bank_id || bankId })));
-              }}
-            >
-              <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
-              {selectableBanks.map((bank) => (
-                <option key={bank.id} value={bank.id}>{bank.name}</option>
-              ))}
-            </select>
-          </Field>
+          )}
 
           <Field label="Contact person" hint="required">
             <input className="input" placeholder="e.g. Ahmad bin Razak" value={f.contact} onChange={(e) => set("contact", e.target.value)} />
@@ -782,15 +500,192 @@ function CustomerPickerModal({ onClose, onSelect }: {
   );
 }
 
+/* =================== ACCEPTANCE CATALOG (admin) =================== */
+
+function AcceptanceSettingModal({ existing, onClose, onSaved }: {
+  existing?: AcceptanceSettingOut | null;
+  onClose: () => void;
+  onSaved: (row: AcceptanceSettingOut) => void;
+}) {
+  const editing = Boolean(existing);
+  const [name, setName] = useState(existing?.name ?? "");
+  const [requiresTidMid, setRequiresTidMid] = useState(existing?.requires_tid_mid ?? false);
+  const [defaultCompulsory, setDefaultCompulsory] = useState(existing?.default_compulsory ?? false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!name.trim()) {
+      setErr("Name is required");
+      return;
+    }
+    setSaving(true); setErr(null);
+    try {
+      const result = editing
+        ? await api.acceptanceSettings.update(existing!.id, {
+          name: name.trim(),
+          requires_tid_mid: requiresTidMid,
+          default_compulsory: defaultCompulsory,
+        } satisfies AcceptanceSettingUpdate)
+        : await api.acceptanceSettings.create({
+          name: name.trim(),
+          requires_tid_mid: requiresTidMid,
+          default_compulsory: defaultCompulsory,
+        } satisfies AcceptanceSettingCreate);
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save acceptance type");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit Acceptance Type" : "Add Acceptance Type"}
+      sub="Global catalog · selectable on any merchant MID"
+      icon="tag"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !name.trim()} onClick={submit}>
+          {saving ? "Saving…" : editing ? "Save Changes" : "Add Acceptance Type"}
+        </Btn>
+      </>}
+    >
+      <Field label="Name" hint="required">
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Credit (Visa)" />
+      </Field>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+        <label style={{ display: "flex", gap: 9, alignItems: "center", cursor: "pointer", fontSize: 13.5 }}>
+          <input type="checkbox" checked={requiresTidMid} onChange={(e) => setRequiresTidMid(e.target.checked)} />
+          Requires its own TID/MID pair
+        </label>
+        <label style={{ display: "flex", gap: 9, alignItems: "center", cursor: "pointer", fontSize: 13.5 }}>
+          <input type="checkbox" checked={defaultCompulsory} onChange={(e) => setDefaultCompulsory(e.target.checked)} />
+          Default compulsory (auto-attached to every new MID)
+        </label>
+      </div>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function AcceptanceCatalogTab({ canEdit }: { canEdit: boolean }) {
+  const [rows, setRows] = useState<AcceptanceSettingOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<{ open: boolean; existing?: AcceptanceSettingOut | null }>({ open: false });
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  function load() {
+    setLoading(true);
+    api.acceptanceSettings.list()
+      .then(setRows)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function handleSaved(row: AcceptanceSettingOut) {
+    setRows((prev) => {
+      const exists = prev.some((r) => r.id === row.id);
+      return exists ? prev.map((r) => r.id === row.id ? row : r) : [...prev, row];
+    });
+  }
+
+  async function toggleStatus(row: AcceptanceSettingOut) {
+    if (!canEdit || actionId) return;
+    setActionId(row.id);
+    setActionError(null);
+    try {
+      const next = row.active
+        ? await api.acceptanceSettings.remove(row.id)
+        : await api.acceptanceSettings.update(row.id, { active: true } satisfies AcceptanceSettingUpdate);
+      handleSaved(next);
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : "Failed to update acceptance type status");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  return (
+    <Card
+      title="Acceptance Types"
+      icon="tag"
+      actions={canEdit ? <Btn variant="primary" sm icon="plus" onClick={() => setModal({ open: true })}>Add Acceptance Type</Btn> : undefined}
+    >
+      {loading ? (
+        <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+      ) : rows.length === 0 ? (
+        <Empty title="No acceptance types configured" sub="Add the first acceptance type to make it selectable on merchant MIDs" />
+      ) : (
+        <ResponsiveTable
+          rows={rows}
+          getKey={(r) => r.id}
+          columns={[
+            { key: "name", header: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.name}</span> },
+            { key: "id", header: "ID", render: (r) => <span className="td-mono td-mut">{r.id}</span> },
+            { key: "requires", header: "Requires TID/MID", render: (r) => r.requires_tid_mid ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
+            { key: "default", header: "Default compulsory", render: (r) => r.default_compulsory ? <Chip cls="chip-ok">Yes</Chip> : <span className="td-mut">No</span> },
+            { key: "status", header: "Status", render: (r) => <Chip cls={r.active ? "chip-ok" : "chip-neutral"} dot>{r.active ? "Active" : "Inactive"}</Chip> },
+            ...(canEdit ? [{
+              key: "actions", header: "", render: (r: AcceptanceSettingOut) => (
+                <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                  <button className="icon-btn" title="Edit" onClick={() => setModal({ open: true, existing: r })}>
+                    <Icon name="edit" size={14} />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title={r.active ? "Deactivate" : "Reactivate"}
+                    disabled={actionId === r.id}
+                    onClick={() => toggleStatus(r)}
+                  >
+                    <Icon name={r.active ? "x" : "refresh"} size={14} />
+                  </button>
+                </div>
+              ),
+            }] : []),
+          ]}
+          renderMobile={(r) => (
+            <MobileListItem
+              title={r.name}
+              sub={<>{r.id}</>}
+              status={<Chip cls={r.active ? "chip-ok" : "chip-neutral"} dot>{r.active ? "Active" : "Inactive"}</Chip>}
+              meta={[
+                { label: "Requires TID/MID", value: r.requires_tid_mid ? "Yes" : "No" },
+                { label: "Default compulsory", value: r.default_compulsory ? "Yes" : "No" },
+              ]}
+              onClick={canEdit ? () => setModal({ open: true, existing: r }) : undefined}
+            />
+          )}
+        />
+      )}
+      {actionError && <div style={{ padding: "0 20px 16px", fontSize: 13, color: "var(--bad)" }}>{actionError}</div>}
+      {modal.open && canEdit && (
+        <AcceptanceSettingModal
+          existing={modal.existing}
+          onClose={() => setModal({ open: false })}
+          onSaved={handleSaved}
+        />
+      )}
+    </Card>
+  );
+}
+
 /* =================== LISTING =================== */
 export function Merchants({ nav }: { nav: NavFn }) {
   const can = useCan();
+  const canViewAcceptance = can("Settings.View");
+  const [pageTab, setPageTab] = useState<"merchants" | "acceptance">("merchants");
   const MERCHANTS_PAGE_SIZE = 20;
   const [merchantList, setMerchantList] = useState<MerchantOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [bankId, setBankId] = useState("All");
-  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
@@ -798,10 +693,6 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [createCustomer, setCreateCustomer] = useState<CustomerOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.banks.list().then(setBankOptions).catch(console.error);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -812,7 +703,6 @@ export function Merchants({ nav }: { nav: NavFn }) {
         per_page: MERCHANTS_PAGE_SIZE,
         query: q.trim() || undefined,
         status: status !== "All" ? status : undefined,
-        bank_id: bankId !== "All" ? bankId : undefined,
       })
         .then((p) => {
           if (cancelled) return;
@@ -830,7 +720,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [page, q, status, bankId]);
+  }, [page, q, status]);
 
   function handleMerchantCreated(merchant: MerchantOut) {
     setMerchantList((prev) => [merchant, ...prev]);
@@ -846,18 +736,34 @@ export function Merchants({ nav }: { nav: NavFn }) {
     <div>
       <PageHead
         title="Merchants"
-        sub={total + " merchants · search by name, MID, TID, terminal serial or merchant ID"}
-        actions={can("Merchants.Create") ? <Btn variant="primary" icon="plus" onClick={() => setShowCustomerPicker(true)}>Create Merchant</Btn> : undefined}
+        sub={pageTab === "merchants" ? total + " merchants · search by name, MID, TID, terminal serial or merchant ID" : "Global catalog of payment acceptance types"}
+        actions={pageTab === "merchants" && can("Merchants.Create") ? <Btn variant="primary" icon="plus" onClick={() => setShowCustomerPicker(true)}>Create Merchant</Btn> : undefined}
       />
+
+      {canViewAcceptance && (
+        <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--line)" }}>
+          {([["merchants", "Merchants"], ["acceptance", "Acceptance"]] as const).map(([t, lbl]) => (
+            <button key={t} onClick={() => setPageTab(t)} style={{
+              padding: "10px 18px", border: "none", background: "none", cursor: "pointer", fontSize: 14,
+              borderBottom: `2px solid ${pageTab === t ? "var(--ink)" : "transparent"}`,
+              fontWeight: pageTab === t ? 700 : 500,
+              color: pageTab === t ? "var(--ink)" : "var(--ink-3)",
+              marginBottom: -1, transition: "color 0.15s",
+            }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {pageTab === "acceptance" && canViewAcceptance ? (
+        <AcceptanceCatalogTab canEdit={can("Settings.Edit")} />
+      ) : (
       <Card>
         <Toolbar>
           <SearchBox value={q} onChange={(value) => { setQ(value); resetPage(); }} placeholder="Search merchant, MID, TID, terminal…" />
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
             {["All","Active","Onboarding","Suspended","Inactive"].map((s) => <option key={s}>{s}</option>)}
-          </select>
-          <select className="select" value={bankId} onChange={(e) => { setBankId(e.target.value); resetPage(); }}>
-            <option value="All">All Banks</option>
-            {bankOptions.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
           </select>
           <span className="tb-meta">{loading ? "Loading..." : `${total} results`}</span>
         </Toolbar>
@@ -870,12 +776,11 @@ export function Merchants({ nav }: { nav: NavFn }) {
             onRowClick={(m) => nav("merchant-detail", m.id)}
             columns={[
               { key: "merchant", header: "Merchant", render: (m) => <Entity name={m.name} sub={m.id + " · " + m.type} /> },
-              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{m.mid}</span> },
-              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
+              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
+              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
               { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
-              { key: "terminals", header: "Terminals", render: (m) => { const n = m.terminal_count ?? m.terminals; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
-              // { key: "finance", header: "Finance Readiness", mobileLabel: "Finance", render: (m) => <Readiness value={m.finance} /> },
-              { key: "jobs", header: "Jobs", render: (m) => m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : <span className="td-mut">None</span> },
+              { key: "terminals", header: "Terminals", render: (m) => { const n = m.terminal_count ?? 0; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
+              { key: "jobs", header: "Jobs", render: (m) => (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : <span className="td-mut">None</span> },
             ]}
             renderMobile={(m) => (
               <MobileListItem
@@ -883,11 +788,11 @@ export function Merchants({ nav }: { nav: NavFn }) {
                 sub={<>{m.id} · {m.type}</>}
                 status={<MerchantStatus status={m.status} />}
                 meta={[
-                  { label: "MID", value: <span className="td-mono">{m.mid}</span> },
-                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{m.bank}</span> },
-                  { label: "Finance", value: <Readiness value={m.finance} /> },
-                  { label: "Terminals", value: (() => { const n = m.terminal_count ?? m.terminals; return n === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; })() },
-                  { label: "Jobs", value: m.open_jobs > 0 ? <Chip cls="chip-warn">{m.open_jobs} open</Chip> : "None" },
+                  { label: "MID", value: <span className="td-mono">{merchantDisplayMid(m)}</span> },
+                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
+                  { label: "Finance", value: <Readiness value={m.finance_status} /> },
+                  { label: "Terminals", value: (() => { const n = m.terminal_count ?? 0; return n === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; })() },
+                  { label: "Jobs", value: (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : "None" },
                 ]}
                 onClick={() => nav("merchant-detail", m.id)}
                 chevron
@@ -897,6 +802,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
         )}
         <Pagination total={total} shown={merchantList.length} page={page} pages={pages} onPageChange={setPage} />
       </Card>
+      )}
       {showCustomerPicker && can("Merchants.Create") && (
         <CustomerPickerModal
           onClose={() => setShowCustomerPicker(false)}
@@ -1069,33 +975,33 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
     </div>
   );
 
-  function handleTidSaved(tid: TerminalTidOut) {
+  function handleMidSaved(mid: MerchantMidOut) {
     setMerchant((prev) => {
       if (!prev) return prev;
-      const tids = prev.tids ?? [];
-      const exists = tids.some((item) => item.id === tid.id);
+      const mids = prev.mids ?? [];
+      const exists = mids.some((item) => item.id === mid.id);
       return {
         ...prev,
-        tids: exists
-          ? tids.map((item) => item.id === tid.id ? tid : item)
-          : [...tids, tid],
+        mids: exists
+          ? mids.map((item) => item.id === mid.id ? mid : item)
+          : [...mids, mid],
       };
     });
   }
 
-  function handleMidSaved(tidId: string, mid: TerminalTidMidOut) {
+  function handleAcceptanceSaved(midId: string, row: MerchantMidAcceptanceOut) {
     setMerchant((prev) => {
       if (!prev) return prev;
-      const tids = prev.tids ?? [];
+      const mids = prev.mids ?? [];
       return {
         ...prev,
-        tids: tids.map((tid) => {
-          if (tid.id !== tidId) return tid;
-          const mids = tid.mids ?? [];
-          const exists = mids.some((item) => item.id === mid.id);
+        mids: mids.map((mid) => {
+          if (mid.id !== midId) return mid;
+          const acceptances = mid.acceptances ?? [];
+          const exists = acceptances.some((item) => item.id === row.id);
           return {
-            ...tid,
-            mids: exists ? mids.map((item) => item.id === mid.id ? mid : item) : [...mids, mid],
+            ...mid,
+            acceptances: exists ? acceptances.map((item) => item.id === row.id ? row : item) : [...acceptances, row],
           };
         }),
       };
@@ -1151,7 +1057,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onTidSaved={handleTidSaved} onMidSaved={handleMidSaved} />
+        {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onMidSaved={handleMidSaved} onAcceptanceSaved={handleAcceptanceSaved} />
           : tab === "commercial" ? <CommercialTab m={merchant} canEdit={can("Merchants.Edit")} onEdit={() => setShowEditCommercial(true)} />
           : tab === "terminals"  ? <TerminalsTab rows={linkedTerminals} nav={nav} />
           : <JobsTab rows={merchantJobs} nav={nav} />}
@@ -1257,27 +1163,124 @@ function UpdateMerchantStatusModal({ merchant, onClose, onSaved }: { merchant: M
   );
 }
 
-function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
+/* Draft state for one selected Acceptance item in the create-MID flow */
+type AcceptanceDraft = {
+  acceptance_setting_id: string;
+  uses_own_tid_mid: boolean;
+  tid_value: string;
+  mid_value: string;
+  mdr_rate_id: string;
+};
+
+function AcceptancePicker({ settings, drafts, onChange }: {
+  settings: AcceptanceSettingOut[];
+  drafts: AcceptanceDraft[];
+  onChange: (next: AcceptanceDraft[]) => void;
+}) {
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  useEffect(() => { api.mdr.list().then(setMdrRates).catch(console.error); }, []);
+
+  const selectable = settings.filter((s) => s.active && !s.default_compulsory);
+  const defaultCompulsory = settings.filter((s) => s.active && s.default_compulsory);
+  const draftFor = (id: string) => drafts.find((d) => d.acceptance_setting_id === id);
+
+  function toggle(setting: AcceptanceSettingOut, checked: boolean) {
+    if (checked) {
+      onChange([...drafts, { acceptance_setting_id: setting.id, uses_own_tid_mid: false, tid_value: "", mid_value: "", mdr_rate_id: "" }]);
+    } else {
+      onChange(drafts.filter((d) => d.acceptance_setting_id !== setting.id));
+    }
+  }
+
+  function update(id: string, patch: Partial<AcceptanceDraft>) {
+    onChange(drafts.map((d) => d.acceptance_setting_id === id ? { ...d, ...patch } : d));
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {defaultCompulsory.map((s) => (
+        <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 7, fontSize: 13 }}>
+          <span style={{ fontWeight: 600 }}>{s.name}</span>
+          <Chip cls="chip-neutral">Default (compulsory)</Chip>
+        </div>
+      ))}
+      {selectable.map((s) => {
+        const draft = draftFor(s.id);
+        const checked = Boolean(draft);
+        return (
+          <div key={s.id} style={{ border: "1px solid var(--line)", borderRadius: 7, padding: 10 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
+              <input type="checkbox" checked={checked} onChange={(e) => toggle(s, e.target.checked)} />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</span>
+              {s.requires_tid_mid && <Chip cls="chip-info">Requires TID/MID</Chip>}
+            </label>
+            {checked && draft && s.requires_tid_mid && (
+              <div style={{ marginTop: 10, paddingLeft: 24, display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", gap: 14 }}>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                    <input type="radio" checked={!draft.uses_own_tid_mid} onChange={() => update(s.id, { uses_own_tid_mid: false })} />
+                    Use original MID/TID
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                    <input type="radio" checked={draft.uses_own_tid_mid} onChange={() => update(s.id, { uses_own_tid_mid: true })} />
+                    Use this MID/TID
+                  </label>
+                </div>
+                {draft.uses_own_tid_mid && (
+                  <>
+                    <div className="field-row">
+                      <Field label="TID" hint="optional · can be filled in later">
+                        <input className="input" value={draft.tid_value} onChange={(e) => update(s.id, { tid_value: e.target.value })} placeholder="TID value" />
+                      </Field>
+                      <Field label="MID" hint="optional · can be filled in later">
+                        <input className="input" value={draft.mid_value} onChange={(e) => update(s.id, { mid_value: e.target.value })} placeholder="MID value" />
+                      </Field>
+                      <Field label="MDR rate">
+                        <select className="input" value={draft.mdr_rate_id} onChange={(e) => update(s.id, { mdr_rate_id: e.target.value })}>
+                          <option value="">No MDR rate</option>
+                          {mdrRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.id} · {rate.type} {rate.rate}%</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    {!draft.tid_value.trim() && (
+                      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                        Without a TID, this acceptance item won't be offered on the Installation Job terminal picker until one is added.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
   merchant: MerchantOut;
-  existing?: TerminalTidOut | null;
+  existing?: MerchantMidOut | null;
   onClose: () => void;
-  onSaved: (tid: TerminalTidOut) => void;
+  onSaved: (mid: MerchantMidOut) => void;
 }) {
   const editing = Boolean(existing);
-  const [tid, setTid] = useState(existing?.tid ?? "");
   const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
   const [banksLoading, setBanksLoading] = useState(true);
-  const [bankId, setBankId] = useState(existing?.bank_id ?? merchant.bank_id ?? "");
-  const [bank, setBank] = useState(existing?.bank ?? merchant.bank ?? "");
-  const [mid, setMid] = useState("");
-  const [mdrRateId, setMdrRateId] = useState("");
+  const [bankId, setBankId] = useState(existing?.bank_id ?? "");
+  const [midValue, setMidValue] = useState(existing?.mid_value ?? "");
+  const [tidValue, setTidValue] = useState(existing?.tid_value ?? "");
+  const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
   const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [acceptanceSettingsList, setAcceptanceSettingsList] = useState<AcceptanceSettingOut[]>([]);
+  const [acceptanceDrafts, setAcceptanceDrafts] = useState<AcceptanceDraft[]>([]);
+  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (editing) return;
     api.mdr.list().then(setMdrRates).catch(console.error);
+    if (!editing) api.acceptanceSettings.list().then(setAcceptanceSettingsList).catch(console.error);
   }, [editing]);
 
   useEffect(() => {
@@ -1287,140 +1290,41 @@ function MerchantTidModal({ merchant, existing, onClose, onSaved }: {
         if (cancelled) return;
         setBankOptions(items);
         const options = activeBanks(items);
-        const resolvedBankId = existing?.bank_id || merchant.bank_id || bankIdForName(options, existing?.bank ?? merchant.bank) || options[0]?.id || "";
-        const resolvedBankName = bankNameForId(items, resolvedBankId) || existing?.bank || merchant.bank || options[0]?.name || "";
-        setBankId((current) => current || resolvedBankId);
-        setBank((current) => current || resolvedBankName);
+        setBankId((current) => current || existing?.bank_id || options[0]?.id || "");
       })
       .catch(console.error)
-      .finally(() => {
-        if (!cancelled) setBanksLoading(false);
-      });
+      .finally(() => { if (!cancelled) setBanksLoading(false); });
     return () => { cancelled = true; };
-  }, [existing?.bank, existing?.bank_id, merchant.bank, merchant.bank_id]);
+  }, [existing?.bank_id]);
 
   const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === bankId);
-  const selectedBankName = bankNameForId(bankOptions, bankId) || bank;
+  const valid = Boolean(bankId && midValue.trim() && tidValue.trim());
 
   async function submit() {
-    if (!tid.trim()) {
-      setErr("TID is required");
-      return;
-    }
+    if (!valid) return;
     setSaving(true); setErr(null);
     try {
       const result = editing
-        ? await api.merchants.updateTid(merchant.id, existing!.id, {
-          tid: tid.trim(),
+        ? await api.merchants.updateMid(merchant.id, existing!.id, {
           bank_id: bankId,
-          bank: selectedBankName,
-        } satisfies TerminalTidUpdate)
-        : await api.merchants.createTid(merchant.id, {
-          tid: tid.trim(),
+          mid_value: midValue.trim(),
+          tid_value: tidValue.trim(),
+          mdr_rate_id: mdrRateId || null,
+          reason: reason.trim() || null,
+        } satisfies MerchantMidUpdate)
+        : await api.merchants.createMid(merchant.id, {
           bank_id: bankId,
-          bank: selectedBankName,
-          mid: mid.trim() || null,
+          mid_value: midValue.trim(),
+          tid_value: tidValue.trim(),
           mdr_rate_id: mdrRateId || null,
-        } satisfies TerminalTidCreate);
-      onSaved(result);
-      onClose();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Failed to save TID");
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={editing ? "Edit TID" : "Add TID"}
-      sub={merchant.name}
-      icon="tag"
-      size="slim"
-      onClose={onClose}
-      foot={<>
-        <div className="mf-spacer" />
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || !tid.trim() || !bankId} onClick={submit}>
-          {saving ? "Saving…" : editing ? "Save Changes" : "Add TID"}
-        </Btn>
-      </>}
-    >
-      <Field label="TID" hint="required">
-        <input className="input" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="TID123456" />
-      </Field>
-      <Field label="Bank" hint="required">
-        <select
-          className="input"
-          value={bankId}
-          disabled={banksLoading}
-          onChange={(e) => {
-            const nextBankId = e.target.value;
-            setBankId(nextBankId);
-            setBank(bankNameForId(bankOptions, nextBankId));
-          }}
-        >
-          <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
-          {selectableBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
-        </select>
-      </Field>
-      {!editing && (
-        <>
-          <Field label="Initial MID" hint="optional">
-            <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="MID123456" />
-          </Field>
-          <Field label="MDR rate" hint="optional">
-            <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
-              <option value="">No MDR rate</option>
-              {mdrRates.map((rate) => (
-                <option key={rate.id} value={rate.id}>
-                  {rate.id} · {rate.type} {rate.rate}%
-                </option>
-              ))}
-            </select>
-          </Field>
-        </>
-      )}
-      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
-    </Modal>
-  );
-}
-
-function MidModal({ tid, merchantName, existing, onClose, onSaved }: {
-  tid: TerminalTidOut;
-  merchantName: string;
-  existing?: TerminalTidMidOut | null;
-  onClose: () => void;
-  onSaved: (mid: TerminalTidMidOut) => void;
-}) {
-  const editing = Boolean(existing);
-  const [mid, setMid] = useState(existing?.mid ?? "");
-  const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
-  const [reason, setReason] = useState("");
-  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.mdr.list().then(setMdrRates).catch(console.error);
-  }, []);
-
-  async function submit() {
-    if (!mid.trim()) {
-      setErr("MID is required");
-      return;
-    }
-    setSaving(true); setErr(null);
-    try {
-      const result = editing
-        ? await api.terminals.updateTidMid(tid.id, existing!.id, {
-          mid: mid.trim(),
-          mdr_rate_id: mdrRateId || null,
-          reason: mid.trim() !== existing?.mid ? (reason.trim() || null) : null,
-        } satisfies TerminalTidMidUpdate)
-        : await api.terminals.createTidMid(tid.id, {
-          mid: mid.trim(),
-          mdr_rate_id: mdrRateId || null,
-        } satisfies TerminalTidMidCreate);
+          acceptances: acceptanceDrafts.map((d) => ({
+            acceptance_setting_id: d.acceptance_setting_id,
+            uses_own_tid_mid: d.uses_own_tid_mid,
+            tid_value: d.uses_own_tid_mid ? d.tid_value.trim() || null : null,
+            mid_value: d.uses_own_tid_mid ? d.mid_value.trim() || null : null,
+            mdr_rate_id: d.uses_own_tid_mid ? d.mdr_rate_id || null : null,
+          } satisfies MerchantMidAcceptanceCreate)),
+        } satisfies MerchantMidCreate);
       onSaved(result);
       onClose();
     } catch (e) {
@@ -1432,40 +1336,46 @@ function MidModal({ tid, merchantName, existing, onClose, onSaved }: {
   return (
     <Modal
       title={editing ? "Edit MID" : "Add MID"}
-      sub={`${merchantName} · ${tid.tid}`}
+      sub={merchant.name}
       icon="tag"
-      size="slim"
       onClose={onClose}
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || !mid.trim()} onClick={submit}>
+        <Btn variant="primary" icon="check" disabled={saving || !valid} onClick={submit}>
           {saving ? "Saving…" : editing ? "Save Changes" : "Add MID"}
         </Btn>
       </>}
     >
-      <Field label="MID" hint="required">
-        <input className="input" value={mid} onChange={(e) => setMid(e.target.value)} placeholder="MID123456" />
-      </Field>
-      <Field label="MDR rate">
-        <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
-          <option value="">No MDR rate</option>
-          {mdrRates.map((rate) => (
-            <option key={rate.id} value={rate.id}>
-              {rate.id} · {rate.type} {rate.rate}%
-            </option>
-          ))}
-        </select>
-      </Field>
-      {editing && (
-        <Field label="MID change reason" hint="optional">
-          <textarea
-            className="textarea"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Reason for changing the MID..."
-            rows={3}
-          />
+      <div className="field-row">
+        <Field label="MID value" hint="required">
+          <input className="input" value={midValue} onChange={(e) => setMidValue(e.target.value)} placeholder="MID123456" />
+        </Field>
+        <Field label="TID value" hint="required">
+          <input className="input" value={tidValue} onChange={(e) => setTidValue(e.target.value)} placeholder="TID123456" />
+        </Field>
+      </div>
+      <div className="field-row">
+        <Field label="Bank" hint="required">
+          <select className="input" value={bankId} onChange={(e) => setBankId(e.target.value)} disabled={banksLoading}>
+            <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
+            {selectableBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
+          </select>
+        </Field>
+        <Field label="MDR rate">
+          <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+            <option value="">No MDR rate</option>
+            {mdrRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.id} · {rate.type} {rate.rate}%</option>)}
+          </select>
+        </Field>
+      </div>
+      {editing ? (
+        <Field label="Change reason" hint="optional">
+          <textarea className="textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for this change..." rows={3} />
+        </Field>
+      ) : (
+        <Field label="Acceptance" hint="select the payment types this MID accepts">
+          <AcceptancePicker settings={acceptanceSettingsList} drafts={acceptanceDrafts} onChange={setAcceptanceDrafts} />
         </Field>
       )}
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
@@ -1473,36 +1383,170 @@ function MidModal({ tid, merchantName, existing, onClose, onSaved }: {
   );
 }
 
-function TidMidHistoryModal({ tid, onClose }: {
-  tid: TerminalTidOut;
+function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
+  mid: MerchantMidOut;
+  merchantName: string;
+  existing?: MerchantMidAcceptanceOut | null;
+  onClose: () => void;
+  onSaved: (row: MerchantMidAcceptanceOut) => void;
+}) {
+  const editing = Boolean(existing);
+  const [settings, setSettings] = useState<AcceptanceSettingOut[]>([]);
+  const [settingId, setSettingId] = useState(existing?.acceptance_setting_id ?? "");
+  const [usesOwn, setUsesOwn] = useState(existing?.uses_own_tid_mid ?? false);
+  const [tidValue, setTidValue] = useState(existing?.tid_value ?? "");
+  const [midValue, setMidValue] = useState(existing?.mid_value ?? "");
+  const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
+  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.mdr.list().then(setMdrRates).catch(console.error);
+    if (!editing) api.acceptanceSettings.list().then(setSettings).catch(console.error);
+  }, [editing]);
+
+  const attachedSettingIds = new Set((mid.acceptances ?? []).map((a) => a.acceptance_setting_id));
+  const selectedSetting = settings.find((s) => s.id === settingId);
+  const requiresTidMid = existing ? existing.requires_tid_mid : Boolean(selectedSetting?.requires_tid_mid);
+  const valid = Boolean(settingId);
+
+  async function submit() {
+    if (!valid) return;
+    setSaving(true); setErr(null);
+    try {
+      const result = editing
+        ? await api.merchants.updateAcceptance(mid.merchant_id, mid.id, existing!.id, {
+          uses_own_tid_mid: usesOwn,
+          tid_value: usesOwn ? tidValue.trim() || null : null,
+          mid_value: usesOwn ? midValue.trim() || null : null,
+          mdr_rate_id: usesOwn ? mdrRateId || null : null,
+          reason: reason.trim() || null,
+        } satisfies MerchantMidAcceptanceUpdate)
+        : await api.merchants.addAcceptance(mid.merchant_id, mid.id, {
+          acceptance_setting_id: settingId,
+          uses_own_tid_mid: usesOwn,
+          tid_value: usesOwn ? tidValue.trim() || null : null,
+          mid_value: usesOwn ? midValue.trim() || null : null,
+          mdr_rate_id: usesOwn ? mdrRateId || null : null,
+        } satisfies MerchantMidAcceptanceCreate);
+      onSaved(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to save acceptance item");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={editing ? "Edit Acceptance" : "Add Acceptance"}
+      sub={`${merchantName} · ${mid.mid_value}`}
+      icon="tag"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={saving || !valid} onClick={submit}>
+          {saving ? "Saving…" : editing ? "Save Changes" : "Add Acceptance"}
+        </Btn>
+      </>}
+    >
+      {editing ? (
+        <Field label="Acceptance type">
+          <div className="input" style={{ background: "var(--bg-2, #f5f5f5)", color: "var(--ink-2)" }}>{existing!.acceptance_name}</div>
+        </Field>
+      ) : (
+        <Field label="Acceptance type" hint="required">
+          <select className="input" value={settingId} onChange={(e) => setSettingId(e.target.value)}>
+            <option value="">Select acceptance type...</option>
+            {settings
+              .filter((s) => s.active && !s.default_compulsory && !attachedSettingIds.has(s.id))
+              .map((s) => (
+                <option key={s.id} value={s.id}>{s.name}{s.requires_tid_mid ? " (requires TID/MID)" : ""}</option>
+              ))}
+          </select>
+        </Field>
+      )}
+      {!editing && settings.length > 0 && settings.every((s) => s.default_compulsory || attachedSettingIds.has(s.id)) && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: -8, marginBottom: 8 }}>
+          Every available acceptance type is already attached to this MID.
+        </div>
+      )}
+      {requiresTidMid && (
+        <>
+          <div style={{ display: "flex", gap: 14, margin: "10px 0" }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+              <input type="radio" checked={!usesOwn} onChange={() => setUsesOwn(false)} />
+              Use original MID/TID
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+              <input type="radio" checked={usesOwn} onChange={() => setUsesOwn(true)} />
+              Use this MID/TID
+            </label>
+          </div>
+          {usesOwn && (
+            <>
+              <div className="field-row">
+                <Field label="TID" hint="optional · can be filled in later">
+                  <input className="input" value={tidValue} onChange={(e) => setTidValue(e.target.value)} placeholder="TID value" />
+                </Field>
+                <Field label="MID" hint="optional · can be filled in later">
+                  <input className="input" value={midValue} onChange={(e) => setMidValue(e.target.value)} placeholder="MID value" />
+                </Field>
+              </div>
+              <Field label="MDR rate">
+                <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+                  <option value="">No MDR rate</option>
+                  {mdrRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.id} · {rate.type} {rate.rate}%</option>)}
+                </select>
+              </Field>
+              {!tidValue.trim() && (
+                <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: -4, marginBottom: 10 }}>
+                  Without a TID, this acceptance item won't be offered on the Installation Job terminal picker until one is added.
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+      {editing && (
+        <Field label="Change reason" hint="optional">
+          <textarea className="textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for this change..." rows={3} />
+        </Field>
+      )}
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function MidHistoryModal({ mid, onClose }: {
+  mid: MerchantMidOut;
   onClose: () => void;
 }) {
-  const [rows, setRows] = useState<TerminalTidMidHistoryOut[]>([]);
+  const [rows, setRows] = useState<MerchantMidHistoryOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     setErr(null);
-    api.terminals.tidMidHistory(tid.id)
+    api.merchants.midHistory(mid.merchant_id, mid.id)
       .then(setRows)
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load MID history"))
       .finally(() => setLoading(false));
-  }, [tid.id]);
-
-  function midLabel(terminalTidMidId: string) {
-    const slot = tid.mids?.find((m) => m.id === terminalTidMidId);
-    return slot ? `${slot.mid} (${terminalTidMidId})` : terminalTidMidId;
-  }
+  }, [mid.merchant_id, mid.id]);
 
   return (
-    <Modal title="MID History" sub={`${tid.tid} · ${tid.id}`} icon="clock" size="slim" onClose={onClose}>
+    <Modal title="MID History" sub={`${mid.mid_value} · ${mid.id}`} icon="clock" size="slim" onClose={onClose}>
       {loading ? (
         <div style={{ padding: "20px 0", fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>Loading...</div>
       ) : err ? (
         <div style={{ fontSize: 13, color: "var(--bad)" }}>{err}</div>
       ) : rows.length === 0 ? (
-        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No MID changes recorded for this TID.</div>
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No changes recorded for this MID.</div>
       ) : (
         <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1510,14 +1554,14 @@ function TidMidHistoryModal({ tid, onClose }: {
               <div key={row.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12, background: "var(--surface)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
                   <div style={{ fontWeight: 700, color: "var(--ink-1)" }}>
-                    <span className="mono">{row.old_mid || "-"}</span>
+                    <span className="td-mut" style={{ fontWeight: 500 }}>{row.field}: </span>
+                    <span className="mono">{row.old_value || "-"}</span>
                     <span style={{ color: "var(--ink-3)", fontWeight: 500 }}> to </span>
-                    <span className="mono">{row.new_mid || "-"}</span>
+                    <span className="mono">{row.new_value || "-"}</span>
                   </div>
                   <span className="td-mut" style={{ fontSize: 12 }}>{row.changed_at ? new Date(row.changed_at).toLocaleString() : "-"}</span>
                 </div>
                 <dl className="kv" style={{ gridTemplateColumns: "92px 1fr", margin: 0 }}>
-                  <dt>MID slot</dt><dd className="mono">{midLabel(row.terminal_tid_mid_id)}</dd>
                   <dt>Reason</dt><dd>{row.reason || "-"}</dd>
                   <dt>Changed by</dt><dd className="mono">{row.changed_by_user_id || "-"}</dd>
                 </dl>
@@ -1530,56 +1574,55 @@ function TidMidHistoryModal({ tid, onClose }: {
   );
 }
 
-function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
+function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
   m: MerchantOut;
   nav: NavFn;
   canEdit: boolean;
-  onTidSaved: (tid: TerminalTidOut) => void;
-  onMidSaved: (tidId: string, mid: TerminalTidMidOut) => void;
+  onMidSaved: (mid: MerchantMidOut) => void;
+  onAcceptanceSaved: (midId: string, row: MerchantMidAcceptanceOut) => void;
 }) {
-  const tidValue = (value: string | null | undefined) => value || "-";
-  const [showAddTid, setShowAddTid] = useState(false);
-  const [editingTid, setEditingTid] = useState<TerminalTidOut | null>(null);
-  const [historyTid, setHistoryTid] = useState<TerminalTidOut | null>(null);
-  const [tidActionId, setTidActionId] = useState<string | null>(null);
-  const [tidActionError, setTidActionError] = useState<string | null>(null);
-  const [midModalTid, setMidModalTid] = useState<TerminalTidOut | null>(null);
-  const [editingMid, setEditingMid] = useState<TerminalTidMidOut | null>(null);
+  const [showAddMid, setShowAddMid] = useState(false);
+  const [editingMid, setEditingMid] = useState<MerchantMidOut | null>(null);
+  const [historyMid, setHistoryMid] = useState<MerchantMidOut | null>(null);
   const [midActionId, setMidActionId] = useState<string | null>(null);
   const [midActionError, setMidActionError] = useState<string | null>(null);
+  const [acceptanceModalMid, setAcceptanceModalMid] = useState<MerchantMidOut | null>(null);
+  const [editingAcceptance, setEditingAcceptance] = useState<MerchantMidAcceptanceOut | null>(null);
+  const [acceptanceActionId, setAcceptanceActionId] = useState<string | null>(null);
+  const [acceptanceActionError, setAcceptanceActionError] = useState<string | null>(null);
   const addressRows = merchantAddressRows(m);
 
-  async function toggleTidStatus(tid: TerminalTidOut) {
-    if (!canEdit || tidActionId) return;
-    setTidActionId(tid.id);
-    setTidActionError(null);
-    try {
-      const active = (tid.status ?? "Active").toLowerCase() === "active";
-      const next = active
-        ? await api.terminals.deleteTid(tid.id)
-        : await api.terminals.reactivateTid(tid.id);
-      onTidSaved(next);
-    } catch (e) {
-      setTidActionError(e instanceof ApiError ? e.message : "Failed to update TID status");
-    } finally {
-      setTidActionId(null);
-    }
-  }
-
-  async function toggleMidStatus(tid: TerminalTidOut, mid: TerminalTidMidOut) {
+  async function toggleMidStatus(mid: MerchantMidOut) {
     if (!canEdit || midActionId) return;
     setMidActionId(mid.id);
     setMidActionError(null);
     try {
       const active = (mid.status ?? "Active").toLowerCase() === "active";
       const next = active
-        ? await api.terminals.deleteTidMid(tid.id, mid.id)
-        : await api.terminals.reactivateTidMid(tid.id, mid.id);
-      onMidSaved(tid.id, next);
+        ? await api.merchants.deactivateMid(m.id, mid.id)
+        : await api.merchants.reactivateMid(m.id, mid.id);
+      onMidSaved(next);
     } catch (e) {
       setMidActionError(e instanceof ApiError ? e.message : "Failed to update MID status");
     } finally {
       setMidActionId(null);
+    }
+  }
+
+  async function toggleAcceptanceStatus(mid: MerchantMidOut, row: MerchantMidAcceptanceOut) {
+    if (!canEdit || acceptanceActionId) return;
+    setAcceptanceActionId(row.id);
+    setAcceptanceActionError(null);
+    try {
+      const active = (row.status ?? "Active").toLowerCase() === "active";
+      const next = active
+        ? await api.merchants.deactivateAcceptance(m.id, mid.id, row.id)
+        : await api.merchants.reactivateAcceptance(m.id, mid.id, row.id);
+      onAcceptanceSaved(mid.id, next);
+    } catch (e) {
+      setAcceptanceActionError(e instanceof ApiError ? e.message : "Failed to update acceptance status");
+    } finally {
+      setAcceptanceActionId(null);
     }
   }
 
@@ -1593,7 +1636,6 @@ function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
               <dt>Merchant ID</dt><dd className="mono">{m.id}</dd>
               {m.mcc_code && <><dt>MCC Code</dt><dd className="mono">{m.mcc_code}</dd></>}
               <dt>Category</dt><dd>{m.type}</dd>
-              <dt>Bank</dt><dd>{m.bank}</dd>
             </dl>
           </div>
         </Card>
@@ -1609,134 +1651,111 @@ function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
             </div>
           </Card>
         )}
-        {/* <Card title="Finance Readiness" icon="shield">
-          <div className="card-pad">
-            <div style={{ marginBottom: 16 }}><Readiness value={m.finance} /></div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {([
-                ["Business registration (SSM)", true],
-                ["Bank account verification",   m.finance !== "Not Ready"],
-                ["Director IC / passport",       m.finance === "Ready"],
-                ["Signed merchant agreement",    m.finance === "Ready"],
-              ] as [string, boolean][]).map(([lbl, ok], i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-                  <div style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: ok ? "var(--green-050)" : "var(--warn-bg)", color: ok ? "var(--green-700)" : "var(--warn)", flexShrink: 0 }}>
-                    <Icon name={ok ? "check" : "clock"} size={13} />
-                  </div>
-                  <span style={{ fontWeight: 500 }}>{lbl}</span>
-                  <span style={{ marginLeft: "auto" }}>{ok ? <Chip cls="chip-ok">Verified</Chip> : <Chip cls="chip-warn">Pending</Chip>}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card> */}
         <Card
-          title="Terminal IDs (TIDs)"
+          title={"MIDs" + (m.mids.length ? ` (${m.mids.length})` : "")}
           icon="tag"
-          actions={canEdit ? <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddTid(true)}>Add TID</Btn> : undefined}
+          actions={canEdit ? <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddMid(true)}>Add MID</Btn> : undefined}
         >
           <div className="card-pad">
-            {m.tids?.length ? (
+            {m.mids.length ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {m.tids.map((tid) => (
-                  <div key={tid.id} style={{ padding: "10px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
+                {m.mids.map((mid) => (
+                  <div key={mid.id} style={{ padding: "10px 12px", background: "var(--bg-2, #f5f5f5)", borderRadius: 6 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
-                      <span className="mono" style={{ fontWeight: 700 }}>{tidValue(tid.tid)}</span>
+                      <span className="mono" style={{ fontWeight: 700 }}>{mid.mid_value}</span>
                       <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <button className="icon-btn" title="MID history" onClick={() => setHistoryTid(tid)}>
+                        <button className="icon-btn" title="History" onClick={() => setHistoryMid(mid)}>
                           <Icon name="clock" size={14} />
                         </button>
                         {canEdit && (
                           <>
-                            <button className="icon-btn" title="Edit TID" onClick={() => setEditingTid(tid)}>
+                            <button className="icon-btn" title="Edit MID" onClick={() => setEditingMid(mid)}>
                               <Icon name="edit" size={14} />
                             </button>
                             <button
                               className="icon-btn"
-                              title={(tid.status ?? "Active").toLowerCase() === "active" ? "Deactivate TID" : "Reactivate TID"}
-                              disabled={tidActionId === tid.id}
-                              onClick={() => toggleTidStatus(tid)}
+                              title={(mid.status ?? "Active").toLowerCase() === "active" ? "Deactivate MID" : "Reactivate MID"}
+                              disabled={midActionId === mid.id}
+                              onClick={() => toggleMidStatus(mid)}
                             >
-                              <Icon name={(tid.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={14} />
+                              <Icon name={(mid.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={14} />
                             </button>
                           </>
                         )}
                       </div>
                     </div>
                     <dl className="kv" style={{ margin: 0 }}>
-                      <dt>TID</dt><dd className="mono">{tidValue(tid.tid)}</dd>
-                      <dt>Bank</dt><dd>{tid.bank || "-"}</dd>
+                      <dt>MID</dt><dd className="mono">{mid.mid_value}</dd>
+                      <dt>TID</dt><dd className="mono">{mid.tid_value}</dd>
+                      <dt>Bank</dt><dd>{mid.bank || "-"}</dd>
+                      <dt>MDR rate</dt><dd>{mid.mdr_rate ? `${mid.mdr_rate.type} · ${mid.mdr_rate.rate}% · ${mid.mdr_rate.network}` : "-"}</dd>
                       <dt>Terminal Serial</dt>
                       <dd className="mono">
-                        {tid.terminal_serial ? (
+                        {mid.terminal_serial ? (
                           <button
                             type="button"
                             style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
-                            onClick={() => nav("terminal-detail", tid.terminal_serial!)}
+                            onClick={() => nav("terminal-detail", mid.terminal_serial!)}
                           >
-                            {tid.terminal_serial}
+                            {mid.terminal_serial}
                           </button>
                         ) : "-"}
                       </dd>
-                      {(tid.sim_card || tid.simcard) && (
-                        <>
-                          <dt>SIM Card</dt>
-                          <dd>
-                            {(() => {
-                              const sim = tid.sim_card ?? tid.simcard;
-                              if (!sim) return null;
-                              const label = tidSimLabel(tid);
-                              return (
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                  <button
-                                    type="button"
-                                    style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
-                                    onClick={() => nav("simcard-detail", sim.id)}
-                                  >
-                                    {sim.id}
-                                  </button>
-                                  {label && <span className="td-mut">{label}</span>}
-                                  {sim.status && <Chip cls={sim.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{sim.status}</Chip>}
-                                </span>
-                              );
-                            })()}
-                          </dd>
-                        </>
-                      )}
-                      <dt>Status</dt><dd>{tid.status ? <Chip cls={tid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{tid.status}</Chip> : "-"}</dd>
+                      <dt>Status</dt><dd>{mid.status ? <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip> : "-"}</dd>
                     </dl>
                     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>MIDs</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>Acceptance</span>
                         {canEdit && (
-                          <Btn variant="ghost" sm icon="plus" onClick={() => { setMidModalTid(tid); setEditingMid(null); }}>Add MID</Btn>
+                          <Btn variant="ghost" sm icon="plus" onClick={() => { setAcceptanceModalMid(mid); setEditingAcceptance(null); }}>Add Acceptance</Btn>
                         )}
                       </div>
-                      {tid.mids?.length ? (
+                      {mid.acceptances.length ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {tid.mids.map((mid) => (
-                            <div key={mid.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "6px 8px", background: "var(--surface)", borderRadius: 5 }}>
+                          {mid.acceptances.map((row) => (
+                            <div key={row.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "6px 8px", background: "var(--surface)", borderRadius: 5 }}>
                               <div>
                                 <div className="mono" style={{ fontWeight: 600 }}>
-                                  {mid.mid}{" "}
-                                  {mid.status && <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
+                                  {row.acceptance_name}{" "}
+                                  {row.status && <Chip cls={row.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{row.status}</Chip>}
                                 </div>
                                 <div className="td-mut" style={{ fontSize: 12 }}>
-                                  {mid.mdr_rate ? `${mid.mdr_rate.type} · ${mid.mdr_rate.rate}% · ${mid.mdr_rate.network}` : "No MDR rate"}
+                                  {row.requires_tid_mid
+                                    ? (row.uses_own_tid_mid
+                                      ? `Own pair · TID ${row.tid_value || "-"} · MID ${row.mid_value || "-"}${row.mdr_rate ? ` · ${row.mdr_rate.rate}%` : ""}`
+                                      : "Uses original MID/TID")
+                                    : "No TID/MID required"}
                                 </div>
+                                {row.uses_own_tid_mid && (
+                                  <div style={{ fontSize: 12, marginTop: 2 }}>
+                                    <span className="td-mut">Terminal: </span>
+                                    {row.terminal_serial ? (
+                                      <button
+                                        type="button"
+                                        className="mono"
+                                        style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+                                        onClick={() => nav("terminal-detail", row.terminal_serial!)}
+                                      >
+                                        {row.terminal_serial}
+                                      </button>
+                                    ) : (
+                                      <span className="td-mut">Not mounted</span>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                               {canEdit && (
                                 <div style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                                  <button className="icon-btn" title="Edit MID" onClick={() => { setMidModalTid(tid); setEditingMid(mid); }}>
+                                  <button className="icon-btn" title="Edit" onClick={() => { setAcceptanceModalMid(mid); setEditingAcceptance(row); }}>
                                     <Icon name="edit" size={13} />
                                   </button>
                                   <button
                                     className="icon-btn"
-                                    title={(mid.status ?? "Active").toLowerCase() === "active" ? "Deactivate MID" : "Reactivate MID"}
-                                    disabled={midActionId === mid.id}
-                                    onClick={() => toggleMidStatus(tid, mid)}
+                                    title={(row.status ?? "Active").toLowerCase() === "active" ? "Deactivate" : "Reactivate"}
+                                    disabled={acceptanceActionId === row.id}
+                                    onClick={() => toggleAcceptanceStatus(mid, row)}
                                   >
-                                    <Icon name={(mid.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={13} />
+                                    <Icon name={(row.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={13} />
                                   </button>
                                 </div>
                               )}
@@ -1744,7 +1763,7 @@ function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
                           ))}
                         </div>
                       ) : (
-                        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No MIDs linked.</div>
+                        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No acceptance items selected.</div>
                       )}
                     </div>
                   </div>
@@ -1752,38 +1771,38 @@ function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
               </div>
             ) : (
               <div style={{ padding: "12px 0", fontSize: 13, color: "var(--ink-3)" }}>
-                No TIDs linked.
+                No MIDs on this merchant yet.
               </div>
             )}
-            {tidActionError && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 10 }}>{tidActionError}</div>}
             {midActionError && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 10 }}>{midActionError}</div>}
+            {acceptanceActionError && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 10 }}>{acceptanceActionError}</div>}
           </div>
         </Card>
-        {historyTid && (
-          <TidMidHistoryModal tid={historyTid} onClose={() => setHistoryTid(null)} />
+        {historyMid && (
+          <MidHistoryModal mid={historyMid} onClose={() => setHistoryMid(null)} />
         )}
-        {showAddTid && canEdit && (
-          <MerchantTidModal
+        {showAddMid && canEdit && (
+          <MerchantMidModal
             merchant={m}
-            onClose={() => setShowAddTid(false)}
-            onSaved={onTidSaved}
+            onClose={() => setShowAddMid(false)}
+            onSaved={onMidSaved}
           />
         )}
-        {editingTid && canEdit && (
-          <MerchantTidModal
+        {editingMid && canEdit && (
+          <MerchantMidModal
             merchant={m}
-            existing={editingTid}
-            onClose={() => setEditingTid(null)}
-            onSaved={onTidSaved}
-          />
-        )}
-        {midModalTid && canEdit && (
-          <MidModal
-            tid={midModalTid}
-            merchantName={m.name}
             existing={editingMid}
-            onClose={() => { setMidModalTid(null); setEditingMid(null); }}
-            onSaved={(mid) => onMidSaved(midModalTid.id, mid)}
+            onClose={() => setEditingMid(null)}
+            onSaved={onMidSaved}
+          />
+        )}
+        {acceptanceModalMid && canEdit && (
+          <AcceptanceModal
+            mid={acceptanceModalMid}
+            merchantName={m.name}
+            existing={editingAcceptance}
+            onClose={() => { setAcceptanceModalMid(null); setEditingAcceptance(null); }}
+            onSaved={(row) => onAcceptanceSaved(acceptanceModalMid.id, row)}
           />
         )}
       </div>
@@ -1796,13 +1815,12 @@ function OverviewTab({ m, nav, canEdit, onTidSaved, onMidSaved }: {
           </dl>
         </div>
       </Card>
-      <Card title="Bank Details" icon="bank">
+      <Card title="Settlement Bank Account" icon="bank">
         <div className="card-pad">
           <dl className="kv">
             <dt>Account name</dt><dd>{m.bank_account_name}</dd>
             <dt>Account number</dt><dd className="mono">{m.bank_account_number}</dd>
             <dt>Account type</dt><dd>{m.bank_account_type}</dd>
-            <dt>Bank</dt><dd>{m.bank}</dd>
           </dl>
         </div>
       </Card>
