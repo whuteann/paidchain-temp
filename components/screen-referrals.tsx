@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "./icons";
-import { Btn, Card, Chip, Empty, Entity, Field, Modal, PageHead, Pagination, SearchBox, Toolbar, useToast, MobileListItem, ResponsiveTable } from "./components";
-import { api, ApiError } from "@/lib/api";
+import { Btn, Card, Chip, Empty, Entity, Field, Modal, PageHead, Pagination, SearchBox, Toolbar, useToast, MobileListItem, ResponsiveTable, SingleFileDropzone } from "./components";
+import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
 import type {
   MerchantOut,
   ReferralBonusBatchOut,
@@ -506,11 +506,11 @@ function LinkMerchantModal({ referral, onClose, onSaved }: { referral: ReferralO
         value={merchant}
         onSelect={setMerchant}
         fetchResults={(query) => api.merchants.list({ query, per_page: 8 }).then((p) => p.items)}
-        getLabel={(m) => `${m.name} · ${m.mid}`}
+        getLabel={(m) => `${m.name} · ${merchantDisplayMid(m)}`}
         renderOption={(m) => (
           <div className="cell-2">
             <span className="td-strong">{m.name}</span>
-            <span className="c2-sub">{m.id} · {m.mid} · {m.bank}</span>
+            <span className="c2-sub">{m.id} · {merchantDisplayMid(m)} · {merchantDisplayBank(m)}</span>
           </div>
         )}
       />
@@ -737,7 +737,6 @@ function UploadAttachmentModal({ referral, onClose, onUploaded }: { referral: Re
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   async function submit() {
     if (!file) return;
@@ -764,26 +763,11 @@ function UploadAttachmentModal({ referral, onClose, onUploaded }: { referral: Re
         <Btn variant="primary" icon="upload" disabled={!file || saving} onClick={submit}>{saving ? "Uploading..." : "Upload"}</Btn>
       </>}
     >
-      <div
-        className={"dropzone" + (file ? " has" : "")}
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); }}
-      >
-        <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
-        <div style={{ fontWeight: 600, fontSize: 13 }}>Drop file or click to upload</div>
-        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>Merchant documents, bank proof or internal notes</div>
-        <input ref={inputRef} type="file" hidden onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])} />
-      </div>
-      {file && (
-        <div className="dz-files">
-          <div className="dz-file">
-            <Icon name="fileCheck" size={16} className="dzf-ico" />
-            <span className="dzf-name">{file.name}</span>
-            <span className="dzf-size">{(file.size / 1024).toFixed(0)} KB</span>
-          </div>
-        </div>
-      )}
+      <SingleFileDropzone
+        file={file}
+        onFile={setFile}
+        hint="Merchant documents, bank proof or internal notes"
+      />
       <ErrorText message={err} />
     </Modal>
   );
@@ -840,7 +824,6 @@ function MarkPaidModal({ batch, onClose, onSaved }: { batch: ReferralBonusBatchO
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   async function submit() {
     if (!paidDate || !file) return;
@@ -871,19 +854,12 @@ function MarkPaidModal({ batch, onClose, onSaved }: { batch: ReferralBonusBatchO
         <input className="input" type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
       </Field>
       <Field label="Payment proof" hint="required">
-        <div
-          className={"dropzone" + (file ? " has" : "")}
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); }}
-        >
-          <Icon name="upload" size={22} style={{ marginBottom: 6 }} />
-          <div style={{ fontWeight: 600, fontSize: 13 }}>Drop file or click to upload</div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>PDF, image or payment confirmation file</div>
-          <input ref={inputRef} type="file" hidden onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])} />
-        </div>
+        <SingleFileDropzone
+          file={file}
+          onFile={setFile}
+          hint="PDF, image or payment confirmation file"
+        />
       </Field>
-      {file && <div className="dz-files"><div className="dz-file"><Icon name="fileCheck" size={16} className="dzf-ico" /><span className="dzf-name">{file.name}</span><span className="dzf-size">{(file.size / 1024).toFixed(0)} KB</span></div></div>}
       <ErrorText message={err} />
     </Modal>
   );

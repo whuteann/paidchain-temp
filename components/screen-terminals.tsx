@@ -1,10 +1,10 @@
 /* Bumipay — Terminal inventory + detail */
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable, SingleFileDropzone } from "./components";
 import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS } from "./data";
-import { api, ApiError, terminalSerial } from "@/lib/api";
-import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, TerminalTidOut, TerminalTidCreate, TerminalTidUpdate } from "@/lib/api";
+import { api, ApiError, terminalSerial, merchantDisplayMid } from "@/lib/api";
+import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, AvailableTidOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
 
@@ -21,8 +21,9 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function tidMidsSummary(tid: TerminalTidOut) {
-  return tid.mids?.length ? tid.mids.map((m) => m.mid).join(", ") : "No MID";
+function availableTidLabel(entry: AvailableTidOut) {
+  const source = entry.source === "acceptance" ? entry.acceptance_name || "Acceptance" : "MID";
+  return `${entry.tid_value} · ${entry.mid_value || "No MID"} · ${source}`;
 }
 
 function EntitySearchSelect<T extends { id: string }>({
@@ -144,10 +145,10 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
     setRegistering(true); setErr(null);
     const body: TerminalCreate = {
       serial_no: serialNo.trim(),
-      brand: setting.brand, model: setting.model, location,
-      rental_rate: setting.monthly_rental, rental_plan: "Monthly Rental",
-      sim: linkSim && selectedSimId ? "4G + WiFi" : "WiFi only",
-      condition_note: "Good", term_setting_id: setting.id,
+      term_setting_id: setting.id,
+      initial_location: location,
+      sim_type: linkSim && selectedSimId ? "4G + WiFi" : "WiFi only",
+      condition_note: "Good",
     };
     try {
       const result = await api.terminals.create(body);
@@ -379,11 +380,11 @@ function BulkUploadModal({ onClose, onComplete }: {
         </select>
       </Field>
       <Field label="Serial number CSV" hint="required">
-        <input
-          className="input"
-          type="file"
+        <SingleFileDropzone
+          file={file}
+          onFile={(f) => void handleFile(f)}
           accept=".csv,text/csv"
-          onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
+          showSelected={false}
         />
       </Field>
       <div style={{ padding: "10px 14px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, fontSize: 12.5, color: "var(--ink-2)" }}>
@@ -926,34 +927,37 @@ function LinkTidModal({ terminal, merchantId, onClose, onLinked }: {
   terminal: TerminalOut;
   merchantId: string;
   onClose: () => void;
-  onLinked: (tid: TerminalTidOut) => void;
+  onLinked: (entry: AvailableTidOut) => void;
 }) {
   const serial = terminalSerial(terminal);
-  const [merchantTids, setMerchantTids] = useState<TerminalTidOut[]>([]);
-  const [selectedTidId, setSelectedTidId] = useState("");
+  const [available, setAvailable] = useState<AvailableTidOut[]>([]);
+  const [selectedKey, setSelectedKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    api.merchants.listTids(merchantId)
+    api.merchants.availableTids(merchantId)
       .then((rows) => {
-        setMerchantTids(rows);
-        const firstAvailable = rows.find((tid) => !tid.terminal_serial);
-        setSelectedTidId(firstAvailable?.id ?? "");
+        setAvailable(rows);
+        setSelectedKey(rows[0] ? `${rows[0].source}:${rows[0].source_id}` : "");
       })
-      .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load merchant TIDs"))
+      .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load available TIDs"))
       .finally(() => setLoading(false));
   }, [merchantId]);
 
-  const availableTids = merchantTids.filter((tid) => !tid.terminal_serial);
+  const selected = available.find((e) => `${e.source}:${e.source_id}` === selectedKey) ?? null;
 
   async function submit() {
-    if (!selectedTidId) return;
+    if (!selected) return;
     setSaving(true); setErr(null);
     try {
-      const result = await api.terminals.assignTid(selectedTidId, { terminal_serial: serial });
-      onLinked(result);
+      if (selected.source === "mid") {
+        await api.merchantMids.mountOnTerminal(selected.source_id, serial);
+      } else {
+        await api.merchantMidAcceptances.mountOnTerminal(selected.source_id, serial);
+      }
+      onLinked(selected);
       onClose();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Failed to link TID");
@@ -971,7 +975,7 @@ function LinkTidModal({ terminal, merchantId, onClose, onLinked }: {
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || loading || !selectedTidId} onClick={submit}>
+        <Btn variant="primary" icon="check" disabled={saving || loading || !selected} onClick={submit}>
           {saving ? "Linking…" : "Link TID"}
         </Btn>
       </>}
@@ -979,21 +983,21 @@ function LinkTidModal({ terminal, merchantId, onClose, onLinked }: {
       <Field label="Merchant TID" hint="required">
         <select
           className="input"
-          value={selectedTidId}
-          onChange={(e) => setSelectedTidId(e.target.value)}
-          disabled={loading || availableTids.length === 0}
+          value={selectedKey}
+          onChange={(e) => setSelectedKey(e.target.value)}
+          disabled={loading || available.length === 0}
         >
           <option value="">{loading ? "Loading TIDs…" : "Select TID…"}</option>
-          {availableTids.map((tid) => (
-            <option key={tid.id} value={tid.id}>
-              {tid.tid} · {tidMidsSummary(tid)} · {tid.id}
+          {available.map((entry) => (
+            <option key={`${entry.source}:${entry.source_id}`} value={`${entry.source}:${entry.source_id}`}>
+              {availableTidLabel(entry)}
             </option>
           ))}
         </select>
       </Field>
-      {!loading && availableTids.length === 0 && (
+      {!loading && available.length === 0 && (
         <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 8 }}>
-          No available unassigned TIDs for this merchant.
+          No available unmounted TIDs for this merchant.
         </div>
       )}
       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
@@ -1004,35 +1008,34 @@ function LinkTidModal({ terminal, merchantId, onClose, onLinked }: {
 function AssignMerchantModal({ terminal, onClose, onAssigned }: {
   terminal: TerminalOut;
   onClose: () => void;
-  onAssigned: (updated: TerminalOut, tid: TerminalTidOut) => void;
+  onAssigned: (updated: TerminalOut, entry: AvailableTidOut) => void;
 }) {
   const serial = terminalSerial(terminal);
   const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(null);
-  const [merchantTids, setMerchantTids] = useState<TerminalTidOut[]>([]);
-  const [selectedTidId, setSelectedTidId] = useState("");
+  const [available, setAvailable] = useState<AvailableTidOut[]>([]);
+  const [selectedKey, setSelectedKey] = useState("");
   const [tidsLoading, setTidsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedMerchant) {
-      setMerchantTids([]);
-      setSelectedTidId("");
+      setAvailable([]);
+      setSelectedKey("");
       return;
     }
 
     let cancelled = false;
     setTidsLoading(true);
     setErr(null);
-    api.merchants.listTids(selectedMerchant.id)
+    api.merchants.availableTids(selectedMerchant.id)
       .then((rows) => {
         if (cancelled) return;
-        const available = rows.filter((tid) => !tid.terminal_serial && tid.status !== "Inactive");
-        setMerchantTids(available);
-        setSelectedTidId(available[0]?.id ?? "");
+        setAvailable(rows);
+        setSelectedKey(rows[0] ? `${rows[0].source}:${rows[0].source_id}` : "");
       })
       .catch((e) => {
-        if (!cancelled) setErr(e instanceof ApiError ? e.message : "Failed to load merchant TIDs");
+        if (!cancelled) setErr(e instanceof ApiError ? e.message : "Failed to load available TIDs");
       })
       .finally(() => {
         if (!cancelled) setTidsLoading(false);
@@ -1043,18 +1046,19 @@ function AssignMerchantModal({ terminal, onClose, onAssigned }: {
     };
   }, [selectedMerchant]);
 
-  const selectedTid = merchantTids.find((tid) => tid.id === selectedTidId) ?? null;
+  const selected = available.find((e) => `${e.source}:${e.source_id}` === selectedKey) ?? null;
 
   async function submit() {
-    if (!selectedMerchant || !selectedTid) return;
+    if (!selectedMerchant || !selected) return;
     setSaving(true);
     setErr(null);
     try {
       const updated = await api.terminals.assignMerchant(serial, {
         merchant_id: selectedMerchant.id,
-        terminal_tid_id: selectedTid.id,
+        merchant_mid_id: selected.source === "mid" ? selected.source_id : undefined,
+        merchant_mid_acceptance_id: selected.source === "acceptance" ? selected.source_id : undefined,
       });
-      onAssigned(updated, { ...selectedTid, terminal_serial: serial });
+      onAssigned(updated, selected);
       onClose();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Failed to assign merchant");
@@ -1072,7 +1076,7 @@ function AssignMerchantModal({ terminal, onClose, onAssigned }: {
       foot={<>
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || !selectedMerchant || !selectedTid} onClick={submit}>
+        <Btn variant="primary" icon="check" disabled={saving || !selectedMerchant || !selected} onClick={submit}>
           {saving ? "Assigning..." : "Assign to Merchant"}
         </Btn>
       </>}
@@ -1084,39 +1088,39 @@ function AssignMerchantModal({ terminal, onClose, onAssigned }: {
         value={selectedMerchant}
         onSelect={(merchant) => {
           setSelectedMerchant(merchant);
-          setMerchantTids([]);
-          setSelectedTidId("");
+          setAvailable([]);
+          setSelectedKey("");
         }}
         fetchResults={(query) => api.merchants.list({ query, per_page: 8 }).then((p) => p.items)}
-        getLabel={(merchant) => merchant.name + (merchant.mid ? " · " + merchant.mid : "")}
+        getLabel={(merchant) => merchant.name + " · " + merchantDisplayMid(merchant)}
         dropdownPlacement="down"
         renderOption={(merchant) => (
           <div className="cell-2">
             <span className="td-strong">{merchant.name}</span>
-            <span className="c2-sub mono">{merchant.id}{merchant.mid ? " · " + merchant.mid : ""}</span>
+            <span className="c2-sub mono">{merchant.id} · {merchantDisplayMid(merchant)}</span>
           </div>
         )}
       />
       <Field label="Available TID" hint="required">
         <select
           className="input"
-          value={selectedTidId}
-          onChange={(e) => setSelectedTidId(e.target.value)}
-          disabled={!selectedMerchant || tidsLoading || merchantTids.length === 0}
+          value={selectedKey}
+          onChange={(e) => setSelectedKey(e.target.value)}
+          disabled={!selectedMerchant || tidsLoading || available.length === 0}
         >
           <option value="">
             {!selectedMerchant ? "Select merchant first..." : tidsLoading ? "Loading TIDs..." : "Select TID..."}
           </option>
-          {merchantTids.map((tid) => (
-            <option key={tid.id} value={tid.id}>
-              {tid.tid} · {tidMidsSummary(tid)} · {tid.id}
+          {available.map((entry) => (
+            <option key={`${entry.source}:${entry.source_id}`} value={`${entry.source}:${entry.source_id}`}>
+              {availableTidLabel(entry)}
             </option>
           ))}
         </select>
       </Field>
-      {selectedMerchant && !tidsLoading && merchantTids.length === 0 && (
+      {selectedMerchant && !tidsLoading && available.length === 0 && (
         <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 8 }}>
-          No available unassigned TIDs for this merchant.
+          No available unmounted TIDs for this merchant.
         </div>
       )}
       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
@@ -1151,9 +1155,8 @@ export function TerminalDetail({
   const linkedSim = linkedSimOverride === undefined ? (terminalSim ?? initialLinkedSim) : linkedSimOverride;
   const linkedSimLoaded = linkedSimOverride !== undefined || Boolean(terminalSim) || simLoaded;
 
-  // TID state
-  const [tids, setTids] = useState<TerminalTidOut[]>([]);
-  const [tidsLoading, setTidsLoading] = useState(true);
+  // Mounted MIDs/acceptance TIDs — TerminalOut.mids already carries everything
+  // currently mounted on this device, no separate fetch needed.
   const [showLinkTid, setShowLinkTid] = useState(false);
   const [showAssignMerchant, setShowAssignMerchant] = useState(false);
 
@@ -1161,7 +1164,6 @@ export function TerminalDetail({
     api.terminals.get(id)
       .then((t) => {
         setTerminal(t);
-        if (t.tids?.length) setTids(t.tids);
         setPendingStatus(t.status);
         if (t.term_setting_id) {
           api.termSettings.get(t.term_setting_id).then(setTermSetting).catch(console.error);
@@ -1169,11 +1171,6 @@ export function TerminalDetail({
       })
       .catch(console.error)
       .finally(() => setDetailLoading(false));
-
-    api.terminals.listTids(id)
-      .then(setTids)
-      .catch(console.error)
-      .finally(() => setTidsLoading(false));
   }, [id]);
 
   if (detailLoading) return (
@@ -1197,8 +1194,7 @@ export function TerminalDetail({
     terminal.sim,
     terminal.merchant?.name,
   ].filter(Boolean).join(" · ");
-  const connectedTid = tids[0] ?? terminal.tids?.[0] ?? null;
-  const visibleTidsLoading = tidsLoading && !(terminal.tids?.length);
+  const mountedTids = terminal.mids ?? [];
   const assignedMerchant = terminal.merchant;
   const assignedCustomer = terminal.customer ?? assignedMerchant?.customer ?? null;
 
@@ -1345,60 +1341,44 @@ export function TerminalDetail({
               </div>
             )}
           </Card>
-          {/* Connected TID */}
+          {/* Mounted TIDs — a device can carry several at once (Credit, Debit, IPP, ...) */}
           <Card
-            title="Connected TID"
+            title={"Mounted TIDs" + (mountedTids.length ? ` (${mountedTids.length})` : "")}
             icon="terminal"
-            actions={can("Terminals.Edit") && !connectedTid ? (
+            actions={can("Terminals.Edit") ? (
               <>
-                <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>
-                {terminal.status === "Installed" && terminal.merchant?.id && (
+                {!assignedMerchant && <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>}
+                {terminal.status === "Installed" && assignedMerchant?.id && (
                   <Btn variant="ghost" sm icon="plus" onClick={openLinkTid}>Link TID</Btn>
                 )}
               </>
             ) : undefined}
           >
-            {visibleTidsLoading ? (
-              <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
-            ) : !connectedTid ? (
+            {mountedTids.length === 0 ? (
               <div style={{ padding: "14px 20px", fontSize: 13, color: "var(--ink-3)" }}>
-                No TID connected to this device.
+                No TID mounted on this device.
                 {can("Terminals.Edit") && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                    <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>
-                    {terminal.status === "Installed" && terminal.merchant?.id && (
+                    {!assignedMerchant && <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>}
+                    {terminal.status === "Installed" && assignedMerchant?.id && (
                       <Btn variant="ghost" sm icon="plus" onClick={openLinkTid}>Link TID</Btn>
                     )}
                   </div>
                 )}
               </div>
             ) : (
-              <div className="card-pad">
-                <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
-                  <dt>ID</dt><dd className="mono">{connectedTid.id}</dd>
-                  <dt>TID</dt><dd className="mono">{connectedTid.tid}</dd>
-                  <dt>Merchant ID</dt><dd className="mono">{connectedTid.merchant_id || terminal.merchant?.id || "—"}</dd>
-                </dl>
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 8 }}>MIDs</div>
-                  {connectedTid.mids?.length ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {connectedTid.mids.map((mid) => (
-                        <div key={mid.id} style={{ padding: "6px 8px", background: "var(--bg-2, #f5f5f5)", borderRadius: 5 }}>
-                          <div className="mono" style={{ fontWeight: 600 }}>
-                            {mid.mid}{" "}
-                            {mid.status && <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip>}
-                          </div>
-                          <div className="td-mut" style={{ fontSize: 12 }}>
-                            {mid.mdr_rate ? `${mid.mdr_rate.type} · ${mid.mdr_rate.rate}% · ${mid.mdr_rate.network}` : "No MDR rate"}
-                          </div>
-                        </div>
-                      ))}
+              <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {mountedTids.map((entry) => (
+                  <div key={`${entry.source}:${entry.source_id}`} style={{ padding: "8px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 7 }}>
+                    <div className="mono" style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}>
+                      {entry.tid_value}
+                      <Chip cls={entry.source === "mid" ? "chip-info" : "chip-neutral"}>{entry.source === "acceptance" ? entry.acceptance_name || "Acceptance" : "MID (default)"}</Chip>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No MIDs linked.</div>
-                  )}
-                </div>
+                    <div className="td-mut" style={{ fontSize: 12 }}>
+                      MID {entry.mid_value || "—"} · {entry.bank}{entry.mdr_rate_id ? ` · ${entry.mdr_rate_id}` : ""}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </Card>
@@ -1418,7 +1398,6 @@ export function TerminalDetail({
                   {assignedMerchant.contact && <><dt>Contact</dt><dd>{assignedMerchant.contact}</dd></>}
                   {assignedMerchant.phone && <><dt>Phone</dt><dd>{assignedMerchant.phone}</dd></>}
                   {assignedMerchant.email && <><dt>Email</dt><dd>{assignedMerchant.email}</dd></>}
-                  {assignedMerchant.bank && <><dt>Bank</dt><dd>{assignedMerchant.bank}</dd></>}
                   {assignedMerchant.mcc_code && <><dt>MCC Code</dt><dd className="mono">{assignedMerchant.mcc_code}</dd></>}
                 </dl>
               </div>
@@ -1604,9 +1583,8 @@ export function TerminalDetail({
           terminal={terminal}
           merchantId={terminal.merchant.id}
           onClose={() => setShowLinkTid(false)}
-          onLinked={(linkedTid) => {
-            setTids([linkedTid]);
-            setTerminal((prev) => prev ? { ...prev, tid: prev.tid || linkedTid.tid } : prev);
+          onLinked={() => {
+            api.terminals.get(id).then(setTerminal).catch(console.error);
             flash("TID linked to device");
           }}
         />
@@ -1616,11 +1594,10 @@ export function TerminalDetail({
         <AssignMerchantModal
           terminal={terminal}
           onClose={() => setShowAssignMerchant(false)}
-          onAssigned={(updated, linkedTid) => {
-            setTerminal((prev) => prev ? { ...prev, ...updated, tid: updated.tid || prev.tid || linkedTid.tid } : updated);
+          onAssigned={(updated) => {
+            setTerminal(updated);
             setPendingStatus(updated.status);
             setPendingLocation(updated.location);
-            setTids(updated.tids?.length ? updated.tids : [linkedTid]);
             flash("Terminal assigned to merchant");
           }}
         />

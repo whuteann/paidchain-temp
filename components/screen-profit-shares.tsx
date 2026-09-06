@@ -10,7 +10,7 @@ import type {
   ProfitShareSqlAccountMapping,
 } from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
-import { Btn, Card, Chip, Empty, Field, Modal, MobileListItem, PageHead, Pagination, ResponsiveTable, SearchBox, Toolbar, useToast } from "./components";
+import { Btn, Card, Chip, Empty, Field, Modal, MobileListItem, PageHead, Pagination, ResponsiveTable, SearchBox, Toolbar, useToast, SingleFileDropzone } from "./components";
 import { Icon } from "./icons";
 import type { NavFn } from "./shell";
 
@@ -123,12 +123,12 @@ function UploadProfitShareModal({ onClose, onUploaded }: {
           <input className="input" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(Number(event.target.value))} />
         </Field>
       </div>
-      <Field label="Sales report" hint=".xlsx · up to 20 MB">
-        <input
-          className="input"
-          type="file"
+      <Field label="Sales report" hint=".xlsx · up to 10 MB">
+        <SingleFileDropzone
+          file={file}
+          onFile={setFile}
           accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={(event) => setFile(event.target.files?.[0] || null)}
+          showSelected={false}
         />
       </Field>
       {file && (

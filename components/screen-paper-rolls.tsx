@@ -1,7 +1,7 @@
 /* Bumipay — Paper roll inventory */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
-import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
+import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";
 import { api, ApiError } from "@/lib/api";
 import type { PaperRollOut, PaperRollCreate, PaperRollDetails } from "@/lib/api";
 import { NavFn } from "./shell";
@@ -107,10 +107,10 @@ function UpdateStockModal({ onClose, onSave }: { onClose: () => void; onSave: (e
         <input className="input" placeholder="Optional note" value={f.note} onChange={(e) => set("note", e.target.value)} />
       </Field>
       <Field label="Attachment">
-        <input
-          className="input"
-          type="file"
-          onChange={(e) => { setFile(e.target.files?.[0] ?? null); setErr(null); }}
+        <SingleFileDropzone
+          file={file}
+          onFile={(f) => { setFile(f); setErr(null); }}
+          showSelected={false}
         />
       </Field>
       {file && (
