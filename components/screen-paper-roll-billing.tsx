@@ -1,4 +1,4 @@
-/* PaidChain — Paper Roll Billing Report */
+/* Bumipay — Paper Roll Billing Report */
 import { useState, useEffect } from "react";
 import { Card, Btn, PageHead, Toolbar, Empty, Chip, ResponsiveTable, MobileListItem } from "./components";
 import { api, ApiError } from "@/lib/api";

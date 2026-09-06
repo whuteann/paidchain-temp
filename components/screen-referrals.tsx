@@ -1,4 +1,4 @@
-/* PaidChain - Referral lead management + bonus batches */
+/* Bumipay — Referral lead management + bonus batches */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "./icons";

@@ -1,4 +1,4 @@
-/* PaidChain — SIM card inventory listing + detail */
+/* Bumipay — SIM card inventory listing + detail */
 import { useState, useEffect, useCallback } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";

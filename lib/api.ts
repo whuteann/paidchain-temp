@@ -1,4 +1,4 @@
-/* PaidChain — typed API client (OpenAPI 3.1.0) */
+/* Bumipay — typed API client (OpenAPI 3.1.0) */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL;
 
@@ -434,6 +434,63 @@ export interface ProfitShareTypeSummaryOut {
   merchant_count: number;
 }
 
+export interface ProfitShareSqlAccountMapping {
+  customer_code: string;
+  item_codes: Record<CustomerType, string>;
+  line_mode: "SINGLE" | "BY_TYPE";
+  terms_code: string | null;
+  tax_code: string | null;
+  document_number_mode: "PAIDCHAIN" | "SQL_AUTO";
+  einvoice_mode: "INHERIT" | "EXPLICIT";
+  einvoice_submission_type: string | null;
+}
+
+export interface ConnectorDeviceRefOut {
+  id: string;
+  code: string;
+  name: string;
+  online: boolean;
+  status: "Online" | "Offline" | "Revoked";
+  sql_status: "Connected" | "Error" | "Unknown";
+  sql_company: string | null;
+  connector_version: string | null;
+  last_seen_at: string | null;
+}
+
+export interface ConnectorDeviceOut extends ConnectorDeviceRefOut {
+  enabled: boolean;
+  machine_name: string | null;
+  windows_user: string | null;
+  paired: boolean;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export interface ConnectorPairingCodeOut {
+  connector: ConnectorDeviceOut;
+  pairing_code: string;
+  expires_at: string;
+}
+
+export interface SqlPostingJobOut {
+  job_id: string;
+  profit_share_id: string;
+  invoice_number: string;
+  status: "QUEUED" | "PROCESSING" | "POSTED" | "FAILED";
+  attempt_count: number;
+  sql_doc_no: string | null;
+  sql_doc_key: string | null;
+  sql_external_ref: string | null;
+  result: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  queued_at: string;
+  started_at: string | null;
+  posted_at: string | null;
+  last_attempt_at: string | null;
+  connector: ConnectorDeviceRefOut | null;
+}
+
 export interface ProfitShareOut {
   id: string;
   report_name: string | null;
@@ -455,6 +512,9 @@ export interface ProfitShareOut {
   invoice_number: string | null;
   invoice_file_url: string | null;
   invoice_generated_at: string | null;
+  sql_account_mapping: ProfitShareSqlAccountMapping | null;
+  sql_account_mapping_updated_at: string | null;
+  sql_posting: SqlPostingJobOut | null;
   paid_at: string | null;
   created_at: string;
   created_by: ProfitShareUserRef | null;
@@ -498,9 +558,33 @@ export const profitShares = {
     req<ProfitShareDetailOut>("PATCH", `/profit-shares/${profitShareId}/lines/${lineId}`, {
       body: { customer_id: customerId },
     }),
-  generateInvoice: (id: string) => reqBlob("POST", `/profit-shares/${id}/invoice`),
+  updateSqlAccountMapping: (id: string, mapping: ProfitShareSqlAccountMapping) =>
+    req<ProfitShareDetailOut>("PATCH", `/profit-shares/${id}/sql-account-mapping`, {
+      body: mapping,
+    }),
+  generateInvoice: (id: string, mapping: ProfitShareSqlAccountMapping) =>
+    reqBlob("POST", `/profit-shares/${id}/invoice`, { body: mapping }),
+  regenerateInvoice: (
+    id: string,
+    mapping: ProfitShareSqlAccountMapping,
+    typeAmounts: Record<CustomerType, number> | null = null,
+  ) => reqBlob("POST", `/profit-shares/${id}/invoice/regenerate`, {
+    body: { mapping, type_amounts: typeAmounts },
+  }),
   downloadInvoice: (id: string) => reqBlob("GET", `/profit-shares/${id}/invoice`),
+  getSqlPosting: (id: string) => req<SqlPostingJobOut | null>("GET", `/profit-shares/${id}/sql-post`),
+  postToSql: (id: string) => req<SqlPostingJobOut>("POST", `/profit-shares/${id}/sql-post`),
+  retrySqlPosting: (id: string) => req<SqlPostingJobOut>("POST", `/profit-shares/${id}/sql-post/retry`),
   markPaid: (id: string) => req<ProfitShareDetailOut>("POST", `/profit-shares/${id}/mark-paid`),
+};
+
+export const sqlConnectors = {
+  list: () => req<ConnectorDeviceOut[]>("GET", "/sql-connectors"),
+  createPairingCode: (connectorCode: string, name: string) =>
+    req<ConnectorPairingCodeOut>("POST", "/sql-connectors/pairing-code", {
+      body: { connector_code: connectorCode, name },
+    }),
+  revoke: (id: string) => req<ConnectorDeviceOut>("POST", `/sql-connectors/${id}/revoke`),
 };
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
@@ -2089,6 +2173,7 @@ export const api = {
   rentals,
   payouts,
   profitShares,
+  sqlConnectors,
   referrals,
   referralBonusBatches,
   referralBonusRules,

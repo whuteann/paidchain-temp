@@ -1,7 +1,9 @@
-import { Shell, useNav } from "@/components/shell";
-import { Payouts } from "@/components/screen-payouts";
+import type { GetServerSideProps } from "next";
 
 export default function PayoutsPage() {
-  const nav = useNav();
-  return <Shell><Payouts nav={nav} /></Shell>;
+  return null;
 }
+
+export const getServerSideProps: GetServerSideProps = async () => ({
+  redirect: { destination: "/dashboard", permanent: false },
+});

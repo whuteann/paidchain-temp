@@ -1,4 +1,4 @@
-/* PaidChain — Paper roll inventory */
+/* Bumipay — Paper roll inventory */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";

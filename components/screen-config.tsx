@@ -1,21 +1,30 @@
-/* PaidChain — Settings: Job SLA, MDR, Users & Roles */
+/* Bumipay — Settings: Job SLA, MDR, Users & Roles */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pagination } from "./components";
 import { ROLES, PERMISSION_MODULES } from "./data";
 import { api, ApiError } from "@/lib/api";
-import type { BankOut, BankCreate, BankUpdate, UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
+import type { BankOut, BankCreate, BankUpdate, ConnectorDeviceOut, ConnectorPairingCodeOut, UserOut, UserCreate, JobSlaMap, MdrOut, MdrCreate, RoleOut, RoleUpdate, RentalPlanOut, RentalPlanCreate, RentalPlanUpdate, ReferralBonusRuleOut, ReferralBonusRuleUpdate } from "@/lib/api";
 import { useCan } from "@/lib/use-permissions";
 
 /* =================== SETTINGS =================== */
+type SettingsTab = "sla" | "banks" | "referral" | "sql-connectors";
+
 export function TerminalSettings() {
-  const [tab, setTab] = useState<"sla" | "banks" | "referral">("sla");
+  const can = useCan();
+  const [tab, setTab] = useState<SettingsTab>("sla");
+  const tabs: [SettingsTab, string, string][] = [
+    ["sla", "clock", "Job SLA"],
+    ["banks", "bank", "Banks"],
+    ["referral", "star", "Referral Bonus"],
+  ];
+  if (can("SQL Connectors.Manage")) tabs.push(["sql-connectors", "receipt", "SQL Connectors"]);
 
   return (
     <div>
       <PageHead title="Settings" />
       <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--line)", paddingBottom: 0 }}>
-        {([["sla", "clock", "Job SLA"], ["banks", "bank", "Banks"], ["referral", "star", "Referral Bonus"]] as const).map(([key, icon, label]) => (
+        {tabs.map(([key, icon, label]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -35,7 +44,161 @@ export function TerminalSettings() {
       {tab === "sla" && <JobSlaSettings />}
       {tab === "banks" && <BankSettings />}
       {tab === "referral" && <ReferralBonusSettings />}
+      {tab === "sql-connectors" && <SqlConnectorSettings />}
     </div>
+  );
+}
+
+function connectorTime(value?: string | null) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-MY", {
+    year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function SqlConnectorSettings() {
+  const [devices, setDevices] = useState<ConnectorDeviceOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<ConnectorDeviceOut | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    api.sqlConnectors.list()
+      .then(setDevices)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load SQL connectors"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  async function revoke() {
+    if (!revokeTarget) return;
+    setActionId(revokeTarget.id);
+    setError(null);
+    try {
+      const updated = await api.sqlConnectors.revoke(revokeTarget.id);
+      setDevices((current) => current.map((device) => device.id === updated.id ? updated : device));
+      setRevokeTarget(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to revoke connector");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  return (
+    <div>
+      {error && <div style={{ padding: "9px 12px", color: "var(--bad)", background: "var(--bad-bg, #fef2f2)", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
+      <Card
+        title="SQL Account Connectors"
+        icon="receipt"
+        actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowAdd(true)}>Add Connector</Btn>}
+      >
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", color: "var(--ink-3)", fontSize: 12.5, lineHeight: 1.5 }}>
+          Each Finance Windows laptop connects outward to Bumipay. No inbound port, public IP, or SQL password is stored here.
+        </div>
+        {loading ? (
+          <div style={{ padding: 20, color: "var(--ink-3)", fontSize: 13 }}>Loading connectors...</div>
+        ) : devices.length === 0 ? (
+          <div style={{ padding: 20, color: "var(--ink-3)", fontSize: 13 }}>No SQL Account connector has been paired.</div>
+        ) : (
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead><tr>{["Connector", "Device", "Bumipay", "SQL Account", "Last Seen", ""].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+              <tbody>
+                {devices.map((device) => (
+                  <tr key={device.id}>
+                    <td><div className="cell-2"><span className="td-strong">{device.name}</span><span className="c2-sub mono">{device.code} · {device.id}</span></div></td>
+                    <td><div className="cell-2"><span>{device.machine_name || "Not paired"}</span><span className="c2-sub">v{device.connector_version || "—"}</span></div></td>
+                    <td><Chip cls={device.status === "Revoked" ? "chip-bad" : device.online ? "chip-ok" : "chip-neutral"} dot>{device.status === "Revoked" ? "Revoked" : device.online ? "Online" : "Offline"}</Chip></td>
+                    <td><div className="cell-2"><span>{device.sql_status}</span><span className="c2-sub">{device.sql_company || "Company unknown"}</span></div></td>
+                    <td>{connectorTime(device.last_seen_at)}</td>
+                    <td>{device.status !== "Revoked" && <Btn variant="ghost" sm disabled={actionId === device.id} onClick={() => setRevokeTarget(device)}>Revoke</Btn>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      {showAdd && <AddSqlConnectorModal onClose={() => setShowAdd(false)} onCreated={(device) => { setDevices((current) => [device, ...current.filter((item) => item.id !== device.id)]); }} />}
+      {revokeTarget && (
+        <Modal
+          title="Revoke SQL Connector?"
+          sub={`${revokeTarget.name} · ${revokeTarget.code}`}
+          icon="receipt"
+          size="slim"
+          onClose={() => setRevokeTarget(null)}
+          foot={<><div className="mf-spacer" /><Btn variant="ghost" onClick={() => setRevokeTarget(null)}>Cancel</Btn><Btn variant="danger" disabled={actionId === revokeTarget.id} onClick={revoke}>{actionId ? "Revoking..." : "Revoke Connector"}</Btn></>}
+        >
+          <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink-2)" }}>The device token will stop working immediately. Queued jobs remain stored but this connector will no longer be able to claim them.</div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function AddSqlConnectorModal({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (device: ConnectorDeviceOut) => void;
+}) {
+  const [code, setCode] = useState("FINANCE-PC-01");
+  const [name, setName] = useState("Finance SQL Laptop");
+  const [pairing, setPairing] = useState<ConnectorPairingCodeOut | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function createCode() {
+    if (!code.trim() || !name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api.sqlConnectors.createPairingCode(code.trim(), name.trim());
+      setPairing(result);
+      onCreated(result.connector);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to create pairing code");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Add SQL Connector"
+      sub="Pair a Finance Windows laptop"
+      icon="receipt"
+      size="slim"
+      onClose={onClose}
+      foot={<><div className="mf-spacer" /><Btn variant="ghost" onClick={onClose}>{pairing ? "Done" : "Cancel"}</Btn>{!pairing && <Btn variant="primary" icon="check" disabled={saving || !code.trim() || !name.trim()} onClick={createCode}>{saving ? "Generating..." : "Generate Pairing Code"}</Btn>}</>}
+    >
+      {!pairing ? (
+        <>
+          <Field label="Connector code" hint="letters, numbers, dot, dash, underscore">
+            <input className="input mono" value={code} onChange={(event) => setCode(event.target.value)} />
+          </Field>
+          <Field label="Display name">
+            <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
+        </>
+      ) : (
+        <div style={{ textAlign: "center" }}>
+          <div style={{ color: "var(--ink-3)", fontSize: 12.5 }}>Enter this one-time code on the Finance laptop before {connectorTime(pairing.expires_at)}.</div>
+          <div className="mono" style={{ fontSize: 34, fontWeight: 700, letterSpacing: 7, margin: "18px 0" }}>{pairing.pairing_code}</div>
+          <div style={{ textAlign: "left", padding: 12, background: "var(--bg-2)", borderRadius: 8, fontSize: 12.5, lineHeight: 1.5 }}>
+            Open the Bumipay Connector and enter pairing code <span className="mono">{pairing.pairing_code}</span>. The code becomes invalid immediately after pairing.
+          </div>
+        </div>
+      )}
+      {error && <div style={{ marginTop: 10, color: "var(--bad)", fontSize: 13 }}>{error}</div>}
+    </Modal>
   );
 }
 
@@ -1172,7 +1335,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
         <input className="input" placeholder="e.g. Mei Ling Tan" value={f.name} onChange={(e) => set("name", e.target.value)} />
       </Field>
       <Field label="Email address" hint="required">
-        <input className="input" type="email" placeholder="name@paidchain.com" value={f.email} onChange={(e) => set("email", e.target.value)} />
+        <input className="input" type="email" placeholder="name@bumipay.com" value={f.email} onChange={(e) => set("email", e.target.value)} />
       </Field>
       {!existing && (
         <Field label="Password" hint="required">
@@ -1231,6 +1394,10 @@ function UserModal({ onClose, onSave, existing, roles }: {
 }
 
 /* =================== ROLES TAB =================== */
+const VISIBLE_PERMISSION_KEYS = new Set(
+  PERMISSION_MODULES.flatMap(({ module, actions }) => actions.map((action) => `${module}.${action}`))
+);
+
 function RolesTab({ roles, loading, onEdit }: { roles: RoleOut[]; loading: boolean; onEdit: (id: string) => void }) {
   const can = useCan();
   const totalPerms = PERMISSION_MODULES.reduce((s, m) => s + m.actions.length, 0);
@@ -1253,7 +1420,7 @@ function RolesTab({ roles, loading, onEdit }: { roles: RoleOut[]; loading: boole
               <div>{role.user_count === 1 ? "user" : "users"}</div>
             </div>
             <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "right", minWidth: 100 }}>
-              <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{role.permissions.length}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--ink-3)" }}>/{totalPerms}</span></div>
+              <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{role.permissions.filter((permission) => VISIBLE_PERMISSION_KEYS.has(permission)).length}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--ink-3)" }}>/{totalPerms}</span></div>
               <div>permissions</div>
             </div>
             {can("Users.Edit") && <Btn variant="ghost" sm icon="edit" onClick={() => onEdit(role.id)}>Edit Permissions</Btn>}
@@ -1269,7 +1436,10 @@ function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => v
   const can = useCan();
   const [name, setName] = useState(role.name);
   const [desc, setDesc] = useState(role.description);
-  const [perms, setPerms] = useState<Set<string>>(new Set(role.permissions));
+  const hiddenPermissions = role.permissions.filter((permission) => !VISIBLE_PERMISSION_KEYS.has(permission));
+  const [perms, setPerms] = useState<Set<string>>(
+    new Set(role.permissions.filter((permission) => VISIBLE_PERMISSION_KEYS.has(permission)))
+  );
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -1289,7 +1459,7 @@ function RoleDetail({ role, onBack, onUpdate }: { role: RoleOut; onBack: () => v
     if (!can("Users.Edit")) return;
     setSaving(true);
     try {
-      const body: RoleUpdate = { name, description: desc, permissions: Array.from(perms) };
+      const body: RoleUpdate = { name, description: desc, permissions: [...hiddenPermissions, ...Array.from(perms)] };
       const updated = await api.roles.update(role.id, body);
       onUpdate(updated);
       setToast("Permissions updated for " + updated.name);

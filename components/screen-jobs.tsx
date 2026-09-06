@@ -1,4 +1,4 @@
-/* PaidChain — Job listing + detail + workflow engine */
+/* Bumipay — Job listing + detail + workflow engine */
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import { Icon } from "./icons";

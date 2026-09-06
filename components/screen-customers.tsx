@@ -1,4 +1,4 @@
-/* PaidChain — Customer listing + detail + onboarding */
+/* Bumipay — Customer listing + detail + onboarding */
 import { useCallback, useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";

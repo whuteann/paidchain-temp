@@ -1,13 +1,14 @@
-/* PaidChain — app shell: sidebar + topbar */
+/* Bumipay — app shell: sidebar + topbar */
 import { useEffect, useMemo, useState, ReactNode } from "react";
 import { useRouter } from "next/router";
+import Image from "next/image";
 import { useDispatch, useSelector } from "react-redux";
 import { Icon } from "./icons";
 import { logout, setDevMode } from "@/store/authSlice";
 import type { AppDispatch, RootState } from "@/store";
 import { canAccessPath } from "@/lib/permissions";
 
-export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "payouts" | "payout-detail" | "profit-shares" | "profit-share-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs";
+export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "profit-shares" | "profit-share-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs" | "payouts" | "payout-detail";
 export type NavFn = (to: Route, param?: string) => void;
 
 const NAV = [
@@ -27,7 +28,6 @@ const NAV = [
   ]},
   { group: "Finance", items: [
     { id: "rentals",              label: "Rentals",             icon: "calendar" },
-    { id: "payouts",           label: "Payouts",             icon: "payouts" },
     { id: "profit-shares",     label: "Profit Shares",       icon: "cash" },
     { id: "referral-bonus-batches", label: "Referral Bonuses", icon: "cash" },
     { id: "paper-roll-billing",  label: "PR Billing",          icon: "receipt" },
@@ -52,7 +52,6 @@ const NAV_PATHS: Record<string, string> = {
   rentals: "/rentals",
   "paper-rolls": "/paper-rolls",
   "paper-roll-billing": "/paper-roll-billing",
-  payouts: "/payouts",
   "profit-shares": "/profit-shares",
   "referral-bonus-batches": "/referral-bonus-batches",
   mdr: "/mdr",
@@ -72,7 +71,6 @@ function getActiveFromPath(pathname: string): string {
   if (pathname.startsWith("/rentals")) return "rentals";
   if (pathname === "/paper-rolls") return "paper-rolls";
   if (pathname === "/paper-roll-billing") return "paper-roll-billing";
-  if (pathname.startsWith("/payouts")) return "payouts";
   if (pathname.startsWith("/profit-shares")) return "profit-shares";
   if (pathname.startsWith("/referral-bonus-batches")) return "referral-bonus-batches";
   if (pathname === "/mdr") return "mdr";
@@ -105,8 +103,6 @@ function getCrumbsFromPath(pathname: string): Crumb[] {
   // Finance
   if (pathname === "/rentals")             return [{ label: "Finance" }, { label: "Rentals" }];
   if (pathname.startsWith("/rentals/"))    return [{ label: "Finance" }, { label: "Rentals", href: "/rentals" }, { label: "Detail" }];
-  if (pathname === "/payouts")             return [{ label: "Finance" }, { label: "Payouts" }];
-  if (pathname.startsWith("/payouts/"))    return [{ label: "Finance" }, { label: "Payouts", href: "/payouts" }, { label: "Detail" }];
   if (pathname === "/profit-shares")       return [{ label: "Finance" }, { label: "Profit Shares" }];
   if (pathname.startsWith("/profit-shares/")) return [{ label: "Finance" }, { label: "Profit Shares", href: "/profit-shares" }, { label: "Detail" }];
   if (pathname === "/referral-bonus-batches")          return [{ label: "Finance" }, { label: "Referral Bonuses" }];
@@ -131,7 +127,6 @@ export function useNav(): NavFn {
     if (to === "simcard-detail")  { router.push(`/simcards/${param}`); return; }
     if (to === "job-detail")      { router.push(`/jobs/${param}`); return; }
     if (to === "rental-detail")   { router.push(`/rentals/${param}`); return; }
-    if (to === "payout-detail")   { router.push(`/payouts/${param}`); return; }
     if (to === "profit-share-detail") { router.push(`/profit-shares/${param}`); return; }
     if (to === "referral-bonus-batch-detail") { router.push(`/referral-bonus-batches/${param}`); return; }
     router.push(NAV_PATHS[to] || "/dashboard");
@@ -150,7 +145,7 @@ export function Shell({ children }: ShellProps) {
   const devMode = useSelector((s: RootState) => s.auth.devMode);
   const activeParent = getActiveFromPath(router.pathname);
   const crumbs = getCrumbsFromPath(router.pathname);
-  const mobileTitle = crumbs[crumbs.length - 1]?.label || "PaidChain";
+  const mobileTitle = crumbs[crumbs.length - 1]?.label || "Bumipay";
 
   const visibleNav = useMemo(
     () => NAV
@@ -196,15 +191,8 @@ export function Shell({ children }: ShellProps) {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sb-brand" onClick={() => router.push("/dashboard")} style={{ cursor: "pointer" }}>
-          <div className="sb-logo">
-            <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <div className="sb-brand-text">
-            <div className="sb-brand-name">PaidChain</div>
-            <div className="sb-brand-sub">Operations Console</div>
-          </div>
+          <Image className="sb-wordmark" src="/branding/bumipay-wordmark.png" alt="Bumipay" width={1200} height={400} priority />
+          <Image className="sb-mark" src="/branding/bumipay-mark.png" alt="Bumipay" width={512} height={512} priority />
           <button
             type="button"
             className="sb-drawer-close"

@@ -1,4 +1,4 @@
-/* PaidChain — Rental listing + detail + create modal */
+/* Bumipay — Rental listing + detail + create modal */
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";

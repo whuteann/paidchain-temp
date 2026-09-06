@@ -1,4 +1,4 @@
-/* PaidChain — Payout listing + upload + detail */
+/* Bumipay — legacy payout listing + upload + detail */
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, PayoutStatus, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";

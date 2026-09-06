@@ -1,4 +1,4 @@
-/* PaidChain — shared UI components */
+/* Bumipay — shared UI components */
 import { useState, useRef, useEffect, useCallback, ReactNode } from "react";
 import { Icon } from "./icons";
 import { TERMINAL_STATUS, MERCHANT_STATUS, JOB_STATUS, SLA, PAYOUT_STATUS, FINANCE } from "./data";

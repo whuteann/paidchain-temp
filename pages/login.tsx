@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/router";
+import Image from "next/image";
 import { useDispatch } from "react-redux";
 import { api, ApiError } from "@/lib/api";
 import { loginSuccess, setDevMode } from "@/store/authSlice";
@@ -56,16 +57,21 @@ export default function LoginPage() {
           border: "1px solid var(--line, #e5e7eb)",
           borderRadius: 12,
           padding: 40,
-          width: 360,
+          width: "min(400px, calc(100vw - 32px))",
           boxShadow: "0 4px 24px rgba(0,0,0,.06)",
         }}
       >
-        <div style={{ marginBottom: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "var(--ink, #111)" }}>
-            PaidChain
-          </div>
-          <div style={{ fontSize: 13, color: "var(--ink-2, #666)", marginTop: 4 }}>
-            Operations Console
+        <div style={{ marginBottom: 32, textAlign: "center", background: "#1f272d", borderRadius: 10, padding: "14px 24px 12px" }}>
+          <Image
+            src="/branding/bumipay-wordmark.png"
+            alt="Bumipay"
+            width={1200}
+            height={400}
+            priority
+            style={{ width: 230, maxWidth: "100%", height: "auto" }}
+          />
+          <div style={{ fontSize: 12, color: "#c6ccd2", marginTop: -4, letterSpacing: ".08em", textTransform: "uppercase" }}>
+            Ops System
           </div>
         </div>
 

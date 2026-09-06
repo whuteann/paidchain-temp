@@ -1,11 +1,9 @@
-import { useRouter } from "next/router";
-import { Shell, useNav } from "@/components/shell";
-import { PayoutDetail } from "@/components/screen-payouts";
+import type { GetServerSideProps } from "next";
 
 export default function PayoutDetailPage() {
-  const router = useRouter();
-  const nav = useNav();
-  const { id } = router.query;
-  if (!id) return null;
-  return <Shell><PayoutDetail id={id as string} nav={nav} /></Shell>;
+  return null;
 }
+
+export const getServerSideProps: GetServerSideProps = async () => ({
+  redirect: { destination: "/dashboard", permanent: false },
+});
