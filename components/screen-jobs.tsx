@@ -8,7 +8,7 @@ import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import { merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantMidOut, MerchantMidCreate, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut, BankOut } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantMidOut, MerchantMidCreate, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -105,9 +105,6 @@ function JobAddMidModal({ merchant, existingTidValues, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (mid: MerchantMidOut) => void;
 }) {
-  const [bankId, setBankId] = useState("");
-  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
-  const [banksLoading, setBanksLoading] = useState(true);
   const [midValue, setMidValue] = useState("");
   const [tidValue, setTidValue] = useState("");
   const [mdrRateId, setMdrRateId] = useState("");
@@ -116,26 +113,10 @@ function JobAddMidModal({ merchant, existingTidValues, onClose, onSaved }: {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    api.banks.list()
-      .then((items) => {
-        if (cancelled) return;
-        setBankOptions(items);
-        const active = items.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
-        setBankId((current) => current || active[0]?.id || "");
-      })
-      .catch(console.error)
-      .finally(() => {
-        if (!cancelled) setBanksLoading(false);
-      });
     api.mdr.list().then(setMdrRates).catch(console.error);
-    return () => { cancelled = true; };
   }, []);
 
-  const selectableBanks = bankOptions.filter((bank) =>
-    (bank.status ?? "Active").toLowerCase() === "active" || bank.id === bankId
-  );
-  const valid = Boolean(bankId && midValue.trim() && tidValue.trim());
+  const valid = Boolean(midValue.trim() && tidValue.trim());
 
   async function submit() {
     if (!valid) return;
@@ -146,7 +127,6 @@ function JobAddMidModal({ merchant, existingTidValues, onClose, onSaved }: {
     setSaving(true); setErr(null);
     try {
       const created = await api.merchants.createMid(merchant.id, {
-        bank_id: bankId,
         mid_value: midValue.trim(),
         tid_value: tidValue.trim(),
         mdr_rate_id: mdrRateId || null,
@@ -181,26 +161,16 @@ function JobAddMidModal({ merchant, existingTidValues, onClose, onSaved }: {
           <input className="input" value={tidValue} onChange={(e) => setTidValue(e.target.value)} placeholder="TID123456" />
         </Field>
       </div>
-      <div className="field-row">
-        <Field label="Bank" hint="required">
-          <select className="input" value={bankId} disabled={banksLoading} onChange={(e) => setBankId(e.target.value)}>
-            <option value="">{banksLoading ? "Loading banks…" : "Select bank…"}</option>
-            {selectableBanks.map((bank) => (
-              <option key={bank.id} value={bank.id}>{bank.name}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="MDR rate">
-          <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
-            <option value="">No MDR rate</option>
-            {mdrRates.map((rate) => (
-              <option key={rate.id} value={rate.id}>
-                {rate.id} · {rate.type} {rate.rate}%
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <Field label="MDR rate">
+        <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+          <option value="">No MDR rate</option>
+          {mdrRates.map((rate) => (
+            <option key={rate.id} value={rate.id}>
+              {rate.id} · {rate.type} {rate.rate}%
+            </option>
+          ))}
+        </select>
+      </Field>
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
   );
@@ -469,8 +439,8 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       tid_value: created.tid_value,
       mid_value: created.mid_value,
       mdr_rate_id: created.mdr_rate_id,
-      bank_id: created.bank_id,
-      bank: created.bank,
+      bank_id: selectedMerchant?.bank_id ?? null,
+      bank: selectedMerchant?.bank ?? null,
       acceptance_name: null,
     };
     setAvailableTids((items) => [...items, entry]);
@@ -766,8 +736,8 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                   <div style={{ fontSize: 12, color: "var(--ink-3)" }}>required · one line per installation device</div>
                 </div>
                 <div style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                  <Btn variant="ghost" sm icon="tag" disabled={!selectedMerchant} onClick={() => setShowAddTid(true)}>Add MID</Btn>
-                  <Btn variant="ghost" sm icon="plus" onClick={addInstallationTerminalRow}>Add Line</Btn>
+                  {/* <Btn variant="ghost" sm icon="tag" disabled={!selectedMerchant} onClick={() => setShowAddTid(true)}>Add MID</Btn> */}
+                  <Btn variant="ghost" sm icon="plus" onClick={addInstallationTerminalRow}>Add MID</Btn>
                 </div>
               </div>
 
@@ -939,6 +909,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<JobOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -970,6 +941,18 @@ export function Jobs({ nav }: { nav: NavFn }) {
     setTimeout(() => { setToast(null); nav("job-detail", job.id); }, 1000);
   }
 
+  function handleCancelled(job: JobOut) {
+    setCancelTarget(null);
+    if (status === "All" || status === "Cancelled") {
+      setJobList((prev) => prev.map((j) => j.id === job.id ? job : j));
+    } else {
+      setJobList((prev) => prev.filter((j) => j.id !== job.id));
+      setTotal((prev) => Math.max(0, prev - 1));
+    }
+    setToast("Job " + job.id + " cancelled");
+    setTimeout(() => setToast(null), 2000);
+  }
+
   return (
     <div>
       <PageHead
@@ -988,7 +971,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
             {["All", ...Object.keys(JOB_TYPES)].map((option) => <option key={option} value={option}>{option === "All" ? "All Types" : option}</option>)}
           </select>
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
-            {["All", "Pending", "Device Prepared", "Device Returned", "Stock Prepared", "Job Done", "Completed"].map((option) => <option key={option} value={option}>{option === "All" ? "All Statuses" : option}</option>)}
+            {["All", "Pending", "Device Prepared", "Device Returned", "Stock Prepared", "Job Done", "Completed", "Cancelled"].map((option) => <option key={option} value={option}>{option === "All" ? "All Statuses" : option}</option>)}
           </select>
           <select className="select" value={sla} onChange={(e) => { setSla(e.target.value); resetPage(); }}>
             {["All", "On Track", "Due Soon", "Breached", "Met"].map((option) => <option key={option} value={option}>{option === "All" ? "All SLA" : option}</option>)}
@@ -1011,6 +994,18 @@ export function Jobs({ nav }: { nav: NavFn }) {
               { key: "sla", header: "SLA", render: (job) => <SlaChip sla={job.sla} /> },
               { key: "assignee", header: "Assignee", render: (job) => <span className="td-mut">{job.assignee}</span> },
               { key: "due", header: "Due", render: (job) => <span className="td-mut td-mono">{job.due_date.slice(5)}</span> },
+              ...(can("Jobs.Delete") ? [{
+                key: "actions", header: "", render: (job: JobOut) => job.stage === "Pending" ? (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="Cancel job"
+                    onClick={(e) => { e.stopPropagation(); setCancelTarget(job); }}
+                  >
+                    <Icon name="x" size={14} />
+                  </button>
+                ) : null,
+              }] : []),
             ]}
             renderMobile={(job) => (
               <MobileListItem
@@ -1025,6 +1020,9 @@ export function Jobs({ nav }: { nav: NavFn }) {
                 ]}
                 onClick={() => nav("job-detail", job.id)}
                 chevron
+                actions={can("Jobs.Delete") && job.stage === "Pending" ? (
+                  <Btn variant="danger" sm icon="x" onClick={() => setCancelTarget(job)}>Cancel</Btn>
+                ) : undefined}
               />
             )}
           />
@@ -1034,8 +1032,60 @@ export function Jobs({ nav }: { nav: NavFn }) {
       </Card>
 
       {showCreate && can("Jobs.Create") && <CreateJobModal onClose={() => setShowCreate(false)} onCreate={handleCreate} nav={nav} />}
+      {cancelTarget && can("Jobs.Delete") && (
+        <CancelJobModal job={cancelTarget} onClose={() => setCancelTarget(null)} onCancelled={handleCancelled} />
+      )}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
+  );
+}
+
+/* =================== CANCEL JOB MODAL =================== */
+function CancelJobModal({ job, onClose, onCancelled }: {
+  job: JobOut;
+  onClose: () => void;
+  onCancelled: (job: JobOut) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      const result = await api.jobs.cancel(job.id, { reason: reason.trim() || null });
+      onCancelled(result);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to cancel job");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Cancel Job"
+      sub={`${job.id} · ${job.merchant.name}`}
+      icon="x"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Back</Btn>
+        <Btn variant="danger" icon="x" disabled={saving} onClick={submit}>
+          {saving ? "Cancelling…" : "Cancel Job"}
+        </Btn>
+      </>}
+    >
+      <p style={{ margin: "0 0 14px", fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+        This job will be marked Cancelled and hidden from the default job list. Any device
+        already assigned to it will be released back to stock.
+      </p>
+      <Field label="Reason" hint="optional">
+        <textarea className="textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this job being cancelled?" rows={3} />
+      </Field>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
   );
 }
 
@@ -1472,6 +1522,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [assignJobTerminalId, setAssignJobTerminalId] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
   const [showTrackParcel, setShowTrackParcel] = useState(false);
   const [refreshingParcel, setRefreshingParcel] = useState(false);
   const [docBusy, setDocBusy] = useState<"form" | "do" | null>(null);
@@ -1516,6 +1567,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const currentSla = currentJobSla(job, rules);
   const nextStage = stages[currentIndex + 1] || null;
   const done = job.stage === "Completed";
+  const cancelled = job.stage === "Cancelled";
+  const closed = done || cancelled;
   const activeHistory = job.history[job.history.length - 1];
   const activeRule = nextStage ? findRule(rules, job.type, activeHistory?.stage ?? "", nextStage) : null;
   const activeElapsedDays = nextStage && activeHistory ? daysBetween(activeHistory.at, stampNow()) : 0;
@@ -1694,6 +1747,9 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           {can("Jobs.Escalate") && job.type === "Repair/Maintenance" && job.stage === "Pending" && !done && (
             <Btn variant="ghost" icon="swap" onClick={() => setShowEscalate(true)}>Escalate to Replacement</Btn>
           )}
+          {can("Jobs.Delete") && job.stage === "Pending" && (
+            <Btn variant="danger" icon="x" onClick={() => setShowCancel(true)}>Cancel Job</Btn>
+          )}
           {can("Jobs.Edit") && showTrackParcelAction && (
             <Btn variant="ghost" icon="truck" onClick={() => setShowTrackParcel(true)}>
               {job.shipment_tracking ? "Change Tracking #" : "Track Parcel"}
@@ -1714,20 +1770,24 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
         </div>
       </div>
 
-      <Card className="job-stepper-card">
-        <div className="card-pad" style={{ paddingTop: 26, paddingBottom: 24 }}>
-          <Stepper stages={stages} current={currentIndex} complete={done} />
-        </div>
-      </Card>
+      {!cancelled && (
+        <Card className="job-stepper-card">
+          <div className="card-pad" style={{ paddingTop: 26, paddingBottom: 24 }}>
+            <Stepper stages={stages} current={currentIndex} complete={done} />
+          </div>
+        </Card>
+      )}
 
       <div className="job-current-stage" style={{ margin: "16px 0", padding: "16px 18px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, boxShadow: "var(--sh-sm)", display: "flex", alignItems: "center", gap: 14 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 11, background: done ? "var(--green-050)" : currentSla === "Breached" ? "var(--bad-bg)" : currentSla === "Due Soon" ? "var(--warn-bg)" : "var(--info-bg)", color: done ? "var(--green-700)" : currentSla === "Breached" ? "var(--bad)" : currentSla === "Due Soon" ? "var(--warn)" : "var(--info)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-          <Icon name={done ? "checkCircle" : "activity"} size={20} />
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: cancelled ? "var(--bad-bg)" : done ? "var(--green-050)" : currentSla === "Breached" ? "var(--bad-bg)" : currentSla === "Due Soon" ? "var(--warn-bg)" : "var(--info-bg)", color: cancelled ? "var(--bad)" : done ? "var(--green-700)" : currentSla === "Breached" ? "var(--bad)" : currentSla === "Due Soon" ? "var(--warn)" : "var(--info)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <Icon name={cancelled ? "x" : done ? "checkCircle" : "activity"} size={20} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>{done ? "This job is complete" : "Current stage: " + (activeHistory?.stage ?? job.stage)}</div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{cancelled ? "This job was cancelled" : done ? "This job is complete" : "Current stage: " + (activeHistory?.stage ?? job.stage)}</div>
           <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
-            {done
+            {cancelled
+              ? (job.cancellation_reason || "No reason given.") + (job.cancelled_at ? ` · ${formatDateTime(job.cancelled_at)}` : "")
+              : done
               ? "Workflow finished with evidence and notifications logged."
               : devicePreparationBlocked
                 ? "Assign a device from inventory before advancing to Device Prepared."
@@ -1736,7 +1796,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                   : "Advance this job when the next team has completed its work."}
           </div>
         </div>
-        {!done && nextStage && canAdvanceStage && (
+        {!closed && nextStage && canAdvanceStage && (
           <Btn
             variant="primary"
             iconRight={transitionNeedsEvidence(job.type, nextStage) ? "upload" : "chevRight"}
@@ -1827,7 +1887,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                         </dl>
                         {assignedSerial ? (
                           <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", assignedSerial)}>View device</Btn>
-                        ) : rowNeedsAssignment && can("Jobs.Edit") && !done ? (
+                        ) : rowNeedsAssignment && can("Jobs.Edit") && !closed ? (
                           <Btn variant="ghost" sm icon="terminal" style={{ width: "100%", marginTop: 10 }} onClick={() => openAssignDevice(terminal.id)}>
                             Assign Device
                           </Btn>
@@ -1998,7 +2058,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          {(!hasJobTerminals && (job.terminal || (["Installation", "Replacement"].includes(job.type) && !done))) && (
+          {(!hasJobTerminals && (job.terminal || (["Installation", "Replacement"].includes(job.type) && !closed))) && (
             <Card title={job.type === "Replacement" ? "Replacement Device" : "Device"} icon="terminal">
               <div className="card-pad">
                 {requestedSpec && (
@@ -2165,6 +2225,18 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           onSaved={(updated) => {
             setJob(updated);
             flash("Tracking number saved");
+          }}
+        />
+      )}
+
+      {showCancel && can("Jobs.Delete") && (
+        <CancelJobModal
+          job={job}
+          onClose={() => setShowCancel(false)}
+          onCancelled={(updated) => {
+            setJob(updated);
+            setShowCancel(false);
+            flash("Job cancelled");
           }}
         />
       )}

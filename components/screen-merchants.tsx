@@ -80,14 +80,6 @@ function merchantTerminalSimLabel(t: MerchantTerminalOut) {
   return [sim?.carrier, sim?.msisdn || sim?.iccid || t.sim_type].filter(Boolean).join(" · ");
 }
 
-function activeBanks(banks: BankOut[]) {
-  return banks.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
-}
-
-function bankNameForId(banks: BankOut[], id?: string | null) {
-  return banks.find((bank) => bank.id === id)?.name ?? "";
-}
-
 export function CreateMerchantModal({ onClose, onSave, customerId, customerName, customer = null, existingMerchant = null }: CreateMerchantModalProps) {
   const MERCHANT_TYPES = ['Retail', 'Corporate'];
   const ACCOUNT_TYPES = ["Current", "Savings"];
@@ -104,11 +96,34 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     bankAccountNumber: existingMerchant?.bank_account_number ?? "",
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
+  const [bankId, setBankId] = useState(existingMerchant?.bank_id ?? "");
+  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
   const [address, setAddress] = useState<MerchantAddressForm>(() => merchantInitialAddressForm(existingMerchant, customer));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const setAddressField = (k: keyof MerchantAddressForm, v: string) => setAddress((prev) => ({ ...prev, [k]: v }));
+
+  useEffect(() => {
+    let cancelled = false;
+    api.banks.list()
+      .then((items) => {
+        if (cancelled) return;
+        setBankOptions(items);
+        const active = items.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active");
+        setBankId((current) => current || active[0]?.id || "");
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) setBanksLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectableBanks = bankOptions.filter((bank) =>
+    (bank.status ?? "Active").toLowerCase() === "active" || bank.id === bankId
+  );
 
   // Commercial profile step (create-only)
   const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
@@ -124,7 +139,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   const setC = (k: string, v: string) => setCommercial((p) => ({ ...p, [k]: v }));
   const [linkingSaving, setLinkingSaving] = useState(false);
   const hasCustomerLink = Boolean(customerId && customerName);
-  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim());
+  const valid = Boolean(hasCustomerLink && f.name.trim() && f.contact.trim() && bankId);
 
   function directAddressFields() {
     return {
@@ -147,6 +162,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       email: f.email.trim(),
       addresses: buildMerchantAddressPayload(address),
       ...directAddressFields(),
+      bank_id: bankId,
       bank_account_name: f.bankAccountName.trim() || f.name.trim(),
       bank_account_number: f.bankAccountNumber.trim(),
       bank_account_type: f.bankAccountType,
@@ -164,6 +180,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
         email: f.email.trim(),
         addresses: buildMerchantAddressPayload(address),
         ...directAddressFields(),
+        bank_id: bankId,
         bank_account_name: f.bankAccountName.trim() || f.name.trim(),
         bank_account_number: f.bankAccountNumber.trim(),
         bank_account_type: f.bankAccountType,
@@ -321,9 +338,18 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
             </div>
           </Field>
 
+          <Field label="Bank" hint="required">
+            <select className="input" value={bankId} disabled={banksLoading} onChange={(e) => setBankId(e.target.value)}>
+              <option value="">{banksLoading ? "Loading banks…" : "Select bank…"}</option>
+              {selectableBanks.map((bank) => (
+                <option key={bank.id} value={bank.id}>{bank.name}</option>
+              ))}
+            </select>
+          </Field>
+
           {!editing && (
             <div style={{ padding: "10px 14px", background: "var(--bg-2, #f5f5f5)", borderRadius: 9, fontSize: 12.5, color: "var(--ink-2)" }}>
-              MIDs (and their bank, TID and Acceptance items) are added from the merchant's detail page once it's created.
+              MIDs (and their TID and Acceptance items) are added from the merchant's detail page once it's created.
             </div>
           )}
 
@@ -502,6 +528,54 @@ function CustomerPickerModal({ onClose, onSelect }: {
 
 /* =================== ACCEPTANCE CATALOG (admin) =================== */
 
+function Toggle({ checked, onChange, label, hint }: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: React.ReactNode;
+  hint?: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 13.5, color: "var(--ink-1)" }}>{label}</div>
+        {hint && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 1 }}>{hint}</div>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        style={{
+          position: "relative",
+          width: 42,
+          height: 24,
+          borderRadius: 999,
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          background: checked ? "var(--green-700)" : "var(--line)",
+          transition: "background 0.15s ease",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            top: 3,
+            left: checked ? 21 : 3,
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#fff",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+            transition: "left 0.15s ease",
+          }}
+        />
+      </button>
+    </div>
+  );
+}
+
 function AcceptanceSettingModal({ existing, onClose, onSaved }: {
   existing?: AcceptanceSettingOut | null;
   onClose: () => void;
@@ -558,15 +632,17 @@ function AcceptanceSettingModal({ existing, onClose, onSaved }: {
       <Field label="Name" hint="required">
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Credit (Visa)" />
       </Field>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-        <label style={{ display: "flex", gap: 9, alignItems: "center", cursor: "pointer", fontSize: 13.5 }}>
-          <input type="checkbox" checked={requiresTidMid} onChange={(e) => setRequiresTidMid(e.target.checked)} />
-          Requires its own TID/MID pair
-        </label>
-        <label style={{ display: "flex", gap: 9, alignItems: "center", cursor: "pointer", fontSize: 13.5 }}>
-          <input type="checkbox" checked={defaultCompulsory} onChange={(e) => setDefaultCompulsory(e.target.checked)} />
-          Default compulsory (auto-attached to every new MID)
-        </label>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 4 }}>
+        <Toggle
+          checked={requiresTidMid}
+          onChange={setRequiresTidMid}
+          label="Allow opt in and opt out (yes/no)"
+        />
+        <Toggle
+          checked={defaultCompulsory}
+          onChange={setDefaultCompulsory}
+          label="Make compulsory (auto-attach to new MID)"
+        />
       </div>
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
     </Modal>
@@ -1219,11 +1295,11 @@ function AcceptancePicker({ settings, drafts, onChange }: {
                 <div style={{ display: "flex", gap: 14 }}>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                     <input type="radio" checked={!draft.uses_own_tid_mid} onChange={() => update(s.id, { uses_own_tid_mid: false })} />
-                    Use original MID/TID
+                    Opt In
                   </label>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                     <input type="radio" checked={draft.uses_own_tid_mid} onChange={() => update(s.id, { uses_own_tid_mid: true })} />
-                    Use this MID/TID
+                    Opt Out
                   </label>
                 </div>
                 {draft.uses_own_tid_mid && (
@@ -1265,9 +1341,6 @@ function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
   onSaved: (mid: MerchantMidOut) => void;
 }) {
   const editing = Boolean(existing);
-  const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
-  const [banksLoading, setBanksLoading] = useState(true);
-  const [bankId, setBankId] = useState(existing?.bank_id ?? "");
   const [midValue, setMidValue] = useState(existing?.mid_value ?? "");
   const [tidValue, setTidValue] = useState(existing?.tid_value ?? "");
   const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
@@ -1283,22 +1356,7 @@ function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
     if (!editing) api.acceptanceSettings.list().then(setAcceptanceSettingsList).catch(console.error);
   }, [editing]);
 
-  useEffect(() => {
-    let cancelled = false;
-    api.banks.list()
-      .then((items) => {
-        if (cancelled) return;
-        setBankOptions(items);
-        const options = activeBanks(items);
-        setBankId((current) => current || existing?.bank_id || options[0]?.id || "");
-      })
-      .catch(console.error)
-      .finally(() => { if (!cancelled) setBanksLoading(false); });
-    return () => { cancelled = true; };
-  }, [existing?.bank_id]);
-
-  const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === bankId);
-  const valid = Boolean(bankId && midValue.trim() && tidValue.trim());
+  const valid = Boolean(midValue.trim() && tidValue.trim());
 
   async function submit() {
     if (!valid) return;
@@ -1306,14 +1364,12 @@ function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
     try {
       const result = editing
         ? await api.merchants.updateMid(merchant.id, existing!.id, {
-          bank_id: bankId,
           mid_value: midValue.trim(),
           tid_value: tidValue.trim(),
           mdr_rate_id: mdrRateId || null,
           reason: reason.trim() || null,
         } satisfies MerchantMidUpdate)
         : await api.merchants.createMid(merchant.id, {
-          bank_id: bankId,
           mid_value: midValue.trim(),
           tid_value: tidValue.trim(),
           mdr_rate_id: mdrRateId || null,
@@ -1355,20 +1411,12 @@ function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
           <input className="input" value={tidValue} onChange={(e) => setTidValue(e.target.value)} placeholder="TID123456" />
         </Field>
       </div>
-      <div className="field-row">
-        <Field label="Bank" hint="required">
-          <select className="input" value={bankId} onChange={(e) => setBankId(e.target.value)} disabled={banksLoading}>
-            <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
-            {selectableBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
-          </select>
-        </Field>
-        <Field label="MDR rate">
-          <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
-            <option value="">No MDR rate</option>
-            {mdrRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.id} · {rate.type} {rate.rate}%</option>)}
-          </select>
-        </Field>
-      </div>
+      <Field label="MDR rate">
+        <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
+          <option value="">No MDR rate</option>
+          {mdrRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.id} · {rate.type} {rate.rate}%</option>)}
+        </select>
+      </Field>
       {editing ? (
         <Field label="Change reason" hint="optional">
           <textarea className="textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for this change..." rows={3} />
@@ -1480,11 +1528,11 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
           <div style={{ display: "flex", gap: 14, margin: "10px 0" }}>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
               <input type="radio" checked={!usesOwn} onChange={() => setUsesOwn(false)} />
-              Use original MID/TID
+              Opt In
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
               <input type="radio" checked={usesOwn} onChange={() => setUsesOwn(true)} />
-              Use this MID/TID
+              Opt Out
             </label>
           </div>
           {usesOwn && (
@@ -1636,6 +1684,7 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
               <dt>Merchant ID</dt><dd className="mono">{m.id}</dd>
               {m.mcc_code && <><dt>MCC Code</dt><dd className="mono">{m.mcc_code}</dd></>}
               <dt>Category</dt><dd>{m.type}</dd>
+              <dt>Bank</dt><dd>{m.bank || "-"}</dd>
             </dl>
           </div>
         </Card>
@@ -1687,7 +1736,6 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
                     <dl className="kv" style={{ margin: 0 }}>
                       <dt>MID</dt><dd className="mono">{mid.mid_value}</dd>
                       <dt>TID</dt><dd className="mono">{mid.tid_value}</dd>
-                      <dt>Bank</dt><dd>{mid.bank || "-"}</dd>
                       <dt>MDR rate</dt><dd>{mid.mdr_rate ? `${mid.mdr_rate.type} · ${mid.mdr_rate.rate}% · ${mid.mdr_rate.network}` : "-"}</dd>
                       <dt>Terminal Serial</dt>
                       <dd className="mono">
