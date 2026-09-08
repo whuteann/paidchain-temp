@@ -589,8 +589,8 @@ export const sqlConnectors = {
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
 //
-// Merchant -> MID model: a merchant has zero or more MIDs (MerchantMidOut), each
-// with its own bank, MID/TID value and MDR rate, plus a list of selected
+// Merchant -> MID model: a merchant has one bank and zero or more MIDs
+// (MerchantMidOut, MID/TID value + MDR rate), plus a list of selected
 // Acceptance items (MerchantMidAcceptanceOut). An acceptance item either shares
 // its parent MID's TID/MID pair, or carries its own when uses_own_tid_mid=true.
 // See paidchain-backend/docs/merchant-mid-rework-plan.md.
@@ -615,8 +615,6 @@ export interface MerchantMidAcceptanceOut {
 export interface MerchantMidOut {
   id: string;
   merchant_id: string;
-  bank_id: string;
-  bank: string;
   mid_value: string;
   tid_value: string;
   mdr_rate_id: string | null;
@@ -646,8 +644,6 @@ export interface MerchantMidAcceptanceUpdate {
 }
 
 export interface MerchantMidCreate {
-  bank_id?: string | null;
-  bank?: string | null;
   mid_value: string;
   tid_value: string;
   mdr_rate_id?: string | null;
@@ -655,8 +651,6 @@ export interface MerchantMidCreate {
 }
 
 export interface MerchantMidUpdate {
-  bank_id?: string | null;
-  bank?: string | null;
   mid_value?: string | null;
   tid_value?: string | null;
   mdr_rate_id?: string | null;
@@ -695,8 +689,8 @@ export interface AvailableTidOut {
   tid_value: string;
   mid_value: string | null;
   mdr_rate_id: string | null;
-  bank_id: string;
-  bank: string;
+  bank_id: string | null;
+  bank: string | null;
   acceptance_name: string | null;
 }
 
@@ -715,6 +709,8 @@ export interface MerchantOut {
   address: string | null;
   addresses?: AddressOut[];
   onboarded_date: string;
+  bank_id?: string | null;
+  bank?: string | null;
   bank_account_name: string;
   bank_account_number: string;
   bank_account_type: string;
@@ -736,10 +732,9 @@ export function merchantDisplayMid(m: MerchantOut): string {
   return merchantPrimaryMid(m)?.mid_value ?? "—";
 }
 
-/** Display-only bank name(s) — a merchant can span multiple banks via its MIDs. */
+/** Display-only bank name — bank lives on the merchant directly. */
 export function merchantDisplayBank(m: MerchantOut): string {
-  const names = Array.from(new Set((m.mids ?? []).map((mid) => mid.bank).filter(Boolean)));
-  return names.length ? names.join(", ") : "—";
+  return m.bank ?? "—";
 }
 
 export interface MerchantCommercialProfileIn {
@@ -764,6 +759,7 @@ export interface MerchantCreate {
   city?: string | null;
   state?: string | null;
   postcode?: string | null;
+  bank_id: string;
   bank_account_name: string;
   bank_account_number: string;
   bank_account_type: string;
@@ -785,6 +781,7 @@ export interface MerchantUpdate {
   city?: string | null;
   state?: string | null;
   postcode?: string | null;
+  bank_id?: string | null;
   bank_account_name?: string | null;
   bank_account_number?: string | null;
   bank_account_type?: string | null;
@@ -1239,6 +1236,9 @@ export interface JobOut {
   escalation_reason: string | null;
   escalated_by_user_id: string | null;
   escalated_at: string | null;
+  cancellation_reason: string | null;
+  cancelled_by_user_id: string | null;
+  cancelled_at: string | null;
   notes: string;
   created_by_role: string;
   created_by_name: string;
@@ -1313,6 +1313,10 @@ export interface JobSlaTransition {
 
 export type JobSlaMap = Record<string, JobSlaTransition[]>;
 
+export interface JobCancel {
+  reason?: string | null;
+}
+
 export interface EscalateToReplacementBody {
   term_setting_id: string;
   due_date: string;
@@ -1380,6 +1384,9 @@ export const jobs = {
 
   escalateToReplacement: (id: string, body: EscalateToReplacementBody) =>
     req<EscalateToReplacementResult>("POST", `/jobs/${id}/escalate-to-replacement`, { body }),
+
+  cancel: (id: string, body: JobCancel = {}) =>
+    req<JobOut>("POST", `/jobs/${id}/cancel`, { body }),
 
   setParcel: (id: string, tracking_number: string) =>
     req<JobOut>("PATCH", `/jobs/${id}/parcel`, { body: { tracking_number } }),

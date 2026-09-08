@@ -576,6 +576,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
   const customerAddress = formatCustomerAddress(customer);
   const customerAddressDetailRows = customerAddressRows(customer);
 
+  console.log("Linked", linked);
   return (
     <div>
       <PageHead
@@ -658,7 +659,7 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
             onRowClick={(m) => nav("merchant-detail", m.id)}
             columns={[
               { key: "merchant", header: "Merchant", render: (m) => <div className="cell-2"><span className="td-strong">{m.name}</span><span className="c2-sub mono">{m.id}</span></div> },
-              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
+              // { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
               { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
               { key: "type", header: "Type", render: (m) => <span className="td-mut">{m.type}</span> },
               { key: "terminals", header: "Terminals", render: (m) => <span className="td-mut">{m.terminal_count || "—"}</span> },
