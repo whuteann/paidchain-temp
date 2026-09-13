@@ -5,6 +5,7 @@ import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal
 import { CUSTOMER_STATUS } from "./data";
 import { CreateMerchantModal } from "./screen-merchants";
 import { CreateJobModal } from "./screen-jobs";
+import { HardDeleteModal } from "./hard-delete-modal";
 import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
 import type { AddressIn, CustomerType, CustomerOut, CustomerCreate, CustomerUpdate, CustomerDetails, CustomerMerchantOut, MerchantOut } from "@/lib/api";
 import { NavFn } from "./shell";
@@ -343,6 +344,7 @@ export function Customers({ nav }: { nav: NavFn }) {
   const [merchantOnboardingCustomer, setMerchantOnboardingCustomer] = useState<CustomerOut | null>(null);
   const [jobPrompt, setJobPrompt] = useState<MerchantJobFollowUp | null>(null);
   const [installationJob, setInstallationJob] = useState<MerchantJobFollowUp | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CustomerOut | null>(null);
 
   useEffect(() => {
     api.customers.details().then(setDetails).catch(console.error);
@@ -437,6 +439,18 @@ export function Customers({ nav }: { nav: NavFn }) {
               { key: "contact", header: "Contact", render: (c) => <span className="td-mut">{c.contact}</span> },
               { key: "onboarded", header: "Onboarded", render: (c) => <span className="td-mono td-mut">{c.onboarded_date}</span> },
               { key: "status", header: "Status", render: (c) => <CustomerStatus status={c.status} /> },
+              ...(can("Customers.Hard Delete") ? [{
+                key: "actions", header: "", render: (c: CustomerOut) => (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="Delete customer"
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(c); }}
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                ),
+              }] : []),
             ]}
             renderMobile={(c) => (
               <MobileListItem
@@ -448,6 +462,9 @@ export function Customers({ nav }: { nav: NavFn }) {
                   { label: "Contact", value: c.contact },
                   { label: "Registration", value: <span className="td-mono">{c.reg_no || "—"}</span> },
                 ]}
+                actions={can("Customers.Hard Delete") ? (
+                  <Btn variant="danger" sm icon="trash" onClick={() => setDeleteTarget(c)}>Delete</Btn>
+                ) : undefined}
                 onClick={() => nav("customer-detail", c.id)}
                 chevron
               />
@@ -458,6 +475,21 @@ export function Customers({ nav }: { nav: NavFn }) {
       </Card>
 
       {showCreate && can("Customers.Create") && <CreateCustomerModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {deleteTarget && can("Customers.Hard Delete") && (
+        <HardDeleteModal
+          entityLabel="Customer"
+          name={deleteTarget.name}
+          id={deleteTarget.id}
+          run={() => api.customers.hardDelete(deleteTarget.id)}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setCustomers((prev) => prev.filter((c) => c.id !== deleteTarget.id));
+            setTotal((prev) => Math.max(0, prev - 1));
+            setDeleteTarget(null);
+            api.customers.details().then(setDetails).catch(console.error);
+          }}
+        />
+      )}
       {onboardingCustomer && (
         <CustomerOnboardingModal
           customer={onboardingCustomer}

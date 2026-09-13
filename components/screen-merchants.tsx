@@ -7,6 +7,7 @@ import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/ap
 import type { AddressIn, BankOut, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, MerchantMidOut, MerchantMidCreate, MerchantMidUpdate, MerchantMidAcceptanceOut, MerchantMidAcceptanceCreate, MerchantMidAcceptanceUpdate, MerchantMidHistoryOut, MerchantMidAcceptanceHistoryOut, AcceptanceSettingOut, AcceptanceSettingCreate, AcceptanceSettingUpdate, MdrOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
+import { HardDeleteModal } from "./hard-delete-modal";
 import { useCan } from "@/lib/use-permissions";
 
 /* =================== CREATE MERCHANT MODAL =================== */
@@ -585,6 +586,7 @@ function AcceptanceSettingModal({ existing, onClose, onSaved }: {
   const [name, setName] = useState(existing?.name ?? "");
   const [requiresTidMid, setRequiresTidMid] = useState(existing?.requires_tid_mid ?? false);
   const [defaultCompulsory, setDefaultCompulsory] = useState(existing?.default_compulsory ?? false);
+  const [canOptInOut, setCanOptInOut] = useState(existing?.can_opt_in_out ?? false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -600,11 +602,13 @@ function AcceptanceSettingModal({ existing, onClose, onSaved }: {
           name: name.trim(),
           requires_tid_mid: requiresTidMid,
           default_compulsory: defaultCompulsory,
+          can_opt_in_out: canOptInOut,
         } satisfies AcceptanceSettingUpdate)
         : await api.acceptanceSettings.create({
           name: name.trim(),
           requires_tid_mid: requiresTidMid,
           default_compulsory: defaultCompulsory,
+          can_opt_in_out: canOptInOut,
         } satisfies AcceptanceSettingCreate);
       onSaved(result);
       onClose();
@@ -636,12 +640,17 @@ function AcceptanceSettingModal({ existing, onClose, onSaved }: {
         <Toggle
           checked={requiresTidMid}
           onChange={setRequiresTidMid}
-          label="Allow opt in and opt out (yes/no)"
+          label="Requires MID and TID (yes/no)"
         />
         <Toggle
           checked={defaultCompulsory}
           onChange={setDefaultCompulsory}
           label="Make compulsory (auto-attach to new MID)"
+        />
+        <Toggle
+          checked={canOptInOut}
+          onChange={setCanOptInOut}
+          label="Can opt in / opt out"
         />
       </div>
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
@@ -708,6 +717,7 @@ function AcceptanceCatalogTab({ canEdit }: { canEdit: boolean }) {
             { key: "id", header: "ID", render: (r) => <span className="td-mono td-mut">{r.id}</span> },
             { key: "requires", header: "Requires TID/MID", render: (r) => r.requires_tid_mid ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
             { key: "default", header: "Default compulsory", render: (r) => r.default_compulsory ? <Chip cls="chip-ok">Yes</Chip> : <span className="td-mut">No</span> },
+            { key: "optinout", header: "Opt In/Out", render: (r) => r.can_opt_in_out ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
             { key: "status", header: "Status", render: (r) => <Chip cls={r.active ? "chip-ok" : "chip-neutral"} dot>{r.active ? "Active" : "Inactive"}</Chip> },
             ...(canEdit ? [{
               key: "actions", header: "", render: (r: AcceptanceSettingOut) => (
@@ -735,6 +745,7 @@ function AcceptanceCatalogTab({ canEdit }: { canEdit: boolean }) {
               meta={[
                 { label: "Requires TID/MID", value: r.requires_tid_mid ? "Yes" : "No" },
                 { label: "Default compulsory", value: r.default_compulsory ? "Yes" : "No" },
+                { label: "Opt In/Out", value: r.can_opt_in_out ? "Yes" : "No" },
               ]}
               onClick={canEdit ? () => setModal({ open: true, existing: r }) : undefined}
             />
@@ -769,6 +780,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [createCustomer, setCreateCustomer] = useState<CustomerOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MerchantOut | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -835,49 +847,78 @@ export function Merchants({ nav }: { nav: NavFn }) {
       {pageTab === "acceptance" && canViewAcceptance ? (
         <AcceptanceCatalogTab canEdit={can("Settings.Edit")} />
       ) : (
-      <Card>
-        <Toolbar>
-          <SearchBox value={q} onChange={(value) => { setQ(value); resetPage(); }} placeholder="Search merchant, MID, TID, terminal…" />
-          <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
-            {["All","Active","Onboarding","Suspended","Inactive"].map((s) => <option key={s}>{s}</option>)}
-          </select>
-          <span className="tb-meta">{loading ? "Loading..." : `${total} results`}</span>
-        </Toolbar>
-        {loading ? (
-          <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
-        ) : merchantList.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
-          <ResponsiveTable
-            rows={merchantList}
-            getKey={(m) => m.id}
-            onRowClick={(m) => nav("merchant-detail", m.id)}
-            columns={[
-              { key: "merchant", header: "Merchant", render: (m) => <Entity name={m.name} sub={m.id + " · " + m.type} /> },
-              { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
-              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
-              { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
-              { key: "terminals", header: "Terminals", render: (m) => { const n = m.terminal_count ?? 0; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
-              { key: "jobs", header: "Jobs", render: (m) => (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : <span className="td-mut">None</span> },
-            ]}
-            renderMobile={(m) => (
-              <MobileListItem
-                title={m.name}
-                sub={<>{m.id} · {m.type}</>}
-                status={<MerchantStatus status={m.status} />}
-                meta={[
-                  { label: "MID", value: <span className="td-mono">{merchantDisplayMid(m)}</span> },
-                  { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
-                  { label: "Finance", value: <Readiness value={m.finance_status} /> },
-                  { label: "Terminals", value: (() => { const n = m.terminal_count ?? 0; return n === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; })() },
-                  { label: "Jobs", value: (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : "None" },
-                ]}
-                onClick={() => nav("merchant-detail", m.id)}
-                chevron
-              />
-            )}
-          />
-        )}
-        <Pagination total={total} shown={merchantList.length} page={page} pages={pages} onPageChange={setPage} />
-      </Card>
+        <Card>
+          <Toolbar>
+            <SearchBox value={q} onChange={(value) => { setQ(value); resetPage(); }} placeholder="Search merchant, MID, TID, terminal…" />
+            <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); resetPage(); }}>
+              {["All", "Active", "Onboarding", "Suspended", "Inactive"].map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <span className="tb-meta">{loading ? "Loading..." : `${total} results`}</span>
+          </Toolbar>
+          {loading ? (
+            <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+          ) : merchantList.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
+            <ResponsiveTable
+              rows={merchantList}
+              getKey={(m) => m.id}
+              onRowClick={(m) => nav("merchant-detail", m.id)}
+              columns={[
+                { key: "merchant", header: "Merchant", render: (m) => <Entity name={m.name} sub={m.id + " · " + m.type} /> },
+                { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
+                { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
+                { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
+                { key: "terminals", header: "Terminals", render: (m) => { const n = m.terminal_count ?? 0; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
+                { key: "jobs", header: "Jobs", render: (m) => (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : <span className="td-mut">None</span> },
+                ...(can("Merchants.Hard Delete") ? [{
+                  key: "actions", header: "", render: (m: MerchantOut) => (
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      title="Delete merchant"
+                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(m); }}
+                    >
+                      <Icon name="trash" size={15} />
+                    </button>
+                  ),
+                }] : []),
+              ]}
+              renderMobile={(m) => (
+                <MobileListItem
+                  title={m.name}
+                  sub={<>{m.id} · {m.type}</>}
+                  status={<MerchantStatus status={m.status} />}
+                  meta={[
+                    { label: "MID", value: <span className="td-mono">{merchantDisplayMid(m)}</span> },
+                    { label: "Bank", value: <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
+                    { label: "Finance", value: <Readiness value={m.finance_status} /> },
+                    { label: "Terminals", value: (() => { const n = m.terminal_count ?? 0; return n === 0 ? "—" : <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; })() },
+                    { label: "Jobs", value: (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : "None" },
+                  ]}
+                  actions={can("Merchants.Hard Delete") ? (
+                    <Btn variant="danger" sm icon="trash" onClick={() => setDeleteTarget(m)}>Delete</Btn>
+                  ) : undefined}
+                  onClick={() => nav("merchant-detail", m.id)}
+                  chevron
+                />
+              )}
+            />
+          )}
+          <Pagination total={total} shown={merchantList.length} page={page} pages={pages} onPageChange={setPage} />
+        </Card>
+      )}
+      {deleteTarget && can("Merchants.Hard Delete") && (
+        <HardDeleteModal
+          entityLabel="Merchant"
+          name={deleteTarget.name}
+          id={deleteTarget.id}
+          run={() => api.merchants.hardDelete(deleteTarget.id)}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setMerchantList((prev) => prev.filter((m) => m.id !== deleteTarget.id));
+            setTotal((prev) => Math.max(0, prev - 1));
+            setDeleteTarget(null);
+          }}
+        />
       )}
       {showCustomerPicker && can("Merchants.Create") && (
         <CustomerPickerModal
@@ -915,10 +956,10 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
   const [rentalPlansLoading, setRentalPlansLoading] = useState(true);
   const [f, setF] = useState({
-    rental_plan_id:  existing?.rental_plan_id  ?? "",
-    rental_price:    existing?.rental_price != null ? String(existing.rental_price) : "",
-    plan_period:     existing?.plan_period    ?? "Monthly",
-    effective_date:  existing?.effective_date ?? "",
+    rental_plan_id: existing?.rental_plan_id ?? "",
+    rental_price: existing?.rental_price != null ? String(existing.rental_price) : "",
+    plan_period: existing?.plan_period ?? "Monthly",
+    effective_date: existing?.effective_date ?? "",
   });
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const [saving, setSaving] = useState(false);
@@ -954,10 +995,10 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
     setSaving(true); setErr(null);
     try {
       const body: MerchantCommercialProfileIn = {
-        rental_plan_id:  f.rental_plan_id  || null,
-        rental_price:    f.rental_price    ? parseFloat(f.rental_price)    : null,
-        plan_period:     f.plan_period     || null,
-        effective_date:  f.effective_date  || null,
+        rental_plan_id: f.rental_plan_id || null,
+        rental_price: f.rental_price ? parseFloat(f.rental_price) : null,
+        plan_period: f.plan_period || null,
+        effective_date: f.effective_date || null,
       };
       const result = await api.merchants.updateCommercial(merchantId, body);
       onSaved(result);
@@ -1113,8 +1154,8 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
 
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 20 }}>
         {[
-          { l: "Merchant Terminals", v: linkedTerminals.length,    ico: "terminal", c: "var(--info)" },
-          { l: "Open Jobs",          v: merchantJobs.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
+          { l: "Merchant Terminals", v: linkedTerminals.length, ico: "terminal", c: "var(--info)" },
+          { l: "Open Jobs", v: merchantJobs.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
           // { l: "Finance Readiness",  v: merchant.finance,           ico: "shield",   c: merchant.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
         ].map((s, i) => (
           <div key={i} className="stat">
@@ -1128,15 +1169,15 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       <div className="tabs">
-        {[["overview","Overview"],["commercial","Commercial Profile"],["terminals","Linked Terminals (" + linkedTerminals.length + ")"],["jobs","Job History (" + merchantJobs.length + ")"]].map(([k,lbl]) => (
+        {[["overview", "Overview"], ["commercial", "Commercial Profile"], ["terminals", "Linked Terminals (" + linkedTerminals.length + ")"], ["jobs", "Job History (" + merchantJobs.length + ")"]].map(([k, lbl]) => (
           <div key={k} className={"tab" + (tab === k ? " active" : "")} onClick={() => setTab(k)}>{lbl}</div>
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview"    ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onMidSaved={handleMidSaved} onAcceptanceSaved={handleAcceptanceSaved} />
+        {tab === "overview" ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onMidSaved={handleMidSaved} onAcceptanceSaved={handleAcceptanceSaved} />
           : tab === "commercial" ? <CommercialTab m={merchant} canEdit={can("Merchants.Edit")} onEdit={() => setShowEditCommercial(true)} />
-          : tab === "terminals"  ? <TerminalsTab rows={linkedTerminals} nav={nav} />
-          : <JobsTab rows={merchantJobs} nav={nav} />}
+            : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} />
+              : <JobsTab rows={merchantJobs} nav={nav} />}
       </div>
 
       {showCreateJob && can("Jobs.Create") && (
@@ -1243,6 +1284,7 @@ function UpdateMerchantStatusModal({ merchant, onClose, onSaved }: { merchant: M
 type AcceptanceDraft = {
   acceptance_setting_id: string;
   uses_own_tid_mid: boolean;
+  opted_in: boolean;
   tid_value: string;
   mid_value: string;
   mdr_rate_id: string;
@@ -1262,7 +1304,7 @@ function AcceptancePicker({ settings, drafts, onChange }: {
 
   function toggle(setting: AcceptanceSettingOut, checked: boolean) {
     if (checked) {
-      onChange([...drafts, { acceptance_setting_id: setting.id, uses_own_tid_mid: false, tid_value: "", mid_value: "", mdr_rate_id: "" }]);
+      onChange([...drafts, { acceptance_setting_id: setting.id, uses_own_tid_mid: false, opted_in: false, tid_value: "", mid_value: "", mdr_rate_id: "" }]);
     } else {
       onChange(drafts.filter((d) => d.acceptance_setting_id !== setting.id));
     }
@@ -1290,16 +1332,28 @@ function AcceptancePicker({ settings, drafts, onChange }: {
               <span style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</span>
               {s.requires_tid_mid && <Chip cls="chip-info">Requires TID/MID</Chip>}
             </label>
+            {checked && draft && s.can_opt_in_out && (
+              <div style={{ marginTop: 10, paddingLeft: 24, display: "flex", gap: 14 }}>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                  <input type="radio" checked={!draft.opted_in} onChange={() => update(s.id, { opted_in: false })} />
+                  Opt Out
+                </label>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                  <input type="radio" checked={draft.opted_in} onChange={() => update(s.id, { opted_in: true })} />
+                  Opt In
+                </label>
+              </div>
+            )}
             {checked && draft && s.requires_tid_mid && (
               <div style={{ marginTop: 10, paddingLeft: 24, display: "grid", gap: 8 }}>
                 <div style={{ display: "flex", gap: 14 }}>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                     <input type="radio" checked={!draft.uses_own_tid_mid} onChange={() => update(s.id, { uses_own_tid_mid: false })} />
-                    Opt In
+                    Does not require MID
                   </label>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                     <input type="radio" checked={draft.uses_own_tid_mid} onChange={() => update(s.id, { uses_own_tid_mid: true })} />
-                    Opt Out
+                    Requires MID
                   </label>
                 </div>
                 {draft.uses_own_tid_mid && (
@@ -1376,6 +1430,7 @@ function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
           acceptances: acceptanceDrafts.map((d) => ({
             acceptance_setting_id: d.acceptance_setting_id,
             uses_own_tid_mid: d.uses_own_tid_mid,
+            opted_in: d.opted_in,
             tid_value: d.uses_own_tid_mid ? d.tid_value.trim() || null : null,
             mid_value: d.uses_own_tid_mid ? d.mid_value.trim() || null : null,
             mdr_rate_id: d.uses_own_tid_mid ? d.mdr_rate_id || null : null,
@@ -1442,6 +1497,7 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
   const [settings, setSettings] = useState<AcceptanceSettingOut[]>([]);
   const [settingId, setSettingId] = useState(existing?.acceptance_setting_id ?? "");
   const [usesOwn, setUsesOwn] = useState(existing?.uses_own_tid_mid ?? false);
+  const [optedIn, setOptedIn] = useState(existing?.opted_in ?? false);
   const [tidValue, setTidValue] = useState(existing?.tid_value ?? "");
   const [midValue, setMidValue] = useState(existing?.mid_value ?? "");
   const [mdrRateId, setMdrRateId] = useState(existing?.mdr_rate_id ?? "");
@@ -1458,6 +1514,7 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
   const attachedSettingIds = new Set((mid.acceptances ?? []).map((a) => a.acceptance_setting_id));
   const selectedSetting = settings.find((s) => s.id === settingId);
   const requiresTidMid = existing ? existing.requires_tid_mid : Boolean(selectedSetting?.requires_tid_mid);
+  const canOptInOut = existing ? existing.can_opt_in_out : Boolean(selectedSetting?.can_opt_in_out);
   const valid = Boolean(settingId);
 
   async function submit() {
@@ -1467,6 +1524,7 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
       const result = editing
         ? await api.merchants.updateAcceptance(mid.merchant_id, mid.id, existing!.id, {
           uses_own_tid_mid: usesOwn,
+          opted_in: optedIn,
           tid_value: usesOwn ? tidValue.trim() || null : null,
           mid_value: usesOwn ? midValue.trim() || null : null,
           mdr_rate_id: usesOwn ? mdrRateId || null : null,
@@ -1475,6 +1533,7 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
         : await api.merchants.addAcceptance(mid.merchant_id, mid.id, {
           acceptance_setting_id: settingId,
           uses_own_tid_mid: usesOwn,
+          opted_in: optedIn,
           tid_value: usesOwn ? tidValue.trim() || null : null,
           mid_value: usesOwn ? midValue.trim() || null : null,
           mdr_rate_id: usesOwn ? mdrRateId || null : null,
@@ -1523,16 +1582,28 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
           Every available acceptance type is already attached to this MID.
         </div>
       )}
+      {canOptInOut && (
+        <div style={{ display: "flex", gap: 14, margin: "10px 0" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+            <input type="radio" checked={!optedIn} onChange={() => setOptedIn(false)} />
+            Opt Out
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+            <input type="radio" checked={optedIn} onChange={() => setOptedIn(true)} />
+            Opt In
+          </label>
+        </div>
+      )}
       {requiresTidMid && (
         <>
           <div style={{ display: "flex", gap: 14, margin: "10px 0" }}>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
               <input type="radio" checked={!usesOwn} onChange={() => setUsesOwn(false)} />
-              Opt In
+              Does not require MID
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
               <input type="radio" checked={usesOwn} onChange={() => setUsesOwn(true)} />
-              Opt Out
+              Requires MID
             </label>
           </div>
           {usesOwn && (
@@ -1675,7 +1746,7 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
   }
 
   return (
-      <div className="detail-grid merchant-overview-grid">
+    <div className="detail-grid merchant-overview-grid">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <Card title="Business Details" icon="building">
           <div className="card-pad">
@@ -1766,6 +1837,8 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
                                 <div className="mono" style={{ fontWeight: 600 }}>
                                   {row.acceptance_name}{" "}
                                   {row.status && <Chip cls={row.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{row.status}</Chip>}
+                                  {" "}
+                                  {row.can_opt_in_out && <Chip cls={row.opted_in ? "chip-ok" : "chip-neutral"}>{row.opted_in ? "Opt In" : "Opt Out"}</Chip>}
                                 </div>
                                 <div className="td-mut" style={{ fontSize: 12 }}>
                                   {row.requires_tid_mid
@@ -1774,23 +1847,6 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
                                       : "Uses original MID/TID")
                                     : "No TID/MID required"}
                                 </div>
-                                {row.uses_own_tid_mid && (
-                                  <div style={{ fontSize: 12, marginTop: 2 }}>
-                                    <span className="td-mut">Terminal: </span>
-                                    {row.terminal_serial ? (
-                                      <button
-                                        type="button"
-                                        className="mono"
-                                        style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
-                                        onClick={() => nav("terminal-detail", row.terminal_serial!)}
-                                      >
-                                        {row.terminal_serial}
-                                      </button>
-                                    ) : (
-                                      <span className="td-mut">Not mounted</span>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                               {canEdit && (
                                 <div style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -1855,40 +1911,40 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <Card title="Billing Customer" icon="building" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("customer-detail", m.customer_id)}>View</Btn>}>
-        <div className="card-pad">
-          <dl className="kv">
-            <dt>Customer</dt><dd>{m.customer_name}</dd>
-            <dt>ID</dt><dd className="mono">{m.customer_id}</dd>
-          </dl>
-        </div>
-      </Card>
-      <Card title="Settlement Bank Account" icon="bank">
-        <div className="card-pad">
-          <dl className="kv">
-            <dt>Account name</dt><dd>{m.bank_account_name}</dd>
-            <dt>Account number</dt><dd className="mono">{m.bank_account_number}</dd>
-            <dt>Account type</dt><dd>{m.bank_account_type}</dd>
-          </dl>
-        </div>
-      </Card>
-      <Card title="Primary Contact" icon="user">
-        <div className="card-pad">
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
-            <div className="avatar" style={{ width: 44, height: 44, fontSize: 15 }}>
-              {m.contact.split(" ").map((w: string) => w[0]).slice(0, 2).join("")}
+        <Card title="Billing Customer" icon="building" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("customer-detail", m.customer_id)}>View</Btn>}>
+          <div className="card-pad">
+            <dl className="kv">
+              <dt>Customer</dt><dd>{m.customer_name}</dd>
+              <dt>ID</dt><dd className="mono">{m.customer_id}</dd>
+            </dl>
+          </div>
+        </Card>
+        <Card title="Settlement Bank Account" icon="bank">
+          <div className="card-pad">
+            <dl className="kv">
+              <dt>Account name</dt><dd>{m.bank_account_name}</dd>
+              <dt>Account number</dt><dd className="mono">{m.bank_account_number}</dd>
+              <dt>Account type</dt><dd>{m.bank_account_type}</dd>
+            </dl>
+          </div>
+        </Card>
+        <Card title="Primary Contact" icon="user">
+          <div className="card-pad">
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
+              <div className="avatar" style={{ width: 44, height: 44, fontSize: 15 }}>
+                {m.contact.split(" ").map((w: string) => w[0]).slice(0, 2).join("")}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600 }}>{m.contact}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Authorised signatory</div>
+              </div>
             </div>
-            <div>
-              <div style={{ fontWeight: 600 }}>{m.contact}</div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Authorised signatory</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 11, fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail" size={15} style={{ color: "var(--ink-3)" }} />{m.email}</div>
+              <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone" size={15} style={{ color: "var(--ink-3)" }} />{m.phone}</div>
             </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 11, fontSize: 13 }}>
-            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="mail"   size={15} style={{ color: "var(--ink-3)" }} />{m.email}</div>
-            <div style={{ display: "flex", gap: 9, alignItems: "center" }}><Icon name="phone"  size={15} style={{ color: "var(--ink-3)" }} />{m.phone}</div>
-          </div>
-        </div>
-      </Card>
+        </Card>
       </div>
     </div>
   );
@@ -1912,10 +1968,10 @@ function CommercialTab({ m, canEdit, onEdit }: { m: MerchantOut; canEdit: boolea
     <Card title="Commercial Profile" icon="percent" actions={canEdit ? <Btn variant="ghost" sm icon="edit" onClick={onEdit}>Edit</Btn> : undefined}>
       <div className="card-pad">
         <dl className="kv">
-          {cp.rental_plan_id      && <><dt>Rental Plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
+          {cp.rental_plan_id && <><dt>Rental Plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
           {cp.rental_price != null && <><dt>Rental Price</dt><dd>RM {cp.rental_price.toFixed(2)}</dd></>}
-          {cp.plan_period         && <><dt>Billing Period</dt><dd>{cp.plan_period}</dd></>}
-          {cp.effective_date      && <><dt>Effective Date</dt><dd>{cp.effective_date}</dd></>}
+          {cp.plan_period && <><dt>Billing Period</dt><dd>{cp.plan_period}</dd></>}
+          {cp.effective_date && <><dt>Effective Date</dt><dd>{cp.effective_date}</dd></>}
         </dl>
       </div>
     </Card>
