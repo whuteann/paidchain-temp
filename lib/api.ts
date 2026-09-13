@@ -85,7 +85,7 @@ async function req<T>(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = getErrorMessage(data, `HTTP ${res.status}`);
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, data);
   }
   return data as T;
 }
@@ -133,9 +133,38 @@ async function reqBlob(
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public detail?: unknown) {
     super(message);
   }
+}
+
+/** One category of record blocking a hard delete — see DeleteBlocker in the backend schema. */
+export interface DeleteBlocker {
+  entity_type: string;
+  count: number;
+  ids: string[];
+}
+
+export interface HardDeleteResult {
+  deleted: boolean;
+  id: string;
+}
+
+/** Shape of the 409 response body a hard-delete endpoint throws when blockers exist. */
+export interface HardDeleteBlockedError {
+  message: string;
+  blockers: DeleteBlocker[];
+}
+
+/** Pulls the structured blocker list out of an ApiError from a hard-delete call, if present.
+ *  err.detail is the raw JSON response body, i.e. {detail: {message, blockers}} for a 409. */
+export function hardDeleteBlockers(err: unknown): HardDeleteBlockedError | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = (err.detail as { detail?: unknown } | undefined)?.detail;
+  if (typeof body !== "object" || body === null || !Array.isArray((body as HardDeleteBlockedError).blockers)) {
+    return null;
+  }
+  return body as HardDeleteBlockedError;
 }
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -394,6 +423,7 @@ export const customers = {
   update: (id: string, body: CustomerUpdate) =>
     req<CustomerOut>("PATCH", `/customers/${id}`, { body }),
   remove: (id: string) => req<void>("DELETE", `/customers/${id}`),
+  hardDelete: (id: string) => req<HardDeleteResult>("DELETE", `/customers/${id}/hard`),
   details: () => req<CustomerDetails>("GET", "/customers/details"),
   merchants: (customerId: string, status?: string) =>
     req<CustomerMerchantOut[]>("GET", `/customers/${customerId}/merchants`, { params: { status } }),
@@ -601,7 +631,9 @@ export interface MerchantMidAcceptanceOut {
   acceptance_setting_id: string;
   acceptance_name: string;
   requires_tid_mid: boolean;
+  can_opt_in_out: boolean;
   uses_own_tid_mid: boolean;
+  opted_in: boolean;
   tid_value: string | null;
   mid_value: string | null;
   mdr_rate_id: string | null;
@@ -629,6 +661,7 @@ export interface MerchantMidOut {
 export interface MerchantMidAcceptanceCreate {
   acceptance_setting_id: string;
   uses_own_tid_mid?: boolean;
+  opted_in?: boolean;
   tid_value?: string | null;
   mid_value?: string | null;
   mdr_rate_id?: string | null;
@@ -636,6 +669,7 @@ export interface MerchantMidAcceptanceCreate {
 
 export interface MerchantMidAcceptanceUpdate {
   uses_own_tid_mid?: boolean;
+  opted_in?: boolean;
   tid_value?: string | null;
   mid_value?: string | null;
   mdr_rate_id?: string | null;
@@ -829,6 +863,8 @@ export interface MerchantTerminalOut {
   merchant: { id: string; name: string };
   simcard?: SimCardRef | null;
   sim?: SimCardRef | null;
+  /** MIDs/acceptance items currently mounted on this terminal — same shape as TerminalOut.mids. */
+  mids?: AvailableTidOut[];
 }
 
 export interface MerchantJobOut {
@@ -869,6 +905,7 @@ export const merchants = {
   update: (id: string, body: MerchantUpdate) =>
     req<MerchantOut>("PATCH", `/merchants/${id}`, { body }),
   remove: (id: string) => req<CustomerMerchantOut>("DELETE", `/merchants/${id}`),
+  hardDelete: (id: string) => req<HardDeleteResult>("DELETE", `/merchants/${id}/hard`),
   details: () => req<MerchantDetails>("GET", "/merchants/details"),
   terminals: (merchantId: string) => req<MerchantTerminalOut[]>("GET", `/merchants/${merchantId}/terminals`),
   jobs: (merchantId: string, status?: string) =>
@@ -919,6 +956,7 @@ export interface AcceptanceSettingOut {
   name: string;
   requires_tid_mid: boolean;
   default_compulsory: boolean;
+  can_opt_in_out: boolean;
   active: boolean;
   created_at: string;
 }
@@ -927,12 +965,14 @@ export interface AcceptanceSettingCreate {
   name: string;
   requires_tid_mid?: boolean;
   default_compulsory?: boolean;
+  can_opt_in_out?: boolean;
 }
 
 export interface AcceptanceSettingUpdate {
   name?: string;
   requires_tid_mid?: boolean;
   default_compulsory?: boolean;
+  can_opt_in_out?: boolean;
   active?: boolean;
 }
 
@@ -1218,7 +1258,7 @@ export interface JobOut {
   assignee: string;
   bank: string;
   customer: { id: string; name: string } | null;
-  merchant: { id: string; name: string };
+  merchant: { id: string; name: string; bank?: string | null };
   terminal: { serial: string; brand: string; model: string } | null;
   previous_terminal: { serial: string; brand: string; model: string } | null;
   merchant_detail: { id: string; name: string; bank: string } | null;
@@ -1227,7 +1267,9 @@ export interface JobOut {
   shipment_tracking?: ShipmentTrackingOut | null;
   print_form: boolean;
   print_do: boolean;
+  print_pickup: boolean;
   created_at: string;
+  completed_at: string | null;
   due_date: string;
   priority: string;
   escalated_to: string | null;
@@ -1339,6 +1381,7 @@ export interface JobListParams {
   type?: string;
   status?: string;
   sla?: string;
+  bank?: string;
 }
 
 export interface JobPage {
@@ -1359,6 +1402,7 @@ export interface JobDetails {
 export const jobs = {
   list: (p?: JobListParams) => req<JobPage>("GET", "/jobs", { params: p }),
   details: () => req<JobDetails>("GET", "/jobs/details"),
+  banks: () => req<string[]>("GET", "/jobs/banks"),
   get: (id: string) => req<JobOut>("GET", `/jobs/${id}`),
   create: (body: JobCreate) => req<JobOut>("POST", "/jobs", { body }),
   update: (id: string, body: JobUpdate) => req<JobOut>("PATCH", `/jobs/${id}`, { body }),
@@ -1399,6 +1443,7 @@ export const jobs = {
 
   installationForm: (id: string) => reqBlob("GET", `/jobs/${id}/installation-form`),
   deliveryOrder: (id: string) => reqBlob("GET", `/jobs/${id}/delivery-order`),
+  pickupForm: (id: string) => reqBlob("GET", `/jobs/${id}/pickup-form`),
 
   slaList: () => req<JobSlaMap>("GET", "/settings/sla"),
   slaUpdate: (job_type_slug: string, from_stage: string, to_stage: string, body: { warning_days?: number; breach_days?: number }) =>

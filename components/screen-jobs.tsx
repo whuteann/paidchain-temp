@@ -690,11 +690,14 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                               style={duplicateTerminal ? { borderColor: "var(--bad)" } : undefined}
                             >
                               <option value="">Select terminal…</option>
-                              {merchantTerminals.map((terminal) => (
-                                <option key={terminal.serial} value={terminal.serial}>
-                                  {terminal.serial} · {terminal.brand} {terminal.model}
-                                </option>
-                              ))}
+                              {merchantTerminals.map((terminal) => {
+                                const tid = terminal.mids?.find((mid) => mid.source === "mid")?.tid_value || terminal.tid;
+                                return (
+                                  <option key={terminal.serial} value={terminal.serial}>
+                                    {terminal.serial}{tid ? ` · TID: ${tid}` : ""} · {terminal.brand} {terminal.model}
+                                  </option>
+                                );
+                              })}
                             </select>
                           </Field>
                           {type === "Replacement" && (
@@ -905,12 +908,18 @@ export function Jobs({ nav }: { nav: NavFn }) {
   const [type, setType] = useState("All");
   const [status, setStatus] = useState("All");
   const [sla, setSla] = useState("All");
+  const [bank, setBank] = useState("All");
+  const [bankOptions, setBankOptions] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<JobOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.jobs.banks().then(setBankOptions).catch(console.error);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -921,6 +930,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
       type: type !== "All" ? type : undefined,
       status: status !== "All" ? status : undefined,
       sla: sla !== "All" ? sla : undefined,
+      bank: bank !== "All" ? bank : undefined,
     })
       .then((p) => {
         setJobList(p.items);
@@ -929,7 +939,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [page, q, type, status, sla]);
+  }, [page, q, type, status, sla, bank]);
 
   function resetPage() { setPage(1); }
 
@@ -959,7 +969,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
         title="Jobs"
         sub={total + " workflow jobs · SLA tracking, notifications and downstream actions"}
         actions={<>
-          {can("Jobs.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
+          {/* {can("Jobs.Export") && <Btn variant="ghost" icon="download">Export</Btn>} */}
           {can("Jobs.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Job</Btn>}
         </>}
       />
@@ -976,6 +986,10 @@ export function Jobs({ nav }: { nav: NavFn }) {
           <select className="select" value={sla} onChange={(e) => { setSla(e.target.value); resetPage(); }}>
             {["All", "On Track", "Due Soon", "Breached", "Met"].map((option) => <option key={option} value={option}>{option === "All" ? "All SLA" : option}</option>)}
           </select>
+          <select className="select" value={bank} onChange={(e) => { setBank(e.target.value); resetPage(); }}>
+            <option value="All">All Banks</option>
+            {bankOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
           <span className="tb-meta">{loading ? "Loading…" : `${total} jobs`}</span>
         </Toolbar>
 
@@ -990,10 +1004,12 @@ export function Jobs({ nav }: { nav: NavFn }) {
               { key: "id", header: "Job ID", render: (job) => <span className="td-mono td-strong">{job.id}</span> },
               { key: "type", header: "Type", render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}><Icon name={JOB_TYPES[job.type]?.icon ?? "jobs"} size={14} /></span>{job.type}</span> },
               { key: "merchant", header: "Customer / Merchant", mobileLabel: "Merchant", render: (job) => <div className="cell-2"><span className="td-strong">{job.customer?.name || "—"}</span><span className="c2-sub">{job.merchant.name}</span></div> },
+              { key: "bank", header: "Bank", render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{job.merchant.bank || "—"}</span> },
               { key: "status", header: "Status", render: (job) => <JobStatus status={job.stage} /> },
               { key: "sla", header: "SLA", render: (job) => <SlaChip sla={job.sla} /> },
               { key: "assignee", header: "Assignee", render: (job) => <span className="td-mut">{job.assignee}</span> },
               { key: "due", header: "Due", render: (job) => <span className="td-mut td-mono">{job.due_date.slice(5)}</span> },
+              { key: "completed", header: "Completed", render: (job) => <span className="td-mut td-mono">{job.completed_at ? job.completed_at.slice(5, 10) : "-"}</span> },
               ...(can("Jobs.Delete") ? [{
                 key: "actions", header: "", render: (job: JobOut) => job.stage === "Pending" ? (
                   <button
@@ -1016,7 +1032,9 @@ export function Jobs({ nav }: { nav: NavFn }) {
                   { label: "SLA", value: <SlaChip sla={job.sla} /> },
                   { label: "Assignee", value: job.assignee },
                   { label: "Due", value: <span className="td-mono">{job.due_date.slice(5)}</span> },
+                  { label: "Completed", value: <span className="td-mono">{job.completed_at ? job.completed_at.slice(5, 10) : "-"}</span> },
                   { label: "Customer", value: job.customer?.name || "—" },
+                  { label: "Bank", value: job.merchant.bank || "—" },
                 ]}
                 onClick={() => nav("job-detail", job.id)}
                 chevron
@@ -1525,7 +1543,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showCancel, setShowCancel] = useState(false);
   const [showTrackParcel, setShowTrackParcel] = useState(false);
   const [refreshingParcel, setRefreshingParcel] = useState(false);
-  const [docBusy, setDocBusy] = useState<"form" | "do" | null>(null);
+  const [docBusy, setDocBusy] = useState<"form" | "do" | "pickup" | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1664,6 +1682,19 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     }
   }
 
+  async function downloadPickupForm() {
+    if (!job || !can("Jobs.Export")) return;
+    setDocBusy("pickup");
+    try {
+      const blob = await api.jobs.pickupForm(job.id);
+      openDocument(blob);
+    } catch {
+      flash("Failed to generate pickup form");
+    } finally {
+      setDocBusy(null);
+    }
+  }
+
   async function confirmPendingStage() {
     if (!pendingStage || !job) return;
     if (!can(pendingStage === "Completed" ? "Jobs.Close" : "Jobs.Edit")) return;
@@ -1763,6 +1794,11 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           {can("Jobs.Export") && job.print_do && (
             <Btn variant="ghost" icon="file" disabled={docBusy !== null} onClick={downloadDeliveryOrder}>
               {docBusy === "do" ? "Generating…" : "Delivery Order"}
+            </Btn>
+          )}
+          {can("Jobs.Export") && job.print_pickup && (
+            <Btn variant="ghost" icon="file" disabled={docBusy !== null} onClick={downloadPickupForm}>
+              {docBusy === "pickup" ? "Generating…" : "Pickup Form"}
             </Btn>
           )}
           {can("Jobs.Export") && def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
@@ -1969,10 +2005,10 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                                 </div>
                               </div>
                               {isImage && (
-                                <iframe
-                                  title={file.filename}
+                                <img
+                                  alt={file.filename}
                                   src={href}
-                                  style={{ width: "100%", height: 240, border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }}
+                                  style={{ width: "100%", height: 240, objectFit: "contain", border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }}
                                 />
                               )}
                             </div>
