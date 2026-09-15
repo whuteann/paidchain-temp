@@ -1440,7 +1440,6 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showTrackParcel, setShowTrackParcel] = useState(false);
   const [refreshingParcel, setRefreshingParcel] = useState(false);
   const [docBusy, setDocBusy] = useState<"form" | "do" | "pickup" | null>(null);
-  const [downloadingEvidenceHref, setDownloadingEvidenceHref] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1555,30 +1554,33 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
   }
 
-  async function downloadEvidenceFile(href: string, filename: string) {
-    // The plain <a download> attribute is silently ignored by browsers for
-    // cross-origin links (evidence files live on the API's own domain, not the
-    // dashboard's) — it just navigates instead of downloading. Fetching the file
-    // ourselves and saving it via a same-origin blob: URL forces a real download.
-    if (typeof window === "undefined") return;
-    setDownloadingEvidenceHref(href);
+  function evidenceDownloadUrl(href: string, filename: string) {
+    // /uploads-dl mirrors /uploads but sets Content-Disposition: attachment, so
+    // a plain navigation downloads the file directly — no fetch()/blob needed,
+    // which means no dependency on cross-origin JS-read permissions that
+    // browsers/extensions can silently block.
     try {
-      const res = await fetch(href);
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+      const url = new URL(href);
+      if (url.pathname.startsWith("/uploads/")) {
+        url.pathname = url.pathname.replace(/^\/uploads\//, "/uploads-dl/");
+        url.searchParams.set("name", filename);
+        return url.toString();
+      }
     } catch {
-      flash("Failed to download " + filename);
-    } finally {
-      setDownloadingEvidenceHref(null);
+      // fall through
     }
+    return href;
+  }
+
+  function downloadEvidenceFile(href: string, filename: string) {
+    if (typeof window === "undefined") return;
+    const url = evidenceDownloadUrl(href, filename);
+    const link = document.createElement("a");
+    link.href = url;
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   async function downloadInstallationForm() {
@@ -1924,12 +1926,11 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                                   </a>
                                   <button
                                     type="button"
-                                    disabled={downloadingEvidenceHref === href}
                                     onClick={() => downloadEvidenceFile(href, evidenceFilename(file))}
                                     style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
                                   >
                                     <Icon name="download" size={13} />
-                                    {downloadingEvidenceHref === href ? "Downloading…" : "Download"}
+                                    Download
                                   </button>
                                 </div>
                               </div>
