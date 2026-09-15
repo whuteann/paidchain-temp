@@ -92,8 +92,8 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     mccCode: existingMerchant?.mcc_code ?? "",
     contact: existingMerchant?.contact ?? customer?.contact ?? "",
     phone: existingMerchant?.phone ?? customer?.phone ?? "",
-    email: existingMerchant?.email ?? "",
-    bankAccountName: existingMerchant?.bank_account_name ?? "",
+    email: existingMerchant?.email ?? customer?.email ?? "",
+    bankAccountName: existingMerchant?.bank_account_name ?? customer?.contact ?? "",
     bankAccountNumber: existingMerchant?.bank_account_number ?? "",
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
@@ -320,7 +320,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       {step === 1 && (
         <>
           <div className="field-row">
-            <Field label="Merchant name" hint="required">
+            <Field label="Merchant name">
               <input className="input" placeholder="e.g. Kopitiam Heritage KL" value={f.name} onChange={(e) => set("name", e.target.value)} />
             </Field>
             <Field label="Business type">
@@ -339,7 +339,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
             </div>
           </Field>
 
-          <Field label="Bank" hint="required">
+          <Field label="Acquired Bank" hint="required">
             <select className="input" value={bankId} disabled={banksLoading} onChange={(e) => setBankId(e.target.value)}>
               <option value="">{banksLoading ? "Loading banks…" : "Select bank…"}</option>
               {selectableBanks.map((bank) => (
@@ -383,6 +383,9 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
             <input className="input" placeholder="50000" value={address.postcode} onChange={(e) => setAddressField("postcode", e.target.value)} />
           </Field>
 
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)", marginBottom: 10, fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+            Settlement Account Bank
+          </div>
           <div className="field-row">
             <Field label="Bank account name">
               <input className="input" placeholder="Defaults to merchant name" value={f.bankAccountName} onChange={(e) => set("bankAccountName", e.target.value)} />
@@ -1755,7 +1758,7 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
               <dt>Merchant ID</dt><dd className="mono">{m.id}</dd>
               {m.mcc_code && <><dt>MCC Code</dt><dd className="mono">{m.mcc_code}</dd></>}
               <dt>Category</dt><dd>{m.type}</dd>
-              <dt>Bank</dt><dd>{m.bank || "-"}</dd>
+              <dt>Acquired Bank</dt><dd>{m.bank || "-"}</dd>
             </dl>
           </div>
         </Card>

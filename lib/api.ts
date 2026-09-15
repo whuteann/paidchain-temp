@@ -1270,6 +1270,7 @@ export interface JobOut {
   print_pickup: boolean;
   created_at: string;
   completed_at: string | null;
+  done_date: string | null;
   due_date: string;
   priority: string;
   escalated_to: string | null;
@@ -1409,11 +1410,12 @@ export const jobs = {
   remove: (id: string) => req<void>("DELETE", `/jobs/${id}`),
   advance: (
     id: string,
-    opts: { note?: string; previous_terminal_status?: string; proof?: Array<File | { file: File }> }
+    opts: { note?: string; previous_terminal_status?: string; done_date?: string; proof?: Array<File | { file: File }> }
   ) => {
     const form = new FormData();
     if (opts.note) form.append("note", opts.note);
     if (opts.previous_terminal_status) form.append("previous_terminal_status", opts.previous_terminal_status);
+    if (opts.done_date) form.append("done_date", opts.done_date);
     for (const proof of opts.proof ?? []) {
       const file = proof instanceof File ? proof : proof.file;
       if (file instanceof File) form.append("proof", file, file.name);
@@ -1448,7 +1450,24 @@ export const jobs = {
   slaList: () => req<JobSlaMap>("GET", "/settings/sla"),
   slaUpdate: (job_type_slug: string, from_stage: string, to_stage: string, body: { warning_days?: number; breach_days?: number }) =>
     req<JobSlaTransition>("PATCH", `/jobs/sla/${job_type_slug}`, { body: { from_stage, to_stage, ...body } }),
+
+  // Reference-data for the Create Job form — gated on Jobs.Create alone, unlike
+  // /terminals/settings, /users and /mdr which need Settings.View/Users.View.
+  lookupTermSettings: () => req<JobLookupTermSettingOut[]>("GET", "/jobs/lookups/term-settings", { params: { active: true } }),
+  lookupMdrRates: () => req<MdrOut[]>("GET", "/jobs/lookups/mdr-rates"),
+  lookupAssignees: (role?: string) => req<JobLookupAssigneeOut[]>("GET", "/jobs/lookups/assignees", { params: { role } }),
 };
+
+export interface JobLookupTermSettingOut {
+  id: string;
+  brand: string;
+  model: string;
+}
+
+export interface JobLookupAssigneeOut {
+  id: string;
+  name: string;
+}
 
 // ─── SIM Cards ────────────────────────────────────────────────────────────────
 

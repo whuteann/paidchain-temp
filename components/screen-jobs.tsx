@@ -8,7 +8,7 @@ import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import { merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, MerchantMidOut, MerchantMidCreate, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut, JobLookupTermSettingOut, JobLookupAssigneeOut } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -96,83 +96,6 @@ function EntitySearchSelect<T extends { id: string }>({
         )}
       </div>
     </Field>
-  );
-}
-
-function JobAddMidModal({ merchant, existingTidValues, onClose, onSaved }: {
-  merchant: MerchantOut;
-  existingTidValues: string[];
-  onClose: () => void;
-  onSaved: (mid: MerchantMidOut) => void;
-}) {
-  const [midValue, setMidValue] = useState("");
-  const [tidValue, setTidValue] = useState("");
-  const [mdrRateId, setMdrRateId] = useState("");
-  const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.mdr.list().then(setMdrRates).catch(console.error);
-  }, []);
-
-  const valid = Boolean(midValue.trim() && tidValue.trim());
-
-  async function submit() {
-    if (!valid) return;
-    if (existingTidValues.includes(tidValue.trim())) {
-      setErr("This merchant already has that TID.");
-      return;
-    }
-    setSaving(true); setErr(null);
-    try {
-      const created = await api.merchants.createMid(merchant.id, {
-        mid_value: midValue.trim(),
-        tid_value: tidValue.trim(),
-        mdr_rate_id: mdrRateId || null,
-      } satisfies MerchantMidCreate);
-      onSaved(created);
-      onClose();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Failed to add MID");
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal
-      title="Add MID"
-      sub={merchant.name}
-      icon="tag"
-      onClose={onClose}
-      foot={<>
-        <div className="mf-spacer" />
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" disabled={saving || !valid} onClick={submit}>
-          {saving ? "Saving…" : "Add MID"}
-        </Btn>
-      </>}
-    >
-      <div className="field-row">
-        <Field label="MID value" hint="required">
-          <input className="input" value={midValue} onChange={(e) => setMidValue(e.target.value)} placeholder="MID123456" />
-        </Field>
-        <Field label="TID value" hint="required">
-          <input className="input" value={tidValue} onChange={(e) => setTidValue(e.target.value)} placeholder="TID123456" />
-        </Field>
-      </div>
-      <Field label="MDR rate">
-        <select className="input" value={mdrRateId} onChange={(e) => setMdrRateId(e.target.value)}>
-          <option value="">No MDR rate</option>
-          {mdrRates.map((rate) => (
-            <option key={rate.id} value={rate.id}>
-              {rate.id} · {rate.type} {rate.rate}%
-            </option>
-          ))}
-        </select>
-      </Field>
-      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
-    </Modal>
   );
 }
 
@@ -325,9 +248,8 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
   const [serviceTerminals, setServiceTerminals] = useState<ServiceTerminalDraft[]>([newServiceTerminalDraft()]);
   const [availableTids, setAvailableTids] = useState<AvailableTidOut[]>([]);
   const [availableTidsLoading, setAvailableTidsLoading] = useState(Boolean(presetMerchant?.id));
-  const [showAddTid, setShowAddTid] = useState(false);
-  const [termSettingsList, setTermSettingsList] = useState<TermSettingOut[]>([]);
-  const [adminUsers, setAdminUsers] = useState<UserOut[]>([]);
+  const [termSettingsList, setTermSettingsList] = useState<JobLookupTermSettingOut[]>([]);
+  const [adminUsers, setAdminUsers] = useState<JobLookupAssigneeOut[]>([]);
   const [mdrRates, setMdrRates] = useState<MdrOut[]>([]);
   const [form, setForm] = useState({
     assignee: "",
@@ -344,9 +266,9 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
   });
 
   useEffect(() => {
-    api.termSettings.list({ active: true }).then(setTermSettingsList).catch(console.error);
-    api.users.list({ role: "Operations", per_page: 100 }).then((p) => setAdminUsers(p.items)).catch(console.error);
-    api.mdr.list().then(setMdrRates).catch(console.error);
+    api.jobs.lookupTermSettings().then(setTermSettingsList).catch(console.error);
+    api.jobs.lookupAssignees("Operations").then(setAdminUsers).catch(console.error);
+    api.jobs.lookupMdrRates().then(setMdrRates).catch(console.error);
   }, []);
 
   const selectedMerchantId = selectedMerchant?.id;
@@ -357,13 +279,11 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
     if (!selectedMerchantId) {
       setAvailableTids([]);
       setAvailableTidsLoading(false);
-      setShowAddTid(false);
       setInstallationTerminals([newInstallationTerminalDraft()]);
       return;
     }
 
     setAvailableTidsLoading(true);
-    setShowAddTid(false);
     setInstallationTerminals([newInstallationTerminalDraft()]);
 
     api.merchants.availableTids(selectedMerchantId)
@@ -430,25 +350,6 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
 
   function selectInstallationTid(index: number, key: string) {
     setInstallationTerminalRow(index, { tid_key: key });
-  }
-
-  function handleMidAdded(created: MerchantMidOut) {
-    const entry: AvailableTidOut = {
-      source: "mid",
-      source_id: created.id,
-      tid_value: created.tid_value,
-      mid_value: created.mid_value,
-      mdr_rate_id: created.mdr_rate_id,
-      bank_id: selectedMerchant?.bank_id ?? null,
-      bank: selectedMerchant?.bank ?? null,
-      acceptance_name: null,
-    };
-    setAvailableTids((items) => [...items, entry]);
-    setInstallationTerminals((rows) => {
-      const targetIndex = rows.findIndex((row) => !row.tid_key);
-      if (targetIndex < 0) return rows;
-      return rows.map((row, index) => index === targetIndex ? { ...row, tid_key: tidKey(entry) } : row);
-    });
   }
 
   function addInstallationTerminalRow() {
@@ -739,7 +640,6 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                   <div style={{ fontSize: 12, color: "var(--ink-3)" }}>required · one line per installation device</div>
                 </div>
                 <div style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                  {/* <Btn variant="ghost" sm icon="tag" disabled={!selectedMerchant} onClick={() => setShowAddTid(true)}>Add MID</Btn> */}
                   <Btn variant="ghost" sm icon="plus" onClick={addInstallationTerminalRow}>Add MID</Btn>
                 </div>
               </div>
@@ -884,14 +784,6 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
         </div>
       )}
       </Modal>
-      {showAddTid && selectedMerchant && (
-        <JobAddMidModal
-          merchant={selectedMerchant}
-          existingTidValues={availableTids.map((t) => t.tid_value)}
-          onClose={() => setShowAddTid(false)}
-          onSaved={handleMidAdded}
-        />
-      )}
     </>
   );
 }
@@ -1009,6 +901,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
               { key: "sla", header: "SLA", render: (job) => <SlaChip sla={job.sla} /> },
               { key: "assignee", header: "Assignee", render: (job) => <span className="td-mut">{job.assignee}</span> },
               { key: "due", header: "Due", render: (job) => <span className="td-mut td-mono">{job.due_date.slice(5)}</span> },
+              { key: "donedate", header: "Done Date", render: (job) => <span className="td-mut td-mono">{job.done_date ? job.done_date.slice(5, 10) : "-"}</span> },
               { key: "completed", header: "Completed", render: (job) => <span className="td-mut td-mono">{job.completed_at ? job.completed_at.slice(5, 10) : "-"}</span> },
               ...(can("Jobs.Delete") ? [{
                 key: "actions", header: "", render: (job: JobOut) => job.stage === "Pending" ? (
@@ -1032,6 +925,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
                   { label: "SLA", value: <SlaChip sla={job.sla} /> },
                   { label: "Assignee", value: job.assignee },
                   { label: "Due", value: <span className="td-mono">{job.due_date.slice(5)}</span> },
+                  { label: "Done Date", value: <span className="td-mono">{job.done_date ? job.done_date.slice(5, 10) : "-"}</span> },
                   { label: "Completed", value: <span className="td-mono">{job.completed_at ? job.completed_at.slice(5, 10) : "-"}</span> },
                   { label: "Customer", value: job.customer?.name || "—" },
                   { label: "Bank", value: job.merchant.bank || "—" },
@@ -1534,6 +1428,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [files, setFiles] = useState<DropzoneFile[]>([]);
   const [transitionNote, setTransitionNote] = useState("");
   const [previousTerminalStatus, setPreviousTerminalStatus] = useState("Faulty");
+  const [doneDate, setDoneDate] = useState("");
+  const [pendingStageErr, setPendingStageErr] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [showSwap, setShowSwap] = useState(false);
   const [showAssignDevice, setShowAssignDevice] = useState(false);
@@ -1544,6 +1440,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showTrackParcel, setShowTrackParcel] = useState(false);
   const [refreshingParcel, setRefreshingParcel] = useState(false);
   const [docBusy, setDocBusy] = useState<"form" | "do" | "pickup" | null>(null);
+  const [downloadingEvidenceHref, setDownloadingEvidenceHref] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1620,6 +1517,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     if (!nextStage) return;
     if (!can(nextStage === "Completed" ? "Jobs.Close" : "Jobs.Edit")) return;
     if (transitionNeedsEvidence(job!.type, nextStage) || (job!.type === "Replacement" && nextStage === "Completed")) {
+      if (nextStage === "Job Done") setDoneDate(new Date().toISOString().slice(0, 10));
+      setPendingStageErr(null);
       setPendingStage(nextStage);
       return;
     }
@@ -1654,6 +1553,32 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     const url = window.URL.createObjectURL(blob);
     window.open(url, "_blank", "noopener,noreferrer");
     window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function downloadEvidenceFile(href: string, filename: string) {
+    // The plain <a download> attribute is silently ignored by browsers for
+    // cross-origin links (evidence files live on the API's own domain, not the
+    // dashboard's) — it just navigates instead of downloading. Fetching the file
+    // ourselves and saving it via a same-origin blob: URL forces a real download.
+    if (typeof window === "undefined") return;
+    setDownloadingEvidenceHref(href);
+    try {
+      const res = await fetch(href);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+    } catch {
+      flash("Failed to download " + filename);
+    } finally {
+      setDownloadingEvidenceHref(null);
+    }
   }
 
   async function downloadInstallationForm() {
@@ -1701,20 +1626,23 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     const evidenceRequired = transitionNeedsEvidence(job.type, pendingStage);
     if (evidenceRequired && files.length === 0) return;
     setAdvancing(true);
+    setPendingStageErr(null);
     try {
       const updated = await api.jobs.advance(job.id, {
         note: transitionNote.trim() || undefined,
         previous_terminal_status:
           job.type === "Replacement" && pendingStage === "Completed" ? previousTerminalStatus : undefined,
+        done_date: pendingStage === "Job Done" ? doneDate || undefined : undefined,
         proof: files.map((entry) => entry.file),
       });
       setJob(updated);
       setPendingStage(null);
       setFiles([]);
       setTransitionNote("");
+      setDoneDate("");
       flash(pendingStage + " recorded");
-    } catch {
-      flash("Failed to advance job");
+    } catch (e) {
+      setPendingStageErr(e instanceof ApiError ? e.message : "Failed to advance job");
     } finally {
       setAdvancing(false);
     }
@@ -1994,14 +1922,15 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                                     <Icon name="link" size={13} />
                                     Open
                                   </a>
-                                  <a
-                                    href={href}
-                                    download
-                                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", textDecoration: "none", fontSize: 12.5, fontWeight: 600 }}
+                                  <button
+                                    type="button"
+                                    disabled={downloadingEvidenceHref === href}
+                                    onClick={() => downloadEvidenceFile(href, evidenceFilename(file))}
+                                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
                                   >
                                     <Icon name="download" size={13} />
-                                    Download
-                                  </a>
+                                    {downloadingEvidenceHref === href ? "Downloading…" : "Download"}
+                                  </button>
                                 </div>
                               </div>
                               {isImage && (
@@ -2032,6 +1961,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                 <dt>Assignee</dt><dd>{job.assignee}</dd>
                 <dt>Created</dt><dd className="mono">{formatDateTime(job.created_at)}</dd>
                 <dt>Due</dt><dd className="mono">{job.due_date}</dd>
+                {job.done_date && (<><dt>Done Date</dt><dd className="mono">{job.done_date}</dd></>)}
                 {job.escalation_reason && (<><dt>Escalation reason</dt><dd>{job.escalation_reason}</dd></>)}
                 {job.paper_roll_request && (<>
                   <dt>Paper rolls</dt><dd>{job.paper_roll_request.quantity} rolls · pay to {job.paper_roll_request.payment_target}</dd>
@@ -2159,10 +2089,10 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           sub={job.id + " · " + job.type}
           icon={transitionNeedsEvidence(job.type, pendingStage) ? "upload" : "check"}
           size="slim"
-          onClose={() => { setPendingStage(null); setFiles([]); setTransitionNote(""); }}
+          onClose={() => { setPendingStage(null); setFiles([]); setTransitionNote(""); setDoneDate(""); setPendingStageErr(null); }}
           foot={<>
             <div className="mf-spacer" />
-            <Btn variant="ghost" onClick={() => { setPendingStage(null); setFiles([]); setTransitionNote(""); }}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => { setPendingStage(null); setFiles([]); setTransitionNote(""); setDoneDate(""); setPendingStageErr(null); }}>Cancel</Btn>
             <Btn
               variant="primary" icon="check"
               disabled={advancing || (transitionNeedsEvidence(job.type, pendingStage) && files.length === 0)}
@@ -2184,10 +2114,27 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             <textarea className="textarea" placeholder="Optional note for this status update…" value={transitionNote} onChange={(e) => setTransitionNote(e.target.value)} />
           </Field>
 
+          {pendingStage === "Job Done" && (
+            <Field label="Completed date">
+              <input
+                type="date"
+                className="input"
+                value={doneDate}
+                min={job.created_at.slice(0, 10)}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setDoneDate(e.target.value)}
+              />
+            </Field>
+          )}
+
           {transitionNeedsEvidence(job.type, pendingStage) && (
             <Field label="Evidence / proof" hint="required">
               <Dropzone files={files} setFiles={setFiles} hint="Attach proof, forms, photos, or signed documents" />
             </Field>
+          )}
+
+          {pendingStageErr && (
+            <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{pendingStageErr}</div>
           )}
         </Modal>
       )}

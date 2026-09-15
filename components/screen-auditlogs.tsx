@@ -17,9 +17,10 @@ const TYPE_META: Record<string, { cls: string; icon: string }> = {
 
 const ROLE_CLS: Record<string, string> = {
   Admin:      "chip-bad",
-  Operations: "chip-info",
-  Warehouse:  "chip-orange",
   Finance:    "chip-indigo",
+  Helpdesk:   "chip-neutral",
+  Operations: "chip-info",
+  RM:         "chip-neutral",
   Viewer:     "chip-neutral",
 };
 
