@@ -1265,7 +1265,7 @@ function UserModal({ onClose, onSave, existing, roles }: {
   const isRm = selectedRole?.id.trim().toLowerCase() === "rm"
     || selectedRole?.name.trim().toLowerCase() === "rm";
   const valid = !!(f.name && f.email.includes("@") && (!isRm || f.bankId) && (existing || f.password));
-  const roleIcons: Record<string, string> = { Admin: "shield", Finance: "payouts", Warehouse: "box", Viewer: "eye", Operations: "wrench" };
+  const roleIcons: Record<string, string> = { Admin: "shield", Finance: "payouts", Helpdesk: "phone", Viewer: "eye", Operations: "wrench", RM: "merchants" };
   const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === f.bankId);
   const selectedBankName = bankOptions.find((bank) => bank.id === f.bankId)?.name ?? f.bank;
 

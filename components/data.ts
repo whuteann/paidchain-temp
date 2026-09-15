@@ -279,9 +279,10 @@ export const STAFF = ["Arif Rahman", "Mei Ling Tan", "Suresh Kumar", "Nurul Huda
 
 export const ROLES: Record<string, RoleMeta> = {
   "Admin":      { chip: "chip-bad",     desc: "Full access — manage everything" },
+  "Finance":    { chip: "chip-indigo",  desc: "Payouts, rentals, profit shares & MDR" },
+  "Helpdesk":   { chip: "chip-neutral", desc: "Support jobs within assigned banks" },
   "Operations": { chip: "chip-info",    desc: "Jobs, terminals, escalations" },
-  "Warehouse":  { chip: "chip-orange",  desc: "Inventory & device preparation" },
-  "Finance":    { chip: "chip-indigo",  desc: "Profit shares, MDR, e-invoices" },
+  "RM":         { chip: "chip-neutral", desc: "Merchant setup, TIDs, jobs & device prep" },
   "Viewer":     { chip: "chip-neutral", desc: "Read-only across modules" },
 };
 
