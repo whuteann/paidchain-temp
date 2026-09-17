@@ -1731,8 +1731,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
               {docBusy === "pickup" ? "Generating…" : "Pickup Form"}
             </Btn>
           )}
-          {can("Jobs.Export") && def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
-          {can("Jobs.Edit") && <Btn variant="ghost" icon="edit">Edit</Btn>}
+          {/* {can("Jobs.Export") && def.exportable && <Btn variant="ghost" icon="export" onClick={() => setShowExport(true)}>Export Details</Btn>}
+          {can("Jobs.Edit") && <Btn variant="ghost" icon="edit">Edit</Btn>} */}
         </div>
       </div>
 
