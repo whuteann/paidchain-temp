@@ -93,11 +93,12 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
     contact: existingMerchant?.contact ?? customer?.contact ?? "",
     phone: existingMerchant?.phone ?? customer?.phone ?? "",
     email: existingMerchant?.email ?? customer?.email ?? "",
-    bankAccountName: existingMerchant?.bank_account_name ?? customer?.contact ?? "",
+    bankAccountName: existingMerchant?.bank_account_name ?? customer?.name ?? "",
     bankAccountNumber: existingMerchant?.bank_account_number ?? "",
     bankAccountType: existingMerchant?.bank_account_type ?? ACCOUNT_TYPES[0],
   });
   const [bankId, setBankId] = useState(existingMerchant?.bank_id ?? "");
+  const [settlementBankId, setSettlementBankId] = useState(existingMerchant?.settlement_bank_id ?? "");
   const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
   const [banksLoading, setBanksLoading] = useState(true);
   const [address, setAddress] = useState<MerchantAddressForm>(() => merchantInitialAddressForm(existingMerchant, customer));
@@ -167,6 +168,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       bank_account_name: f.bankAccountName.trim() || f.name.trim(),
       bank_account_number: f.bankAccountNumber.trim(),
       bank_account_type: f.bankAccountType,
+      settlement_bank_id: settlementBankId || null,
     };
   }
 
@@ -185,6 +187,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
         bank_account_name: f.bankAccountName.trim() || f.name.trim(),
         bank_account_number: f.bankAccountNumber.trim(),
         bank_account_type: f.bankAccountType,
+        settlement_bank_id: settlementBankId || null,
       };
       const m = await api.merchants.update(existingMerchant.id, updateBody);
       onSave(m);
@@ -386,6 +389,14 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)", marginBottom: 10, fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: 0.3 }}>
             Settlement Account Bank
           </div>
+          <Field label="Settlement Bank">
+            <select className="input" value={settlementBankId} disabled={banksLoading} onChange={(e) => setSettlementBankId(e.target.value)}>
+              <option value="">{banksLoading ? "Loading banks…" : "Select bank…"}</option>
+              {selectableBanks.map((bank) => (
+                <option key={bank.id} value={bank.id}>{bank.name}</option>
+              ))}
+            </select>
+          </Field>
           <div className="field-row">
             <Field label="Bank account name">
               <input className="input" placeholder="Defaults to merchant name" value={f.bankAccountName} onChange={(e) => set("bankAccountName", e.target.value)} />
@@ -784,6 +795,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [createCustomer, setCreateCustomer] = useState<CustomerOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MerchantOut | null>(null);
+  const [showExport, setShowExport] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -828,7 +840,10 @@ export function Merchants({ nav }: { nav: NavFn }) {
       <PageHead
         title="Merchants"
         sub={pageTab === "merchants" ? total + " merchants · search by name, MID, TID, terminal serial or merchant ID" : "Global catalog of payment acceptance types"}
-        actions={pageTab === "merchants" && can("Merchants.Create") ? <Btn variant="primary" icon="plus" onClick={() => setShowCustomerPicker(true)}>Create Merchant</Btn> : undefined}
+        actions={pageTab === "merchants" ? <>
+          {can("Merchants.Export") && <Btn variant="ghost" icon="download" onClick={() => setShowExport(true)}>Export</Btn>}
+          {can("Merchants.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCustomerPicker(true)}>Create Merchant</Btn>}
+        </> : undefined}
       />
 
       {canViewAcceptance && (
@@ -941,8 +956,67 @@ export function Merchants({ nav }: { nav: NavFn }) {
           customer={createCustomer}
         />
       )}
+      {showExport && can("Merchants.Export") && (
+        <ExportMerchantsModal onClose={() => setShowExport(false)} />
+      )}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
+  );
+}
+
+/* =================== EXPORT MODAL =================== */
+function downloadMerchantsBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function ExportMerchantsModal({ onClose }: { onClose: () => void }) {
+  const [form, setForm] = useState({ query: "", status: "" });
+  const [exporting, setExporting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function submit() {
+    setExporting(true); setErr(null);
+    try {
+      const blob = await api.merchants.export({
+        query: form.query || undefined,
+        status: form.status && form.status !== "All" ? form.status : undefined,
+      });
+      downloadMerchantsBlob(blob, `merchants-export-${new Date().toISOString().slice(0, 10)}.csv`);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to export");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Export Merchants" sub="Download a CSV of Customer + Merchant + Terminal + SIM data" icon="download"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="download" disabled={exporting} onClick={submit}>
+          {exporting ? "Exporting…" : "Export CSV"}
+        </Btn>
+      </>}
+    >
+      <Field label="Search query">
+        <input className="input" placeholder="Merchant name, ID, customer, terminal serial…" value={form.query} onChange={(e) => set("query", e.target.value)} />
+      </Field>
+      <Field label="Status">
+        <select className="input" value={form.status} onChange={(e) => set("status", e.target.value)}>
+          {["All", "Active", "Onboarding", "Suspended", "Inactive"].map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
   );
 }
 
@@ -1925,6 +1999,7 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
         <Card title="Settlement Bank Account" icon="bank">
           <div className="card-pad">
             <dl className="kv">
+              <dt>Settlement Bank</dt><dd>{m.settlement_bank || "-"}</dd>
               <dt>Account name</dt><dd>{m.bank_account_name}</dd>
               <dt>Account number</dt><dd className="mono">{m.bank_account_number}</dd>
               <dt>Account type</dt><dd>{m.bank_account_type}</dd>

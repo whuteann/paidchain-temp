@@ -1189,12 +1189,13 @@ function UsersTabContent({
         </Toolbar>
         <div className="tbl-wrap">
           <table className="tbl">
-            <thead><tr>{["User","Role","Status","Open Jobs","Last Active",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <thead><tr>{["User","Role","Bank","Status","Open Jobs","Last Active",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
             <tbody>
               {!loading && users.map((u) => (
                 <tr key={u.id}>
                   <td><Entity name={u.name} sub={u.email} /></td>
                   <td><Chip cls={ROLES[u.role]?.chip ?? "chip-neutral"}>{u.role}</Chip></td>
+                  <td className="td-mut">{u.banks?.length ? u.banks.join(", ") : "—"}</td>
                   <td><Chip cls={statusChip[u.status] ?? "chip-neutral"} dot>{u.status}</Chip></td>
                   <td className="td-mut">{u.jobs || "—"}</td>
                   <td className="td-mut">{u.last_active ?? "—"}</td>
@@ -1249,10 +1250,9 @@ function UserModal({ onClose, onSave, existing, roles }: {
     role: existing
       ? roles.find((r) => r.name === existing.role)?.id ?? ""
       : roles.find((r) => r.name === "Operations")?.id ?? roles[0]?.id ?? "",
-    bankId: existing?.bank_ids?.[0] ?? "",
-    bank: existing?.banks?.[0] ?? "",
     password: "",
   }));
+  const [bankIds, setBankIds] = useState<Set<string>>(new Set(existing?.bank_ids ?? []));
   const [bankOptions, setBankOptions] = useState<BankOut[]>([]);
   const [banksLoading, setBanksLoading] = useState(true);
   const [resetPw, setResetPw] = useState("");
@@ -1264,10 +1264,17 @@ function UserModal({ onClose, onSave, existing, roles }: {
   const selectedRole = roles.find((role) => role.id === f.role);
   const isRm = selectedRole?.id.trim().toLowerCase() === "rm"
     || selectedRole?.name.trim().toLowerCase() === "rm";
-  const valid = !!(f.name && f.email.includes("@") && (!isRm || f.bankId) && (existing || f.password));
+  const valid = !!(f.name && f.email.includes("@") && (!isRm || bankIds.size > 0) && (existing || f.password));
   const roleIcons: Record<string, string> = { Admin: "shield", Finance: "payouts", Helpdesk: "phone", Viewer: "eye", Operations: "wrench", RM: "merchants" };
-  const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bank.id === f.bankId);
-  const selectedBankName = bankOptions.find((bank) => bank.id === f.bankId)?.name ?? f.bank;
+  const selectableBanks = bankOptions.filter((bank) => (bank.status ?? "Active").toLowerCase() === "active" || bankIds.has(bank.id));
+
+  function toggleBank(bankId: string) {
+    setBankIds((prev) => {
+      const next = new Set(prev);
+      next.has(bankId) ? next.delete(bankId) : next.add(bankId);
+      return next;
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1275,9 +1282,11 @@ function UserModal({ onClose, onSave, existing, roles }: {
       .then((items) => {
         if (cancelled) return;
         setBankOptions(items);
-        const existingBankId = existing?.bank_ids?.[0] || items.find((bank) => bank.name === existing?.banks?.[0])?.id || "";
-        const existingBankName = items.find((bank) => bank.id === existingBankId)?.name || existing?.banks?.[0] || "";
-        setF((prev) => ({ ...prev, bankId: prev.bankId || existingBankId, bank: prev.bank || existingBankName }));
+        if (existing?.bank_ids?.length) return;
+        const namedIds = (existing?.banks ?? [])
+          .map((name) => items.find((bank) => bank.name === name)?.id)
+          .filter((id): id is string => Boolean(id));
+        if (namedIds.length) setBankIds((prev) => new Set([...prev, ...namedIds]));
       })
       .catch(console.error)
       .finally(() => {
@@ -1291,9 +1300,13 @@ function UserModal({ onClose, onSave, existing, roles }: {
     if (existing ? !can("Users.Edit") : !can("Users.Invite")) return;
     setSaving(true); setErr(null);
     try {
-      const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder", bank_ids: f.bankId ? [f.bankId] : [], banks: selectedBankName ? [selectedBankName] : [] };
+      const selectedIds = Array.from(bankIds);
+      const selectedNames = selectedIds
+        .map((id) => bankOptions.find((bank) => bank.id === id)?.name)
+        .filter((name): name is string => Boolean(name));
+      const body: UserCreate = { name: f.name, email: f.email, role_id: f.role, password: f.password || "placeholder", bank_ids: selectedIds, banks: selectedNames };
       const result = existing
-        ? await api.users.update(existing.id, { name: f.name, email: f.email, role_id: f.role, bank_ids: f.bankId ? [f.bankId] : [], banks: selectedBankName ? [selectedBankName] : [] })
+        ? await api.users.update(existing.id, { name: f.name, email: f.email, role_id: f.role, bank_ids: selectedIds, banks: selectedNames })
         : await api.users.create(body);
       onSave(result);
     } catch (e) {
@@ -1357,19 +1370,43 @@ function UserModal({ onClose, onSave, existing, roles }: {
         </div>
       </Field>
       <Field label="Bank" hint={isRm ? "required" : "optional"}>
-        <select
-          className="input"
-          value={f.bankId}
-          disabled={banksLoading}
-          onChange={(e) => {
-            const bankId = e.target.value;
-            const name = bankOptions.find((bank) => bank.id === bankId)?.name ?? "";
-            setF((prev) => ({ ...prev, bankId, bank: name }));
-          }}
-        >
-          <option value="">{banksLoading ? "Loading banks..." : "Select bank..."}</option>
-          {selectableBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
-        </select>
+        {banksLoading ? (
+          <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Loading banks…</div>
+        ) : selectableBanks.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No banks available</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(148px, 1fr))", gap: 6 }}>
+            {selectableBanks.map((bank) => {
+              const checked = bankIds.has(bank.id);
+              return (
+                <label
+                  key={bank.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "7px 10px", borderRadius: 7, cursor: "pointer",
+                    border: `1.5px solid ${checked ? "var(--indigo)" : "var(--line)"}`,
+                    background: checked ? "var(--bg-2)" : "var(--bg)",
+                    transition: "border-color 0.1s, background 0.1s",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleBank(bank.id)}
+                    style={{ accentColor: "var(--indigo)", width: 14, height: 14, flexShrink: 0, cursor: "pointer" }}
+                  />
+                  <span style={{
+                    fontSize: 12.5, userSelect: "none",
+                    fontWeight: checked ? 600 : 400,
+                    color: checked ? "var(--ink)" : "var(--ink-3)",
+                  }}>
+                    {bank.name}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </Field>
       {existing && can("Users.Edit") && (
         <div style={{ marginTop: 8, paddingTop: 14, borderTop: "1px solid var(--line)" }}>

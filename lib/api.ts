@@ -749,6 +749,8 @@ export interface MerchantOut {
   bank_account_number: string;
   bank_account_type: string;
   bank_code?: string | null;
+  settlement_bank_id?: string | null;
+  settlement_bank?: string | null;
   terminal_count: number;
   open_jobs_count: number;
   commercial_profile?: MerchantCommercialProfileOut | null;
@@ -798,6 +800,7 @@ export interface MerchantCreate {
   bank_account_number: string;
   bank_account_type: string;
   bank_code?: string | null;
+  settlement_bank_id?: string | null;
   commercial_profile?: MerchantCommercialProfileIn | null;
 }
 
@@ -819,6 +822,7 @@ export interface MerchantUpdate {
   bank_account_name?: string | null;
   bank_account_number?: string | null;
   bank_account_type?: string | null;
+  settlement_bank_id?: string | null;
   status?: string | null;
   finance_status?: string | null;
 }
@@ -907,6 +911,8 @@ export const merchants = {
   remove: (id: string) => req<CustomerMerchantOut>("DELETE", `/merchants/${id}`),
   hardDelete: (id: string) => req<HardDeleteResult>("DELETE", `/merchants/${id}/hard`),
   details: () => req<MerchantDetails>("GET", "/merchants/details"),
+  export: (p?: { query?: string; status?: string; customer_id?: string }) =>
+    reqBlob("GET", "/merchants/export", { params: p }),
   terminals: (merchantId: string) => req<MerchantTerminalOut[]>("GET", `/merchants/${merchantId}/terminals`),
   jobs: (merchantId: string, status?: string) =>
     req<MerchantJobOut[]>("GET", `/merchants/${merchantId}/jobs`, { params: { status } }),
