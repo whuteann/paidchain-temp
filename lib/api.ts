@@ -236,6 +236,7 @@ export interface TerminalRef {
   status?: string | null;
   merchant?: MerchantRef | null;
   customer?: CustomerRef | null;
+  sim_card?: SimCardRef | null;
 }
 
 export interface SimCardRef {
@@ -1236,8 +1237,8 @@ export interface JobTerminalOut {
   mdr_rate_id: string | null;
   previous_terminal_status: string | null;
   term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
-  terminal: { serial: string; serial_no?: string; brand: string; model: string } | null;
-  service_terminal: { serial: string; serial_no?: string; brand: string; model: string } | null;
+  terminal: { serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
+  service_terminal: { serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
   mid_source: AvailableTidOut | null;
 }
 
