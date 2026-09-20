@@ -8,7 +8,7 @@ import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import { merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut, JobLookupTermSettingOut, JobLookupAssigneeOut } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut, JobLookupTermSettingOut, JobLookupAssigneeOut, SimCardRef } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -164,8 +164,24 @@ function daysBetween(start: string, end: string) {
   return Math.max(0, Math.floor((parseStamp(end).getTime() - parseStamp(start).getTime()) / 86400000));
 }
 
+/** YYYY-MM-DD for a <input type="date">, in the browser's LOCAL calendar day —
+ * not `.toISOString().slice(0, 10)`, which is UTC and reads as "yesterday" for
+ * any UTC+ timezone (e.g. Malaysia, UTC+8) during the first hours after local
+ * midnight, wrongly disabling "today" as a max/default. */
+function localDateInputValue(d: Date = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function findRule(rules: Record<string, SlaTransitionRule[]>, jobType: string, from: string, to: string) {
   return (rules[jobType] || []).find((rule) => rule.from === from && rule.to === to) || null;
+}
+
+function simCardLabel(sim?: SimCardRef | null) {
+  if (!sim) return "-";
+  return [sim.msisdn, sim.carrier].filter(Boolean).join(" · ") || "-";
 }
 
 function elapsedToSla(elapsedDays: number, rule: SlaTransitionRule | null, completed = false) {
@@ -1516,7 +1532,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
     if (!nextStage) return;
     if (!can(nextStage === "Completed" ? "Jobs.Close" : "Jobs.Edit")) return;
     if (transitionNeedsEvidence(job!.type, nextStage) || (job!.type === "Replacement" && nextStage === "Completed")) {
-      if (nextStage === "Job Done") setDoneDate(new Date().toISOString().slice(0, 10));
+      if (nextStage === "Job Done") setDoneDate(localDateInputValue());
       setPendingStageErr(null);
       setPendingStage(nextStage);
       return;
@@ -1828,7 +1844,10 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                           </Chip>
                         </div>
                         <dl className="kv" style={{ gridTemplateColumns: "88px 1fr", margin: 0 }}>
-                          {serviceSerial && (<><dt>Old serial</dt><dd className="mono">{serviceSerial}</dd></>)}
+                          {serviceSerial && (<>
+                            <dt>Old serial</dt><dd className="mono">{serviceSerial}</dd>
+                            <dt>Old SIM</dt><dd className="mono">{simCardLabel(terminal.service_terminal?.sim_card)}</dd>
+                          </>)}
                           {job.type === "Replacement" && terminal.term_setting && (
                             <><dt>Requested</dt><dd>{terminal.term_setting.brand} {terminal.term_setting.model}</dd></>
                           )}
@@ -1848,7 +1867,10 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                               </div>
                             </dd>
                           </>)}
-                          {rowNeedsAssignment && (<><dt>{job.type === "Replacement" ? "New serial" : "Serial"}</dt><dd className="mono">{assignedSerial || "—"}</dd></>)}
+                          {rowNeedsAssignment && (<>
+                            <dt>{job.type === "Replacement" ? "New serial" : "Serial"}</dt><dd className="mono">{assignedSerial || "—"}</dd>
+                            {assignedSerial && (<><dt>{job.type === "Replacement" ? "New SIM" : "SIM"}</dt><dd className="mono">{simCardLabel(terminal.terminal?.sim_card)}</dd></>)}
+                          </>)}
                           {terminal.previous_terminal_status && (<><dt>Old status</dt><dd>{terminal.previous_terminal_status}</dd></>)}
                         </dl>
                         {assignedSerial ? (
@@ -2121,8 +2143,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                 type="date"
                 className="input"
                 value={doneDate}
-                min={job.created_at.slice(0, 10)}
-                max={new Date().toISOString().slice(0, 10)}
+                min={localDateInputValue(new Date(job.created_at))}
+                max={localDateInputValue()}
                 onChange={(e) => setDoneDate(e.target.value)}
               />
             </Field>
