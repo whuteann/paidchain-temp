@@ -181,7 +181,9 @@ function findRule(rules: Record<string, SlaTransitionRule[]>, jobType: string, f
 
 function simCardLabel(sim?: SimCardRef | null) {
   if (!sim) return "-";
-  return [sim.msisdn, sim.carrier].filter(Boolean).join(" · ") || "-";
+  const parts = [sim.msisdn, sim.carrier].filter(Boolean);
+  if (sim.iccid) parts.push(`ICCID ${sim.iccid}`);
+  return parts.join(" · ") || "-";
 }
 
 function elapsedToSla(elapsedDays: number, rule: SlaTransitionRule | null, completed = false) {
