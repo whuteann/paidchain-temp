@@ -1,4 +1,5 @@
 /* Bumipay — Audit Logs */
+import { SortableTable, useServerSort } from "./table-sorting";
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Pagination, Empty } from "./components";
@@ -33,25 +34,30 @@ export function AuditLogs() {
   const [q, setQ]             = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [page, setPage]       = useState(1);
+  const { sort, onSortChange, sortParams } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages]     = useState(1);
   const [total, setTotal]     = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     api.auditLogs.list({
+      ...sortParams,
       page,
-      size: PAGE_SIZE,
+      per_page: PAGE_SIZE,
       query: q || undefined,
       type: typeFilter !== "All" ? typeFilter : undefined,
     })
       .then((p) => {
+        if (cancelled) return;
         setLogs(p.items);
         setPages(p.pages);
         setTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, typeFilter]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, typeFilter, sortParams]);
 
   function resetPage() { setPage(1); }
 
@@ -90,56 +96,60 @@ export function AuditLogs() {
           <Empty icon="activity" title="No audit events match" sub="Try adjusting your search or filter" />
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  {["ID", "Timestamp", "User", "Description", "Type"].map((h) => (
-                    <th key={h}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => {
-                  const tm = TYPE_META[log.type] ?? { cls: "chip-neutral", icon: "activity" };
-                  return (
-                    <tr key={log.id}>
-                      <td>
-                        <div className="cell-2">
-                          <span className="td-mono td-strong">{log.id}</span>
-                          {log.entity_id && (
-                            <span className="c2-sub mono">{log.entity_type} · {log.entity_id}</span>
-                          )}
-                          {!log.entity_id && log.entity_type && (
-                            <span className="c2-sub mono">{log.entity_type}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-2">
-                          <span className="td-mono td-strong">{log.action_at.slice(0, 10)}</span>
-                          <span className="c2-sub mono">{log.action_at.slice(11)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <span style={{ fontWeight: 600, fontSize: 13 }}>{log.user.name}</span>
-                          <Chip cls={ROLE_CLS[log.user.role] || "chip-neutral"}>{log.user.role}</Chip>
-                        </div>
-                      </td>
-                      <td style={{ maxWidth: 380 }}>
-                        <span style={{ fontSize: 13 }}>{log.description}</span>
-                      </td>
-                      <td>
-                        <Chip cls={tm.cls}>
-                          <Icon name={tm.icon} size={12} />
-                          {log.type}
-                        </Chip>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <SortableTable rows={logs} sort={sort} onSortChange={onSortChange} columns={[
+              { key: "ID", header: "ID", sortValue: (r) => r.id },
+              { key: "Timestamp", header: "Timestamp", sortValue: (r) => r.action_at },
+              { key: "User", header: "User", sortValue: (r) => r.user.name },
+              { key: "Description", header: "Description", sortValue: (r) => r.description },
+              { key: "Type", header: "Type", sortValue: (r) => r.type }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((log) => {
+                      const tm = TYPE_META[log.type] ?? { cls: "chip-neutral", icon: "activity" };
+                      return (
+                        <tr key={log.id}>
+                          <td>
+                            <div className="cell-2">
+                              <span className="td-mono td-strong">{log.id}</span>
+                              {log.entity_id && (
+                                <span className="c2-sub mono">{log.entity_type} · {log.entity_id}</span>
+                              )}
+                              {!log.entity_id && log.entity_type && (
+                                <span className="c2-sub mono">{log.entity_type}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="cell-2">
+                              <span className="td-mono td-strong">{log.action_at.slice(0, 10)}</span>
+                              <span className="c2-sub mono">{log.action_at.slice(11)}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              <span style={{ fontWeight: 600, fontSize: 13 }}>{log.user.name}</span>
+                              <Chip cls={ROLE_CLS[log.user.role] || "chip-neutral"}>{log.user.role}</Chip>
+                            </div>
+                          </td>
+                          <td style={{ maxWidth: 380 }}>
+                            <span style={{ fontSize: 13 }}>{log.description}</span>
+                          </td>
+                          <td>
+                            <Chip cls={tm.cls}>
+                              <Icon name={tm.icon} size={12} />
+                              {log.type}
+                            </Chip>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
 

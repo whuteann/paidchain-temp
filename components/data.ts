@@ -122,7 +122,7 @@ export interface PaperRollEntry {
 
 export interface TermSetting {
   id: string; brand: string; model: string; category: string; bank: string;
-  monthly: number; deposit: number; setup: number; units: number; active: boolean;
+  units: number; active: boolean;
 }
 
 export interface MDRRate {
@@ -270,7 +270,7 @@ export const RENTAL_STATUS: Record<string, StatusMeta> = {
 };
 export const PAYOUT_METHODS = ["Visa", "Mastercard", "CIMB", "Maybank", "DuitNow QR", "Multi-Method", "AmBank"];
 export const TXN_PAYMENT_METHODS = ["Visa Credit", "Visa Debit", "Mastercard Credit", "Mastercard Debit", "DuitNow QR", "Touch 'n Go", "American Express"];
-export const BRANDS: Record<string, string[]> = {
+const BRANDS: Record<string, string[]> = {
   "Ingenico": ["Move/5000", "Desk/5000", "Lane/3000", "Move/3500"],
   "PAX":      ["A920 Pro", "A80", "A920", "S920"],
   "Verifone": ["V240m", "P400", "Engage V200c", "T650p"],
@@ -504,9 +504,6 @@ brandKeys.forEach((brand) => {
       brand, model,
       category: j % 2 ? "Portable" : "Countertop",
       bank: BANKS[_tsIdx++ % BANKS.length],
-      monthly: [85, 95, 120, 70][j % 4],
-      deposit: [200, 250, 300, 150][j % 4],
-      setup: [50, 0, 80, 0][j % 4],
       units: 6 + j * 3,
       active: !(brand === "Verifone" && j === 3),
     });

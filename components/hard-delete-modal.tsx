@@ -35,6 +35,7 @@ export function HardDeleteModal({
   run,
   onClose,
   onDeleted,
+  detail,
 }: {
   entityLabel: string;
   name: string;
@@ -42,6 +43,8 @@ export function HardDeleteModal({
   run: () => Promise<HardDeleteResult>;
   onClose: () => void;
   onDeleted: () => void;
+  /** Overrides the default "Its addresses..." sentence, for entities that don't have addresses. */
+  detail?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,8 +103,8 @@ export function HardDeleteModal({
       </>}
     >
       <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>
-        This permanently deletes this {entityLabel.toLowerCase()} — this cannot be undone. Its addresses
-        {entityLabel === "Merchant" ? " and commercial profile" : ""} will be deleted along with it.
+        This permanently deletes this {entityLabel.toLowerCase()} — this cannot be undone.{" "}
+        {detail ?? `Its addresses${entityLabel === "Merchant" ? " and commercial profile" : ""} will be deleted along with it.`}{" "}
         Use this only to clean up an erroneously-created record; it will be blocked if any real activity is linked to it.
       </div>
       {error && <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--bad)", marginTop: 12 }}><Icon name="alert" size={15} />{error}</div>}

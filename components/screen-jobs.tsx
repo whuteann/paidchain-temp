@@ -1,4 +1,5 @@
 /* Bumipay — Job listing + detail + workflow engine */
+import { useServerSort } from "./table-sorting";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import { Icon } from "./icons";
@@ -204,6 +205,10 @@ function currentJobSla(job: JobOut, rules: Record<string, SlaTransitionRule[]>, 
   if (!currentStage || !nextStage) return job.sla;
   const rule = findRule(rules, job.type, currentStage.stage, nextStage);
   return elapsedToSla(daysBetween(currentStage.at, now), rule);
+}
+
+function isCancellableStage(stage: string) {
+  return stage !== "Completed" && stage !== "Cancelled";
 }
 
 function transitionNeedsEvidence(jobType: string, nextStage: string) {
@@ -821,6 +826,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
   const [bank, setBank] = useState("All");
   const [bankOptions, setBankOptions] = useState<string[]>([]);
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
@@ -832,8 +838,10 @@ export function Jobs({ nav }: { nav: NavFn }) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     api.jobs.list({
+      ...sortParams,
       page,
       per_page: JOBS_PAGE_SIZE,
       query: q || undefined,
@@ -843,18 +851,21 @@ export function Jobs({ nav }: { nav: NavFn }) {
       bank: bank !== "All" ? bank : undefined,
     })
       .then((p) => {
+        if (cancelled) return;
         setJobList(p.items);
         setPages(p.pages);
         setTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, type, status, sla, bank]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, type, status, sla, bank, sortParams]);
 
   function resetPage() { setPage(1); }
 
   function handleCreate(job: JobOut) {
-    setJobList((prev) => [job, ...prev]);
+    if (sort) refreshSort();
+    else setJobList((prev) => [job, ...prev]);
     setTotal((prev) => prev + 1);
     setShowCreate(false);
     setToast("Job " + job.id + " created");
@@ -863,6 +874,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
 
   function handleCancelled(job: JobOut) {
     setCancelTarget(null);
+    refreshSort();
     if (status === "All" || status === "Cancelled") {
       setJobList((prev) => prev.map((j) => j.id === job.id ? job : j));
     } else {
@@ -907,22 +919,23 @@ export function Jobs({ nav }: { nav: NavFn }) {
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : jobList.length === 0 ? <Empty icon="jobs" title="No jobs match" /> : (
           <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
             rows={jobList}
             getKey={(job) => job.id}
             onRowClick={(job) => nav("job-detail", job.id)}
             columns={[
-              { key: "id", header: "Job ID", render: (job) => <span className="td-mono td-strong">{job.id}</span> },
-              { key: "type", header: "Type", render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}><Icon name={JOB_TYPES[job.type]?.icon ?? "jobs"} size={14} /></span>{job.type}</span> },
-              { key: "merchant", header: "Customer / Merchant", mobileLabel: "Merchant", render: (job) => <div className="cell-2"><span className="td-strong">{job.customer?.name || "—"}</span><span className="c2-sub">{job.merchant.name}</span></div> },
-              { key: "bank", header: "Bank", render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{job.merchant.bank || "—"}</span> },
-              { key: "status", header: "Status", render: (job) => <JobStatus status={job.stage} /> },
-              { key: "sla", header: "SLA", render: (job) => <SlaChip sla={job.sla} /> },
-              { key: "assignee", header: "Assignee", render: (job) => <span className="td-mut">{job.assignee}</span> },
-              { key: "due", header: "Due", render: (job) => <span className="td-mut td-mono">{job.due_date.slice(5)}</span> },
-              { key: "donedate", header: "Done Date", render: (job) => <span className="td-mut td-mono">{job.done_date ? job.done_date.slice(5, 10) : "-"}</span> },
-              { key: "completed", header: "Completed", render: (job) => <span className="td-mut td-mono">{job.completed_at ? job.completed_at.slice(5, 10) : "-"}</span> },
+              { key: "id", header: "Job ID", sortValue: (r) => r.id, render: (job) => <span className="td-mono td-strong">{job.id}</span> },
+              { key: "type", header: "Type", sortValue: (r) => r.type, render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}><Icon name={JOB_TYPES[job.type]?.icon ?? "jobs"} size={14} /></span>{job.type}</span> },
+              { key: "merchant", header: "Customer / Merchant", sortValue: (r) => r.customer?.name, mobileLabel: "Merchant", render: (job) => <div className="cell-2"><span className="td-strong">{job.customer?.name || "—"}</span><span className="c2-sub">{job.merchant.name}</span></div> },
+              { key: "bank", header: "Bank", sortValue: (r) => r.merchant.bank, render: (job) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{job.merchant.bank || "—"}</span> },
+              { key: "status", header: "Status", sortValue: (r) => r.stage, render: (job) => <JobStatus status={job.stage} /> },
+              { key: "sla", header: "SLA", sortValue: (r) => r.sla, render: (job) => <SlaChip sla={job.sla} /> },
+              { key: "assignee", header: "Assignee", sortValue: (r) => r.assignee, render: (job) => <span className="td-mut">{job.assignee}</span> },
+              { key: "due", header: "Due", sortValue: (r) => r.due_date, render: (job) => <span className="td-mut td-mono">{job.due_date.slice(5)}</span> },
+              { key: "donedate", header: "Done Date", sortValue: (r) => r.done_date, render: (job) => <span className="td-mut td-mono">{job.done_date ? job.done_date.slice(5, 10) : "-"}</span> },
+              { key: "completed", header: "Completed", sortValue: (r) => r.completed_at, render: (job) => <span className="td-mut td-mono">{job.completed_at ? job.completed_at.slice(5, 10) : "-"}</span> },
               ...(can("Jobs.Delete") ? [{
-                key: "actions", header: "", render: (job: JobOut) => job.stage === "Pending" ? (
+                key: "actions", header: "", render: (job: JobOut) => isCancellableStage(job.stage) ? (
                   <button
                     type="button"
                     className="icon-btn"
@@ -950,7 +963,7 @@ export function Jobs({ nav }: { nav: NavFn }) {
                 ]}
                 onClick={() => nav("job-detail", job.id)}
                 chevron
-                actions={can("Jobs.Delete") && job.stage === "Pending" ? (
+                actions={can("Jobs.Delete") && isCancellableStage(job.stage) ? (
                   <Btn variant="danger" sm icon="x" onClick={() => setCancelTarget(job)}>Cancel</Btn>
                 ) : undefined}
               />
@@ -1306,7 +1319,7 @@ function EscalateToReplacementModal({ job, onClose, onEscalate }: {
     };
     try {
       const result = await api.jobs.escalateToReplacement(job.id, body);
-      onEscalate(result.replacement_job.id);
+      onEscalate(result.id);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Failed to escalate job");
       setSaving(false);
@@ -1346,7 +1359,7 @@ function EscalateToReplacementModal({ job, onClose, onEscalate }: {
         renderOption={(t) => (
           <div className="cell-2">
             <span className="td-strong">{t.brand} {t.model}</span>
-            <span className="c2-sub">{t.category} · RM {t.monthly_rental}/mo</span>
+            <span className="c2-sub">{t.category}</span>
           </div>
         )}
       />
@@ -1726,7 +1739,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           {can("Jobs.Escalate") && job.type === "Repair/Maintenance" && job.stage === "Pending" && !done && (
             <Btn variant="ghost" icon="swap" onClick={() => setShowEscalate(true)}>Escalate to Replacement</Btn>
           )}
-          {can("Jobs.Delete") && job.stage === "Pending" && (
+          {can("Jobs.Delete") && isCancellableStage(job.stage) && (
             <Btn variant="danger" icon="x" onClick={() => setShowCancel(true)}>Cancel Job</Btn>
           )}
           {can("Jobs.Edit") && showTrackParcelAction && (
@@ -1824,6 +1837,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                   {jobTerminals.map((terminal, index) => {
                     const assignedSerial = terminal.terminal_serial || terminal.terminal?.serial || terminal.terminal?.serial_no || "";
                     const serviceSerial = terminal.service_terminal_serial || terminal.service_terminal?.serial || terminal.service_terminal?.serial_no || "";
+                    const assignedTerminalId = terminal.terminal?.id || "";
+                    const serviceTerminalId = terminal.service_terminal?.id || "";
                     const rowNeedsAssignment = jobTerminalAssignmentRequired;
 
                     return (
@@ -1876,13 +1891,13 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                           {terminal.previous_terminal_status && (<><dt>Old status</dt><dd>{terminal.previous_terminal_status}</dd></>)}
                         </dl>
                         {assignedSerial ? (
-                          <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", assignedSerial)}>View device</Btn>
+                          <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", assignedTerminalId)}>View device</Btn>
                         ) : rowNeedsAssignment && can("Jobs.Edit") && !closed ? (
                           <Btn variant="ghost" sm icon="terminal" style={{ width: "100%", marginTop: 10 }} onClick={() => openAssignDevice(terminal.id)}>
                             Assign Device
                           </Btn>
                         ) : serviceSerial ? (
-                          <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", serviceSerial)}>View service terminal</Btn>
+                          <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 10 }} onClick={() => nav("terminal-detail", serviceTerminalId)}>View service terminal</Btn>
                         ) : null}
                       </div>
                     );
@@ -2062,16 +2077,9 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                   <>
                     <div className="mono" style={{ fontWeight: 600, marginBottom: 2 }}>{job.terminal.serial}</div>
                     <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 12 }}>{job.terminal.brand + " " + job.terminal.model}</div>
-                    <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%" }} onClick={() => nav("terminal-detail", job.terminal!.serial)}>View device</Btn>
-                    {can("Jobs.Edit") && !done && job.type == "Replacement/Maintenance" && (
+                    <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%" }} onClick={() => nav("terminal-detail", job.terminal!.id)}>View device</Btn>
+                    {can("Jobs.Edit") && !done && job.type == "Replacement" && (
                       <Btn variant="ghost" sm icon="swap" style={{ width: "100%", marginTop: 8 }} onClick={() => setShowSwap(true)}>Swap Device</Btn>
-                    )}
-                    {job.previous_terminal && (
-                      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-                        <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Previous rental device</div>
-                        <div className="mono" style={{ fontWeight: 600 }}>{job.previous_terminal.serial}</div>
-                        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{job.previous_terminal.brand + " " + job.previous_terminal.model}</div>
-                      </div>
                     )}
                   </>
                 ) : (
@@ -2086,6 +2094,14 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                       </Btn>
                     )}
                   </>
+                )}
+                {job.previous_terminal && (
+                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+                    <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Device being replaced</div>
+                    <div className="mono" style={{ fontWeight: 600 }}>{job.previous_terminal.serial}</div>
+                    <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{job.previous_terminal.brand + " " + job.previous_terminal.model}</div>
+                    <Btn variant="ghost" sm iconRight="chevRight" style={{ width: "100%", marginTop: 8 }} onClick={() => nav("terminal-detail", job.previous_terminal!.id)}>View device</Btn>
+                  </div>
                 )}
               </div>
             </Card>

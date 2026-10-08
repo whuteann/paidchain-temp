@@ -1,4 +1,5 @@
 /* Bumipay — Settings: Job SLA, MDR, Users & Roles */
+import { SortableTable, useServerSort, type ServerSortProps } from "./table-sorting";
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Chip, Modal, Field, Entity, Pagination } from "./components";
@@ -110,21 +111,32 @@ function SqlConnectorSettings() {
           <div style={{ padding: 20, color: "var(--ink-3)", fontSize: 13 }}>No SQL Account connector has been paired.</div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr>{["Connector", "Device", "Bumipay", "SQL Account", "Last Seen", ""].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
-              <tbody>
-                {devices.map((device) => (
-                  <tr key={device.id}>
-                    <td><div className="cell-2"><span className="td-strong">{device.name}</span><span className="c2-sub mono">{device.code} · {device.id}</span></div></td>
-                    <td><div className="cell-2"><span>{device.machine_name || "Not paired"}</span><span className="c2-sub">v{device.connector_version || "—"}</span></div></td>
-                    <td><Chip cls={device.status === "Revoked" ? "chip-bad" : device.online ? "chip-ok" : "chip-neutral"} dot>{device.status === "Revoked" ? "Revoked" : device.online ? "Online" : "Offline"}</Chip></td>
-                    <td><div className="cell-2"><span>{device.sql_status}</span><span className="c2-sub">{device.sql_company || "Company unknown"}</span></div></td>
-                    <td>{connectorTime(device.last_seen_at)}</td>
-                    <td>{device.status !== "Revoked" && <Btn variant="ghost" sm disabled={actionId === device.id} onClick={() => setRevokeTarget(device)}>Revoke</Btn>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={devices} columns={[
+              { key: "Connector", header: "Connector", sortValue: (r) => r.name },
+              { key: "Device", header: "Device", sortValue: (r) => r.machine_name },
+              { key: "Bumipay", header: "Bumipay", sortValue: (r) => r.status === "Revoked" ? "Revoked" : r.online ? "Online" : "Offline" },
+              { key: "SQL Account", header: "SQL Account", sortValue: (r) => r.sql_status },
+              { key: "Last Seen", header: "Last Seen", sortValue: (r) => r.last_seen_at },
+              { key: "actions", header: "" }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((device) => (
+                      <tr key={device.id}>
+                        <td><div className="cell-2"><span className="td-strong">{device.name}</span><span className="c2-sub mono">{device.code} · {device.id}</span></div></td>
+                        <td><div className="cell-2"><span>{device.machine_name || "Not paired"}</span><span className="c2-sub">v{device.connector_version || "—"}</span></div></td>
+                        <td><Chip cls={device.status === "Revoked" ? "chip-bad" : device.online ? "chip-ok" : "chip-neutral"} dot>{device.status === "Revoked" ? "Revoked" : device.online ? "Online" : "Offline"}</Chip></td>
+                        <td><div className="cell-2"><span>{device.sql_status}</span><span className="c2-sub">{device.sql_company || "Company unknown"}</span></div></td>
+                        <td>{connectorTime(device.last_seen_at)}</td>
+                        <td>{device.status !== "Revoked" && <Btn variant="ghost" sm disabled={actionId === device.id} onClick={() => setRevokeTarget(device)}>Revoke</Btn>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
       </Card>
@@ -260,41 +272,48 @@ function BankSettings() {
           <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--ink-3)" }}>No banks configured.</div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Bank", "Code", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {banks.map((bank) => (
-                  <tr key={bank.id}>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong">{bank.name}</span>
-                        <span className="c2-sub mono">{bank.id}</span>
-                      </div>
-                    </td>
-                    <td className="td-mono">{bank.code || "-"}</td>
-                    <td>
-                      <Chip cls={(bank.status ?? "Active").toLowerCase() === "active" ? "chip-ok" : "chip-neutral"} dot>{bank.status}</Chip>
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        {can("Settings.Edit") && (
-                          <button className="icon-btn" title="Edit bank" onClick={() => setModal({ open: true, bank })}>
-                            <Icon name="edit" size={14} />
-                          </button>
-                        )}
-                        {can("Settings.Edit") && (bank.status ?? "Active").toLowerCase() === "active" && (
-                          <button className="icon-btn" title="Deactivate bank" disabled={actionId === bank.id} onClick={() => deactivate(bank)}>
-                            <Icon name="x" size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={banks} columns={[
+              { key: "Bank", header: "Bank", sortValue: (r) => r.name },
+              { key: "Code", header: "Code", sortValue: (r) => r.code },
+              { key: "Status", header: "Status", sortValue: (r) => r.status },
+              { key: "actions", header: "" }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((bank) => (
+                      <tr key={bank.id}>
+                        <td>
+                          <div className="cell-2">
+                            <span className="td-strong">{bank.name}</span>
+                            <span className="c2-sub mono">{bank.id}</span>
+                          </div>
+                        </td>
+                        <td className="td-mono">{bank.code || "-"}</td>
+                        <td>
+                          <Chip cls={(bank.status ?? "Active").toLowerCase() === "active" ? "chip-ok" : "chip-neutral"} dot>{bank.status}</Chip>
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            {can("Settings.Edit") && (
+                              <button className="icon-btn" title="Edit bank" onClick={() => setModal({ open: true, bank })}>
+                                <Icon name="edit" size={14} />
+                              </button>
+                            )}
+                            {can("Settings.Edit") && (bank.status ?? "Active").toLowerCase() === "active" && (
+                              <button className="icon-btn" title="Deactivate bank" disabled={actionId === bank.id} onClick={() => deactivate(bank)}>
+                                <Icon name="x" size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
       </Card>
@@ -635,45 +654,50 @@ function JobSlaSettings() {
             <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
           ) : (
             <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>{["Job Type", "From Stage", "To Stage", "Warning (days)", "Breach (days)"].map((h) => <th key={h}>{h}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {Object.entries(slaMap).map(([jobType, transitions]) =>
-                    transitions.map((t, i) => {
-                      const invalid = t.warning_days > t.breach_days;
-                      return (
-                        <tr key={jobType + t.from_stage + t.to_stage}>
-                          {i === 0 && (
-                            <td className="td-strong" rowSpan={transitions.length}>{jobType}</td>
-                          )}
-                          <td className="td-mut">{t.from_stage}</td>
-                          <td className="td-mut">{t.to_stage}</td>
-                          <td style={{ maxWidth: 160 }}>
-                            <input
-                              className="input" type="number" min="0"
-                              disabled={!can("Settings.Edit")}
-                              style={invalid ? { borderColor: "var(--bad)" } : undefined}
-                              value={t.warning_days}
-                              onChange={(e) => handleChange(jobType, t.from_stage, t.to_stage, "warning_days", e.target.value)}
-                            />
-                          </td>
-                          <td style={{ maxWidth: 160 }}>
-                            <input
-                              className="input" type="number" min="0"
-                              disabled={!can("Settings.Edit")}
-                              style={invalid ? { borderColor: "var(--bad)" } : undefined}
-                              value={t.breach_days}
-                              onChange={(e) => handleChange(jobType, t.from_stage, t.to_stage, "breach_days", e.target.value)}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              <SortableTable rows={Object.entries(slaMap).flatMap(([jobType, transitions]) => transitions.map((transition) => ({ ...transition, jobType })))} columns={[
+                { key: "Job Type", header: "Job Type", sortValue: (r) => r.jobType },
+                { key: "From Stage", header: "From Stage", sortValue: (r) => r.from_stage },
+                { key: "To Stage", header: "To Stage", sortValue: (r) => r.to_stage },
+                { key: "Warning (days)", header: "Warning (days)", sortValue: (r) => r.warning_days },
+                { key: "Breach (days)", header: "Breach (days)", sortValue: (r) => r.breach_days }
+              ]}>
+                {(sortedRows, headers) => (
+                  <table className="tbl">
+                    <thead><tr>{headers}</tr></thead>
+                    <tbody>
+                      {sortedRows.map((t) => {
+                          const jobType = t.jobType;
+                          const invalid = t.warning_days > t.breach_days;
+                          return (
+                            <tr key={jobType + t.from_stage + t.to_stage}>
+                              <td className="td-strong">{jobType}</td>
+                              <td className="td-mut">{t.from_stage}</td>
+                              <td className="td-mut">{t.to_stage}</td>
+                              <td style={{ maxWidth: 160 }}>
+                                <input
+                                  className="input" type="number" min="0"
+                                  disabled={!can("Settings.Edit")}
+                                  style={invalid ? { borderColor: "var(--bad)" } : undefined}
+                                  value={t.warning_days}
+                                  onChange={(e) => handleChange(jobType, t.from_stage, t.to_stage, "warning_days", e.target.value)}
+                                />
+                              </td>
+                              <td style={{ maxWidth: 160 }}>
+                                <input
+                                  className="input" type="number" min="0"
+                                  disabled={!can("Settings.Edit")}
+                                  style={invalid ? { borderColor: "var(--bad)" } : undefined}
+                                  value={t.breach_days}
+                                  onChange={(e) => handleChange(jobType, t.from_stage, t.to_stage, "breach_days", e.target.value)}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                )}
+              </SortableTable>
             </div>
           )}
         </div>
@@ -777,33 +801,44 @@ export function MDR() {
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr>{["ID","Payment Type","Network","Category","MDR (%)",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-              <tbody>
-                {filtered.map((m) => (
-                  <tr key={m.id}>
-                    <td className="td-mono td-mut">{m.id}</td>
-                    <td><span style={{ display: "flex", gap: 9, alignItems: "center", fontWeight: 600 }}>
-                      <span style={{ width: 28, height: 28, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}>
-                        <Icon name={m.category === "QR" ? "grid" : "payouts"} size={14} />
-                      </span>{m.type}
-                    </span></td>
-                    <td className="td-mut">{m.network}</td>
-                    <td><Chip cls={CAT_CHIP[m.category] || "chip-neutral"}>{m.category}</Chip></td>
-                    <td><span style={{ display: "inline-flex", alignItems: "baseline", gap: 2, fontWeight: 700, fontSize: 15, fontFamily: "var(--mono)" }}>
-                      {m.rate.toFixed(2)}<span style={{ fontSize: 11, color: "var(--ink-3)" }}>%</span>
-                    </span></td>
-                    <td><div className="row-actions">
-                      {can("Settings.Edit") && (
-                        <button className="icon-btn" onClick={() => setModal({ open: true, rate: m })}>
-                          <Icon name="edit" size={14} />
-                        </button>
-                      )}
-                    </div></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={filtered} columns={[
+              { key: "ID", header: "ID", sortValue: (r) => r.id },
+              { key: "Payment Type", header: "Payment Type", sortValue: (r) => r.type },
+              { key: "Network", header: "Network", sortValue: (r) => r.network },
+              { key: "Category", header: "Category", sortValue: (r) => r.category },
+              { key: "MDR (%)", header: "MDR (%)", sortValue: (r) => r.rate },
+              { key: "actions", header: "" }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((m) => (
+                      <tr key={m.id}>
+                        <td className="td-mono td-mut">{m.id}</td>
+                        <td><span style={{ display: "flex", gap: 9, alignItems: "center", fontWeight: 600 }}>
+                          <span style={{ width: 28, height: 28, borderRadius: 7, background: "var(--bg)", display: "grid", placeItems: "center", color: "var(--slate)", flexShrink: 0 }}>
+                            <Icon name={m.category === "QR" ? "grid" : "payouts"} size={14} />
+                          </span>{m.type}
+                        </span></td>
+                        <td className="td-mut">{m.network}</td>
+                        <td><Chip cls={CAT_CHIP[m.category] || "chip-neutral"}>{m.category}</Chip></td>
+                        <td><span style={{ display: "inline-flex", alignItems: "baseline", gap: 2, fontWeight: 700, fontSize: 15, fontFamily: "var(--mono)" }}>
+                          {m.rate.toFixed(2)}<span style={{ fontSize: 11, color: "var(--ink-3)" }}>%</span>
+                        </span></td>
+                        <td><div className="row-actions">
+                          {can("Settings.Edit") && (
+                            <button className="icon-btn" onClick={() => setModal({ open: true, rate: m })}>
+                              <Icon name="edit" size={14} />
+                            </button>
+                          )}
+                        </div></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
       </Card>
@@ -970,43 +1005,53 @@ export function RentalPlans() {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Plan Name", "Period", "Monthly Rate", "Deposit", "Setup Fee", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => (
-                  <tr key={p.id}>
-                    <td style={{ fontWeight: 600 }}>{p.name}</td>
-                    <td className="td-mut">{p.plan_period}</td>
-                    <td><span style={{ fontWeight: 700, fontFamily: "var(--mono)" }}>RM {p.monthly_rate.toFixed(2)}</span></td>
-                    <td className="td-mut">RM {p.deposit.toFixed(2)}</td>
-                    <td className="td-mut">RM {p.setup_fee.toFixed(2)}</td>
-                    <td><Chip cls={p.active ? "chip-ok" : "chip-neutral"} dot>{p.active ? "Active" : "Inactive"}</Chip></td>
-                    <td>
-                      <div className="row-actions">
-                        {can("Settings.Edit") && (
-                          <button className="icon-btn" title="Edit" onClick={() => setModal({ open: true, plan: p })}>
-                            <Icon name="edit" size={14} />
-                          </button>
-                        )}
-                        {can("Settings.Edit") && p.active && (
-                          <button
-                            className="icon-btn"
-                            title="Deactivate"
-                            disabled={deactivating === p.id}
-                            onClick={() => handleDeactivate(p)}
-                            style={{ color: "var(--bad)" }}
-                          >
-                            <Icon name="x" size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={filtered} columns={[
+              { key: "Plan Name", header: "Plan Name", sortValue: (r) => r.name },
+              { key: "Period", header: "Period", sortValue: (r) => r.plan_period },
+              { key: "Monthly Rate", header: "Monthly Rate", sortValue: (r) => r.monthly_rate },
+              { key: "Deposit", header: "Deposit", sortValue: (r) => r.deposit },
+              { key: "Setup Fee", header: "Setup Fee", sortValue: (r) => r.setup_fee },
+              { key: "Status", header: "Status", sortValue: (r) => r.active ? "Active" : "Inactive" },
+              { key: "actions", header: "" }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((p) => (
+                      <tr key={p.id}>
+                        <td style={{ fontWeight: 600 }}>{p.name}</td>
+                        <td className="td-mut">{p.plan_period}</td>
+                        <td><span style={{ fontWeight: 700, fontFamily: "var(--mono)" }}>RM {p.monthly_rate.toFixed(2)}</span></td>
+                        <td className="td-mut">RM {p.deposit.toFixed(2)}</td>
+                        <td className="td-mut">RM {p.setup_fee.toFixed(2)}</td>
+                        <td><Chip cls={p.active ? "chip-ok" : "chip-neutral"} dot>{p.active ? "Active" : "Inactive"}</Chip></td>
+                        <td>
+                          <div className="row-actions">
+                            {can("Settings.Edit") && (
+                              <button className="icon-btn" title="Edit" onClick={() => setModal({ open: true, plan: p })}>
+                                <Icon name="edit" size={14} />
+                              </button>
+                            )}
+                            {can("Settings.Edit") && p.active && (
+                              <button
+                                className="icon-btn"
+                                title="Deactivate"
+                                disabled={deactivating === p.id}
+                                onClick={() => handleDeactivate(p)}
+                                style={{ color: "var(--bad)" }}
+                              >
+                                <Icon name="x" size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
       </Card>
@@ -1029,6 +1074,7 @@ export function Users() {
   const [userList, setUserList] = useState<UserOut[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [userPage, setUserPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setUserPage, () => setUsersLoading(true));
   const [userPages, setUserPages] = useState(1);
   const [userTotal, setUserTotal] = useState(0);
   const [userPageSize, setUserPageSize] = useState(USERS_PAGE_SIZE_OPTIONS[1]);
@@ -1045,21 +1091,25 @@ export function Users() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     setUsersLoading(true);
     api.users.list({
+      ...sortParams,
       page: userPage,
       per_page: userPageSize,
       query: userQuery || undefined,
       role: userRole !== "All" ? userRole : undefined,
     })
       .then((p) => {
+        if (cancelled) return;
         setUserList(p.items);
         setUserPages(p.pages);
         setUserTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setUsersLoading(false));
-  }, [userPage, userPageSize, userQuery, userRole]);
+      .finally(() => { if (!cancelled) setUsersLoading(false); });
+    return () => { cancelled = true; };
+  }, [userPage, userPageSize, userQuery, userRole, sortParams]);
 
   function switchTab(t: "users" | "roles") { setTab(t); setEditRoleId(null); }
 
@@ -1083,6 +1133,7 @@ export function Users() {
 
       {tab === "users" && (
         <UsersTabContent
+          sort={sort} onSortChange={onSortChange}
           users={userList}
           loading={usersLoading}
           roles={roleList}
@@ -1096,8 +1147,8 @@ export function Users() {
           onPageSizeChange={(n) => { setUserPageSize(n); setUserPage(1); }}
           onQueryChange={(v) => { setUserQuery(v); setUserPage(1); }}
           onRoleFilterChange={(v) => { setUserRole(v); setUserPage(1); }}
-          onAdd={(u) => setUserList((p) => [u, ...p])}
-          onUpdate={(u) => setUserList((p) => p.map((x) => x.id === u.id ? u : x))}
+          onAdd={(u) => { if (sort) refreshSort(); else setUserList((p) => [u, ...p]); }}
+          onUpdate={(u) => { if (sort) refreshSort(); else setUserList((p) => p.map((x) => x.id === u.id ? u : x)); }}
         />
       )}
       {tab === "roles" && !editRoleId && (
@@ -1120,8 +1171,8 @@ export function Users() {
 function UsersTabContent({
   users, loading, roles, page, pages, total, pageSize, query, roleFilter,
   onPageChange, onPageSizeChange, onQueryChange, onRoleFilterChange,
-  onAdd, onUpdate,
-}: {
+  onAdd, onUpdate, sort, onSortChange,
+}: ServerSortProps & {
   users: UserOut[];
   loading: boolean;
   roles: RoleOut[];
@@ -1188,31 +1239,43 @@ function UsersTabContent({
           {can("Users.Invite") && <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Invite User</Btn>}
         </Toolbar>
         <div className="tbl-wrap">
-          <table className="tbl">
-            <thead><tr>{["User","Role","Bank","Status","Open Jobs","Last Active",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-            <tbody>
-              {!loading && users.map((u) => (
-                <tr key={u.id}>
-                  <td><Entity name={u.name} sub={u.email} /></td>
-                  <td><Chip cls={ROLES[u.role]?.chip ?? "chip-neutral"}>{u.role}</Chip></td>
-                  <td className="td-mut">{u.banks?.length ? u.banks.join(", ") : "—"}</td>
-                  <td><Chip cls={statusChip[u.status] ?? "chip-neutral"} dot>{u.status}</Chip></td>
-                  <td className="td-mut">{u.jobs || "—"}</td>
-                  <td className="td-mut">{u.last_active ?? "—"}</td>
-                  <td>
-                    <div className="row-actions">
-                      {can("Users.Edit") && <button className="icon-btn" title="Edit" onClick={() => setEditUser(u)}><Icon name="edit" size={14} /></button>}
-                      {can("Users.Suspend") && (
-                        <button className="icon-btn" title={u.status === "Active" ? "Suspend" : "Activate"} onClick={() => handleStatusToggle(u)}>
-                          <Icon name={u.status === "Active" ? "x" : "check"} size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <SortableTable rows={users} sort={sort} onSortChange={onSortChange} columns={[
+            { key: "User", header: "User", sortValue: (r) => r.name },
+            { key: "Role", header: "Role", sortValue: (r) => r.role },
+            { key: "Bank", header: "Bank", sortValue: (r) => r.banks?.join(", ") },
+            { key: "Status", header: "Status", sortValue: (r) => r.status },
+            { key: "Open Jobs", header: "Open Jobs", sortValue: (r) => r.open_jobs_count },
+            { key: "Last Active", header: "Last Active", sortValue: (r) => r.last_active },
+            { key: "actions", header: "" }
+          ]}>
+            {(sortedRows, headers) => (
+              <table className="tbl">
+                <thead><tr>{headers}</tr></thead>
+                <tbody>
+                  {!loading && sortedRows.map((u) => (
+                    <tr key={u.id}>
+                      <td><Entity name={u.name} sub={u.email} /></td>
+                      <td><Chip cls={ROLES[u.role]?.chip ?? "chip-neutral"}>{u.role}</Chip></td>
+                      <td className="td-mut">{u.banks?.length ? u.banks.join(", ") : "—"}</td>
+                      <td><Chip cls={statusChip[u.status] ?? "chip-neutral"} dot>{u.status}</Chip></td>
+                      <td className="td-mut">{u.open_jobs_count || "—"}</td>
+                      <td className="td-mut">{u.last_active ?? "—"}</td>
+                      <td>
+                        <div className="row-actions">
+                          {can("Users.Edit") && <button className="icon-btn" title="Edit" onClick={() => setEditUser(u)}><Icon name="edit" size={14} /></button>}
+                          {can("Users.Suspend") && (
+                            <button className="icon-btn" title={u.status === "Active" ? "Suspend" : "Activate"} onClick={() => handleStatusToggle(u)}>
+                              <Icon name={u.status === "Active" ? "x" : "check"} size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </SortableTable>
         </div>
         <Pagination total={total} shown={users.length} page={page} pages={pages} onPageChange={onPageChange} />
       </Card>

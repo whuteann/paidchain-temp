@@ -1,12 +1,15 @@
+import { SortableTable } from "./table-sorting";
+import { useServerSort } from "./table-sorting";
 /* Bumipay — Terminal inventory + detail */
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable, SingleFileDropzone } from "./components";
-import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, BRANDS } from "./data";
+import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER } from "./data";
 import { api, ApiError, terminalSerial, merchantDisplayMid } from "@/lib/api";
 import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, AvailableTidOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
+import { HardDeleteModal } from "./hard-delete-modal";
 
 const TERMINAL_SETTING_CATEGORIES = ["Attended", "Unattended"] as const;
 
@@ -191,7 +194,7 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
               <option value="">Select model…</option>
               {settings.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.brand} {s.model} · {s.category} · RM {s.monthly_rental}/mo
+                  {s.brand} {s.model} · {s.category}
                 </option>
               ))}
             </select>
@@ -201,8 +204,6 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
               <Chip cls="chip-neutral">{setting.brand}</Chip>
               <Chip cls="chip-neutral">{setting.model}</Chip>
               <Chip cls="chip-info">{setting.category}</Chip>
-              <Chip cls="chip-neutral">RM {setting.monthly_rental}/mo</Chip>
-              {setting.deposit > 0 && <Chip cls="chip-neutral">Deposit RM {setting.deposit}</Chip>}
             </div>
           )}
           <Field label="Initial location">
@@ -251,6 +252,90 @@ function RegisterDeviceModal({ onClose, onRegister, initialSettingId }: {
           {err && <div style={{ marginTop: 10, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
         </>
       )}
+    </Modal>
+  );
+}
+
+/* =================== EDIT TERMINAL MODAL =================== */
+function EditTerminalModal({ terminal, onClose, onUpdated }: {
+  terminal: TerminalOut;
+  onClose: () => void;
+  onUpdated: (t: TerminalOut) => void;
+}) {
+  const [settings, setSettings] = useState<TermSettingOut[]>([]);
+  const [settingId, setSettingId] = useState(terminal.term_setting_id ?? "");
+  const [location, setLocation] = useState(terminal.location);
+  const [conditionNote, setConditionNote] = useState(terminal.condition_note ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.termSettings.list({ active: true }).then(setSettings).catch(console.error);
+  }, []);
+
+  const setting = settings.find((s) => s.id === settingId);
+  const dirty = settingId !== (terminal.term_setting_id ?? "")
+    || location !== terminal.location
+    || conditionNote !== (terminal.condition_note ?? "");
+
+  async function save() {
+    if (!settingId) return;
+    setSaving(true); setErr(null);
+    try {
+      const updated = await api.terminals.update(terminal.id, {
+        term_setting_id: settingId,
+        location,
+        condition_note: conditionNote,
+      });
+      onUpdated(updated);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Update failed");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Edit Terminal" sub={terminalSerial(terminal) + " · " + terminal.brand + " " + terminal.model} icon="edit" size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" onClick={save} disabled={saving || !settingId || !dirty}>
+          {saving ? "Saving…" : "Save Changes"}
+        </Btn>
+      </>}
+    >
+      <Field label="Serial number" hint="cannot be changed">
+        <input className="input" value={terminalSerial(terminal)} disabled readOnly />
+      </Field>
+      <Field label="Terminal setting" hint="required">
+        <select className="input" value={settingId} onChange={(e) => setSettingId(e.target.value)}>
+          <option value="">Select model…</option>
+          {settings.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.brand} {s.model} · {s.category}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {setting && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          <Chip cls="chip-neutral">{setting.brand}</Chip>
+          <Chip cls="chip-neutral">{setting.model}</Chip>
+          <Chip cls="chip-info">{setting.category}</Chip>
+        </div>
+      )}
+      <Field label="Location">
+        <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
+          {["KL Warehouse", "Repair Center", "In Transit", "Merchant Site"].map((l) => <option key={l}>{l}</option>)}
+        </select>
+      </Field>
+      <Field label="Condition note">
+        <textarea className="textarea" value={conditionNote} onChange={(e) => setConditionNote(e.target.value)} placeholder="Device condition…" />
+      </Field>
+      {err && <div style={{ marginTop: 10, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
     </Modal>
   );
 }
@@ -360,7 +445,7 @@ function BulkUploadModal({ onClose, onComplete }: {
           <option value="">Select model…</option>
           {settings.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.brand} {s.model} · {s.category} · RM {s.monthly_rental}/mo
+              {s.brand} {s.model} · {s.category}
             </option>
           ))}
         </select>
@@ -370,8 +455,6 @@ function BulkUploadModal({ onClose, onComplete }: {
           <Chip cls="chip-neutral">{setting.brand}</Chip>
           <Chip cls="chip-neutral">{setting.model}</Chip>
           <Chip cls="chip-info">{setting.category}</Chip>
-          <Chip cls="chip-neutral">RM {setting.monthly_rental}/mo</Chip>
-          {setting.deposit > 0 && <Chip cls="chip-neutral">Deposit RM {setting.deposit}</Chip>}
         </div>
       )}
       <Field label="Initial location">
@@ -507,9 +590,6 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
     category: TERMINAL_SETTING_CATEGORIES.includes(existing?.category as typeof TERMINAL_SETTING_CATEGORIES[number])
       ? existing?.category ?? "Attended"
       : "Attended",
-    monthly_rental: existing?.monthly_rental?.toString() ?? "",
-    deposit: existing?.deposit?.toString() ?? "",
-    setup_fee: existing?.setup_fee?.toString() ?? "",
     active: existing?.active ?? true,
   });
   const [saving, setSaving] = useState(false);
@@ -522,8 +602,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
     setSaving(true);
     setErr(null);
     const body: TermSettingCreate = {
-      brand: f.brand.trim(), model: f.model.trim(), category: f.category,
-      monthly_rental: +f.monthly_rental || 0, deposit: +f.deposit || 0, setup_fee: +f.setup_fee || 0, active: f.active,
+      brand: f.brand.trim(), model: f.model.trim(), category: f.category, active: f.active,
     };
     try {
       const result = existing
@@ -539,7 +618,7 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
   return (
     <Modal
       title={existing ? "Edit Terminal Setting" : "New Terminal Setting"}
-      sub={existing ? `${existing.brand} ${existing.model}` : "Define a device model and its rental rate card"}
+      sub={existing ? `${existing.brand} ${existing.model}` : "Define a device model"}
       icon="tag" onClose={onClose}
       foot={<>
         <div className="mf-spacer" />
@@ -562,17 +641,6 @@ function TerminalSettingModal({ onClose, onSave, existing }: {
       <div className="field-row" style={{marginBottom: 20}}>
         <Field label="Model name" hint="required">
           <input className="input" placeholder="e.g. A920 Pro" value={f.model} onChange={(e) => set("model", e.target.value)} />
-        </Field>
-      </div>
-      <div className="field-row">
-        <Field label="Monthly rental (RM)">
-          <input className="input" type="number" placeholder="0.00" value={f.monthly_rental} onChange={(e) => set("monthly_rental", e.target.value)} />
-        </Field>
-        <Field label="Deposit (RM)">
-          <input className="input" type="number" placeholder="0.00" value={f.deposit} onChange={(e) => set("deposit", e.target.value)} />
-        </Field>
-        <Field label="Setup fee (RM)">
-          <input className="input" type="number" placeholder="0.00" value={f.setup_fee} onChange={(e) => set("setup_fee", e.target.value)} />
         </Field>
       </div>
       {
@@ -601,10 +669,18 @@ function TerminalSettingsTab() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [brand, setBrand] = useState("");
+  const [allBrands, setAllBrands] = useState<string[]>([]);
   const [active, setActive] = useState<"" | "true" | "false">("");
   const [editRow, setEditRow] = useState<TermSettingOut | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TermSettingOut | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.termSettings.list({}).then((all) => {
+      setAllBrands(Array.from(new Set(all.map((s) => s.brand))).sort());
+    }).catch(console.error);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -643,7 +719,7 @@ function TerminalSettingsTab() {
           <SearchBox value={q} onChange={setQ} placeholder="Search brand or model…" />
           <select className="input" style={{ width: 140 }} value={brand} onChange={(e) => setBrand(e.target.value)}>
             <option value="">All Brands</option>
-            {Object.keys(BRANDS).map((b) => <option key={b}>{b}</option>)}
+            {allBrands.map((b) => <option key={b}>{b}</option>)}
           </select>
           <select className="input" style={{ width: 120 }} value={active} onChange={(e) => setActive(e.target.value as "" | "true" | "false")}>
             <option value="">All</option>
@@ -651,47 +727,57 @@ function TerminalSettingsTab() {
             <option value="false">Inactive</option>
           </select>
           {can("Terminals.Edit") && <Btn variant="primary" icon="plus" onClick={() => { setShowCreate(true); setEditRow(null); }}>New Terminal Setting</Btn>}
-          <span className="tb-meta">{loading ? "Loading…" : `${filtered.length} rate cards`}</span>
+          <span className="tb-meta">{loading ? "Loading…" : `${filtered.length} settings`}</span>
         </Toolbar>
         <div className="tbl-wrap">
-          <table className="tbl">
-            <thead>
-              <tr>{["Brand / Model", "Category", "Monthly Rental", "Deposit", "Setup Fee", "Units", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {!loading && filtered.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <div className="ent">
-                      <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
-                      <div><div className="ent-name">{r.brand}</div><div className="ent-sub">{r.model}</div></div>
-                    </div>
-                  </td>
-                  <td><Chip cls={r.category === "Attended" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
-                  <td className="td-strong">RM {r.monthly_rental}.00 <span className="td-mut" style={{ fontWeight: 400 }}>/mo</span></td>
-                  <td className="td-mut">RM {r.deposit}</td>
-                  <td className="td-mut">{r.setup_fee ? "RM " + r.setup_fee : "Waived"}</td>
-                  <td className="td-mut">{r.units}</td>
-                  <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
-                  <td>
-                    <div className="row-actions">
-                      {can("Terminals.Edit") && <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>}
-                      {can("Terminals.Edit") && (
-                        <button
-                          className="icon-btn"
-                          title={r.active ? "Deactivate" : "Activate"}
-                          style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
-                          onClick={() => api.termSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
-                        >
-                          <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <SortableTable rows={filtered} columns={[
+            { key: "Brand / Model", header: "Brand / Model", sortValue: (r) => [r.brand, r.model].join(" ") },
+            { key: "Category", header: "Category", sortValue: (r) => r.category },
+            { key: "Units", header: "Units", sortValue: (r) => r.units },
+            { key: "Status", header: "Status", sortValue: (r) => r.active ? "Active" : "Disabled" },
+            { key: "actions", header: "" }
+          ]}>
+            {(sortedRows, headers) => (
+              <table className="tbl">
+                <thead><tr>{headers}</tr></thead>
+                <tbody>
+                  {!loading && sortedRows.map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <div className="ent">
+                          <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div>
+                          <div><div className="ent-name">{r.brand}</div><div className="ent-sub">{r.model}</div></div>
+                        </div>
+                      </td>
+                      <td><Chip cls={r.category === "Attended" ? "chip-info" : "chip-neutral"}>{r.category}</Chip></td>
+                      <td className="td-mut">{r.units}</td>
+                      <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
+                      <td>
+                        <div className="row-actions">
+                          {can("Terminals.Edit") && <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>}
+                          {can("Terminals.Edit") && (
+                            <button
+                              className="icon-btn"
+                              title={r.active ? "Deactivate" : "Activate"}
+                              style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
+                              onClick={() => api.termSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
+                            >
+                              <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
+                            </button>
+                          )}
+                          {can("Terminals.Hard Delete") && (
+                            <button className="icon-btn" title="Delete permanently" style={{ color: "var(--bad)" }} onClick={() => setDeleteTarget(r)}>
+                              <Icon name="trash" size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </SortableTable>
         </div>
       </Card>
       {isModalOpen && can("Terminals.Edit") && (
@@ -701,6 +787,22 @@ function TerminalSettingsTab() {
           existing={editRow ?? undefined}
         />
       )}
+      {deleteTarget && can("Terminals.Hard Delete") && (
+        <HardDeleteModal
+          entityLabel="Terminal Setting"
+          name={`${deleteTarget.brand} ${deleteTarget.model}`}
+          id={deleteTarget.id}
+          detail="This removes it from the device catalog entirely."
+          run={() => api.termSettings.hardDelete(deleteTarget.id)}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+            setDeleteTarget(null);
+            setToast("Terminal setting deleted");
+            setTimeout(() => setToast(null), 2400);
+          }}
+        />
+      )}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </>
   );
@@ -708,7 +810,6 @@ function TerminalSettingsTab() {
 
 /* =================== LISTING =================== */
 const TERMINALS_PAGE_SIZE = 20;
-const RENTED = ["Installed", "Assigned"];
 
 export function Terminals({
   nav,
@@ -726,9 +827,11 @@ export function Terminals({
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"inventory" | "settings">("inventory");
   const [q, setQ] = useState("");
-  const [brand, setBrand] = useState("All");
+  const [termSettingId, setTermSettingId] = useState("All");
+  const [termSettingOptions, setTermSettingOptions] = useState<TermSettingOut[]>([]);
   const [status, setStatus] = useState(initialFilter || "All");
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showRegister, setShowRegister] = useState(initialRegister);
@@ -737,23 +840,31 @@ export function Terminals({
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
+    api.termSettings.list({}).then(setTermSettingOptions).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     api.terminals.list({
+      ...sortParams,
       page,
       per_page: TERMINALS_PAGE_SIZE,
       query: q || undefined,
-      status: status !== "All" && status !== "Rented" ? status : undefined,
-      brand: brand !== "All" ? brand : undefined,
+      status: status !== "All" ? status : undefined,
+      term_setting_id: termSettingId !== "All" ? termSettingId : undefined,
     })
       .then((p) => {
-        const items = status === "Rented" ? p.items.filter((t) => RENTED.includes(t.status)) : p.items;
+        if (cancelled) return;
+        const items = p.items;
         setTerminalList(items);
         setPages(p.pages);
         setTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, brand, status]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, termSettingId, status, sortParams]);
 
   function resetPage() { setPage(1); }
 
@@ -766,7 +877,8 @@ export function Terminals({
   ];
 
   function handleRegister(t: TerminalOut) {
-    setTerminalList((prev) => [t, ...prev]);
+    if (sort) refreshSort();
+    else setTerminalList((prev) => [t, ...prev]);
     setTotal((prev) => prev + 1);
     setToast("Device " + terminalSerial(t) + " registered");
     setTimeout(() => setToast(null), 2800);
@@ -776,13 +888,14 @@ export function Terminals({
     setLoading(true);
     try {
       const p = await api.terminals.list({
+        ...sortParams,
         page,
         per_page: TERMINALS_PAGE_SIZE,
         query: q || undefined,
-        status: status !== "All" && status !== "Rented" ? status : undefined,
-        brand: brand !== "All" ? brand : undefined,
+        status: status !== "All" ? status : undefined,
+        term_setting_id: termSettingId !== "All" ? termSettingId : undefined,
       });
-      const items = status === "Rented" ? p.items.filter((t) => RENTED.includes(t.status)) : p.items;
+      const items = p.items;
       setTerminalList(items);
       setPages(p.pages);
       setTotal(p.total);
@@ -863,8 +976,11 @@ export function Terminals({
                 <option value="Rented">Rented (out)</option>
                 {TERMINAL_STATUS_ORDER.map((s) => <option key={s} value={s}>{TERMINAL_STATUS[s].label}</option>)}
               </select>
-              <select className="select" value={brand} onChange={(e) => { setBrand(e.target.value); resetPage(); }}>
-                {["All", ...Object.keys(BRANDS)].map((b) => <option key={b} value={b}>{b === "All" ? "All Brands" : b}</option>)}
+              <select className="select" value={termSettingId} onChange={(e) => { setTermSettingId(e.target.value); resetPage(); }}>
+                <option value="All">All Brands</option>
+                {termSettingOptions.map((s) => (
+                  <option key={s.id} value={s.id}>{s.brand} {s.model}</option>
+                ))}
               </select>
               <span className="tb-meta">{loading ? "Loading…" : `${total} devices`}</span>
             </Toolbar>
@@ -872,17 +988,18 @@ export function Terminals({
               <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
             ) : terminalList.length === 0 ? <Empty icon="terminal" title="No devices match" /> : (
               <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
                 rows={terminalList}
-                getKey={(t) => terminalSerial(t)}
-                onRowClick={(t) => nav("terminal-detail", terminalSerial(t))}
+                getKey={(t) => t.id}
+                onRowClick={(t) => nav("terminal-detail", t.id)}
                 columns={[
-                  { key: "serial", header: "Serial", render: (t) => <div className="cell-2"><span className="td-mono td-strong">{terminalSerial(t)}</span>{t.tid && <span className="c2-sub mono">{t.tid}</span>}</div> },
-                  { key: "device", header: "Brand / Model", mobileLabel: "Device", render: (t) => <div className="ent"><div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div><div><div className="ent-name">{t.brand}</div><div className="ent-sub">{t.model}</div></div></div> },
-                  { key: "status", header: "Status", render: (t) => <TerminalStatus status={t.status} /> },
-                  { key: "merchant", header: "Assigned Merchant", mobileLabel: "Merchant", render: (t) => <span className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</span> },
-                  { key: "location", header: "Location", render: (t) => <span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
-                  { key: "movement", header: "Last Movement", render: (t) => <span className="td-mut td-mono">{t.last_movement.slice(5)}</span> },
-                  { key: "rental", header: "Rental", render: (t) => <span className="td-mut">RM {t.rental_rate}</span> },
+                  { key: "serial", header: "Serial", sortValue: (r) => terminalSerial(r), render: (t) => <div className="cell-2"><span className="td-mono td-strong">{terminalSerial(t)}</span>{t.tid && <span className="c2-sub mono">{t.tid}</span>}</div> },
+                  { key: "device", header: "Brand / Model", sortValue: (r) => [r.brand, r.model].join(" "), mobileLabel: "Device", render: (t) => <div className="ent"><div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="terminal" size={15} /></div><div><div className="ent-name">{t.brand}</div><div className="ent-sub">{t.model}</div></div></div> },
+                  { key: "status", header: "Status", sortValue: (r) => r.status, render: (t) => <TerminalStatus status={t.status} /> },
+                  { key: "merchant", header: "Assigned Merchant", sortValue: (r) => r.merchant?.name, mobileLabel: "Merchant", render: (t) => <span className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</span> },
+                  { key: "location", header: "Location", sortValue: (r) => r.location, render: (t) => <span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
+                  { key: "movement", header: "Last Movement", sortValue: (r) => r.last_movement, render: (t) => <span className="td-mut td-mono">{t.last_movement.slice(5)}</span> },
+                  { key: "rental", header: "Rental", sortValue: (r) => r.rental_rate, render: (t) => <span className="td-mut">RM {t.rental_rate}</span> },
                 ]}
                 renderMobile={(t) => (
                   <MobileListItem
@@ -895,7 +1012,7 @@ export function Terminals({
                       { label: "Location", value: <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
                       { label: "Rental", value: <>RM {t.rental_rate}</> },
                     ]}
-                    onClick={() => nav("terminal-detail", terminalSerial(t))}
+                    onClick={() => nav("terminal-detail", t.id)}
                     chevron
                   />
                 )}
@@ -1010,7 +1127,6 @@ function AssignMerchantModal({ terminal, onClose, onAssigned }: {
   onClose: () => void;
   onAssigned: (updated: TerminalOut, entry: AvailableTidOut) => void;
 }) {
-  const serial = terminalSerial(terminal);
   const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(null);
   const [available, setAvailable] = useState<AvailableTidOut[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
@@ -1053,7 +1169,7 @@ function AssignMerchantModal({ terminal, onClose, onAssigned }: {
     setSaving(true);
     setErr(null);
     try {
-      const updated = await api.terminals.assignMerchant(serial, {
+      const updated = await api.terminals.assignMerchant(terminal.id, {
         merchant_id: selectedMerchant.id,
         merchant_mid_id: selected.source === "mid" ? selected.source_id : undefined,
         merchant_mid_acceptance_id: selected.source === "acceptance" ? selected.source_id : undefined,
@@ -1069,7 +1185,7 @@ function AssignMerchantModal({ terminal, onClose, onAssigned }: {
   return (
     <Modal
       title="Assign to Merchant"
-      sub={serial}
+      sub={terminalSerial(terminal)}
       icon="merchants"
       size="overflow-visible"
       onClose={onClose}
@@ -1145,6 +1261,7 @@ export function TerminalDetail({
   const [linkedSimOverride, setLinkedSimOverride] = useState<SimCardOut | null | undefined>(undefined);
   const [detailLoading, setDetailLoading] = useState(true);
 
+  const [showEdit, setShowEdit] = useState(false);
   const [showStatus, setShowStatus] = useState(false);
   const [pendingStatus, setPendingStatus] = useState("");
   const [pendingLocation, setPendingLocation] = useState("");
@@ -1216,12 +1333,20 @@ export function TerminalDetail({
     setShowLinkTid(true);
   }
 
+  function handleTerminalUpdated(updated: TerminalOut) {
+    setTerminal((prev) => ({ ...prev, ...updated }));
+    if (updated.term_setting_id) {
+      api.termSettings.get(updated.term_setting_id).then(setTermSetting).catch(console.error);
+    }
+    flash("Terminal updated");
+  }
+
   async function applyStatus() {
     if (!terminal) return;
     if (!can("Terminals.Edit")) return;
     setStatusSaving(true);
     try {
-      const updated = await api.terminals.update(terminalSerial(terminal), { status: pendingStatus, location: pendingLocation || undefined });
+      const updated = await api.terminals.update(terminal.id, { status: pendingStatus, location: pendingLocation || undefined });
       setTerminal(prev => {
         return {
           ...prev,
@@ -1243,9 +1368,8 @@ export function TerminalDetail({
     if (!terminal) return;
     if (!can("Terminals.Edit")) return;
     try {
-      const serial = terminalSerial(terminal);
-      const updated = await api.terminals.linkSim({ terminal_serial: serial, simcard_id: simId });
-      const newSim = await api.terminals.simCard(serial);
+      const updated = await api.terminals.linkSim({ terminal_serial: terminalSerial(terminal), simcard_id: simId });
+      const newSim = await api.terminals.simCard(terminal.id);
       setLinkedSimOverride(newSim);
       setTerminal((prev) => ({ ...prev, ...updated }));
       setShowSimModal(false);
@@ -1261,7 +1385,7 @@ export function TerminalDetail({
     if (!linkedSim || !terminal) return;
     if (!can("Terminals.Edit")) return;
     try {
-      const updated = await api.terminals.unlinkSim(terminalSerial(terminal));
+      const updated = await api.terminals.unlinkSim(terminal.id);
       setLinkedSimOverride(null);
       setTerminal(prev => {
         return {
@@ -1295,7 +1419,7 @@ export function TerminalDetail({
           </div>
         </div>
         <div className="page-head-actions">
-          {can("Terminals.Edit") && <Btn variant="ghost" icon="edit">Edit</Btn>}
+          {can("Terminals.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>}
           {can("Terminals.Edit") && <Btn variant="slate" icon="refresh" onClick={() => { setPendingStatus(terminal.status); setPendingLocation(terminal.location); setShowStatus(true); }}>Update Status</Btn>}
         </div>
       </div>
@@ -1326,18 +1450,26 @@ export function TerminalDetail({
               <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--ink-3)" }}>No open jobs for this device.</div>
             ) : (
               <div className="tbl-wrap">
-                <table className="tbl">
-                  <thead><tr>{["Job ID", "Type", "Status"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-                  <tbody>
-                    {openJobs.map((j) => (
-                      <tr key={j.id} className="clickable" onClick={() => nav("job-detail", j.id)}>
-                        <td className="td-mono td-strong">{j.id}</td>
-                        <td>{j.type}</td>
-                        <td><JobStatus status={j.stage} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <SortableTable rows={openJobs} columns={[
+                  { key: "Job ID", header: "Job ID", sortValue: (r) => r.id },
+                  { key: "Type", header: "Type", sortValue: (r) => r.type },
+                  { key: "Status", header: "Status", sortValue: (r) => r.stage }
+                ]}>
+                  {(sortedRows, headers) => (
+                    <table className="tbl">
+                      <thead><tr>{headers}</tr></thead>
+                      <tbody>
+                        {sortedRows.map((j) => (
+                          <tr key={j.id} className="clickable" onClick={() => nav("job-detail", j.id)}>
+                            <td className="td-mono td-strong">{j.id}</td>
+                            <td>{j.type}</td>
+                            <td><JobStatus status={j.stage} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </SortableTable>
               </div>
             )}
           </Card>
@@ -1461,9 +1593,6 @@ export function TerminalDetail({
                 <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
                   <dt>Setting ID</dt><dd className="mono">{termSetting.id}</dd>
                   <dt>Category</dt><dd>{termSetting.category}</dd>
-                  <dt>Monthly rate</dt><dd>RM {termSetting.monthly_rental}</dd>
-                  <dt>Deposit</dt><dd>RM {termSetting.deposit}</dd>
-                  {termSetting.setup_fee > 0 && <><dt>Setup fee</dt><dd>RM {termSetting.setup_fee}</dd></>}
                 </dl>
               ) : (
                 <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No terminal setting linked.</div>
@@ -1543,6 +1672,10 @@ export function TerminalDetail({
           </Card>
         </div>
       </div>
+
+      {showEdit && can("Terminals.Edit") && (
+        <EditTerminalModal terminal={terminal} onClose={() => setShowEdit(false)} onUpdated={handleTerminalUpdated} />
+      )}
 
       {/* Status update modal */}
       {showStatus && can("Terminals.Edit") && (

@@ -1,5 +1,6 @@
 /* Bumipay — SIM card inventory listing + detail */
-import { useState, useEffect, useCallback } from "react";
+import { SortableTable, useServerSort } from "./table-sorting";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";
 import { SIM_DATA_ALLOWANCES, SIM_STATUS } from "./data";
@@ -442,43 +443,52 @@ function SimSettingsTab() {
           <span className="tb-meta">{loading ? "Loading…" : `${filtered.length} setting${filtered.length === 1 ? "" : "s"}`}</span>
         </Toolbar>
         <div className="tbl-wrap">
-          <table className="tbl">
-            <thead>
-              <tr>{["Setting ID", "Carrier", "Plan", "Status", "Created", ""].map((h) => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {!loading && filtered.map((r) => (
-                <tr key={r.id}>
-                  <td><span className="td-mono td-strong">{r.id}</span></td>
-                  <td>
-                    <div className="ent">
-                      <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="phone" size={15} /></div>
-                      <div><div className="ent-name">{r.carrier}</div><div className="ent-sub">{r.plan}</div></div>
-                    </div>
-                  </td>
-                  <td><Chip cls="chip-info">{r.plan}</Chip></td>
-                  <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
-                  <td className="td-mut">{r.created_at ? r.created_at.slice(0, 10) : "—"}</td>
-                  <td>
-                    <div className="row-actions">
-                      {can("SIM Cards.Edit") && <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>}
-                      {can("SIM Cards.Edit") && (
-                        <button
-                          className="icon-btn"
-                          title={r.active ? "Deactivate" : "Activate"}
-                          style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
-                          onClick={() => api.simSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
-                        >
-                          <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
-                        </button>
-                      )}
-                      {can("SIM Cards.Delete") && <button className="icon-btn" title="Delete" style={{ color: "var(--bad)" }} onClick={() => void handleDelete(r)}><Icon name="trash" size={14} /></button>}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <SortableTable rows={filtered} columns={[
+            { key: "Setting ID", header: "Setting ID", sortValue: (r) => r.id },
+            { key: "Carrier", header: "Carrier", sortValue: (r) => r.carrier },
+            { key: "Plan", header: "Plan", sortValue: (r) => r.plan },
+            { key: "Status", header: "Status", sortValue: (r) => r.active ? "Active" : "Disabled" },
+            { key: "Created", header: "Created", sortValue: (r) => r.created_at },
+            { key: "actions", header: "" }
+          ]}>
+            {(sortedRows, headers) => (
+              <table className="tbl">
+                <thead><tr>{headers}</tr></thead>
+                <tbody>
+                  {!loading && sortedRows.map((r) => (
+                    <tr key={r.id}>
+                      <td><span className="td-mono td-strong">{r.id}</span></td>
+                      <td>
+                        <div className="ent">
+                          <div className="ent-ava slate" style={{ borderRadius: 7 }}><Icon name="phone" size={15} /></div>
+                          <div><div className="ent-name">{r.carrier}</div><div className="ent-sub">{r.plan}</div></div>
+                        </div>
+                      </td>
+                      <td><Chip cls="chip-info">{r.plan}</Chip></td>
+                      <td>{r.active ? <Chip cls="chip-ok" dot>Active</Chip> : <Chip cls="chip-neutral" dot>Disabled</Chip>}</td>
+                      <td className="td-mut">{r.created_at ? r.created_at.slice(0, 10) : "—"}</td>
+                      <td>
+                        <div className="row-actions">
+                          {can("SIM Cards.Edit") && <button className="icon-btn" title="Edit" onClick={() => { setEditRow(r); setShowCreate(false); }}><Icon name="edit" size={14} /></button>}
+                          {can("SIM Cards.Edit") && (
+                            <button
+                              className="icon-btn"
+                              title={r.active ? "Deactivate" : "Activate"}
+                              style={{ color: r.active ? "var(--ok)" : "var(--ink-3)" }}
+                              onClick={() => api.simSettings.update(r.id, { active: !r.active }).then((updated) => setRows((prev) => prev.map((x) => x.id === r.id ? updated : x))).catch(console.error)}
+                            >
+                              <Icon name={r.active ? "checkCircle" : "clock"} size={14} />
+                            </button>
+                          )}
+                          {can("SIM Cards.Delete") && <button className="icon-btn" title="Delete" style={{ color: "var(--bad)" }} onClick={() => void handleDelete(r)}><Icon name="trash" size={14} /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </SortableTable>
         </div>
       </Card>
       {isModalOpen && can("SIM Cards.Edit") && (
@@ -502,6 +512,7 @@ export function SimCards({ nav }: { nav: NavFn }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [details, setDetails] = useState<SimCardDetails | null>(null);
@@ -510,24 +521,29 @@ export function SimCards({ nav }: { nav: NavFn }) {
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  const requestVersion = useRef(0);
   const refreshSimCards = useCallback(() => {
+    const version = ++requestVersion.current;
     return api.simCards.list({
+      ...sortParams,
       page,
       per_page: SIMCARDS_PAGE_SIZE,
       query: q || undefined,
       status: status !== "All" ? status : undefined,
     })
       .then((p) => {
+        if (version !== requestVersion.current) return;
         setSimCards(p.items);
         setPages(p.pages);
         setTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, status]);
+      .finally(() => { if (version === requestVersion.current) setLoading(false); });
+  }, [page, q, status, sortParams]);
 
   useEffect(() => {
     void refreshSimCards();
+    return () => { requestVersion.current += 1; };
   }, [refreshSimCards]);
 
   useEffect(() => {
@@ -537,7 +553,8 @@ export function SimCards({ nav }: { nav: NavFn }) {
   function resetPage() { setPage(1); }
 
   function handleCreate(s: SimCardOut) {
-    setSimCards((prev) => [s, ...prev]);
+    if (sort) refreshSort();
+    else setSimCards((prev) => [s, ...prev]);
     setTotal((prev) => prev + 1);
     setToast(s.id + " added to inventory");
     setTimeout(() => setToast(null), 2800);
@@ -619,38 +636,49 @@ export function SimCards({ nav }: { nav: NavFn }) {
             </Toolbar>
             {!loading && simCards.length === 0 ? <Empty icon="phone" title="No SIM cards match" /> : (
               <div className="tbl-wrap">
-                <table className="tbl">
-                  <thead>
-                    <tr>{["SIM ID","ICCID","MSISDN","Carrier","Plan","Linked Terminal","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {!loading && simCards.map((s) => {
-                      const t = s.terminal;
-                      const terminalId = t?.serial ?? s.terminal_serial;
-                      return (
-                        <tr key={s.id} onClick={() => nav("simcard-detail", s.id)}>
-                          <td><span className="td-mono td-strong">{s.id}</span></td>
-                          <td className="td-mono td-mut" style={{ fontSize: 12 }}>{s.iccid}</td>
-                          <td className="td-mono">{s.msisdn || <span className="td-mut">—</span>}</td>
-                          <td>{s.carrier}</td>
-                          <td className="td-mut">{s.plan}</td>
-                          <td>
-                            {terminalId ? (
-                              <div className="cell-2">
-                                <span className="td-strong">{[t?.brand, t?.model].filter(Boolean).join(" ") || "Linked terminal"}</span>
-                                <span className="c2-sub mono">{terminalId}</span>
-                              </div>
-                            ) : (
-                              <span className="td-mut">In Storage</span>
-                            )}
-                          </td>
-                          <td><SimStatus status={s.status} /></td>
-                          <td><Btn variant="ghost" sm icon="eye" onClick={() => nav("simcard-detail", s.id)}>View</Btn></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <SortableTable rows={simCards} sort={sort} onSortChange={onSortChange} columns={[
+                  { key: "SIM ID", header: "SIM ID", sortValue: (r) => r.id },
+                  { key: "ICCID", header: "ICCID", sortValue: (r) => r.iccid },
+                  { key: "MSISDN", header: "MSISDN", sortValue: (r) => r.msisdn },
+                  { key: "Carrier", header: "Carrier", sortValue: (r) => r.carrier },
+                  { key: "Plan", header: "Plan", sortValue: (r) => r.plan },
+                  { key: "Linked Terminal", header: "Linked Terminal", sortValue: (r) => r.terminal_serial },
+                  { key: "Status", header: "Status", sortValue: (r) => r.status },
+                  { key: "actions", header: "" }
+                ]}>
+                  {(sortedRows, headers) => (
+                    <table className="tbl">
+                      <thead><tr>{headers}</tr></thead>
+                      <tbody>
+                        {!loading && sortedRows.map((s) => {
+                          const t = s.terminal;
+                          const terminalId = t?.serial ?? s.terminal_serial;
+                          return (
+                            <tr key={s.id} onClick={() => nav("simcard-detail", s.id)}>
+                              <td><span className="td-mono td-strong">{s.id}</span></td>
+                              <td className="td-mono td-mut" style={{ fontSize: 12 }}>{s.iccid}</td>
+                              <td className="td-mono">{s.msisdn || <span className="td-mut">—</span>}</td>
+                              <td>{s.carrier}</td>
+                              <td className="td-mut">{s.plan}</td>
+                              <td>
+                                {terminalId ? (
+                                  <div className="cell-2">
+                                    <span className="td-strong">{[t?.brand, t?.model].filter(Boolean).join(" ") || "Linked terminal"}</span>
+                                    <span className="c2-sub mono">{terminalId}</span>
+                                  </div>
+                                ) : (
+                                  <span className="td-mut">In Storage</span>
+                                )}
+                              </td>
+                              <td><SimStatus status={s.status} /></td>
+                              <td><Btn variant="ghost" sm icon="eye" onClick={() => nav("simcard-detail", s.id)}>View</Btn></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </SortableTable>
               </div>
             )}
             <Pagination total={total} shown={simCards.length} page={page} pages={pages} onPageChange={setPage} />
@@ -784,6 +812,7 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
     ["Data Allowance", sim.data_allowance],
   ];
   const connectedTerminalId = sim.terminal?.serial ?? sim.terminal_serial;
+  const connectedTerminalNavId = sim.terminal?.id;
   const connectedMerchant = sim.merchant ?? sim.terminal?.merchant ?? null;
   const connectedCustomer = sim.customer ?? connectedMerchant?.customer ?? sim.terminal?.customer ?? null;
 
@@ -863,7 +892,7 @@ export function SimCardDetail({ id, nav }: { id: string; nav: NavFn }) {
 
         {/* Terminal */}
         {connectedTerminalId && (
-          <Card title="Connected Terminal" icon="terminal" actions={<Btn variant="ghost" sm icon="chevRight" onClick={() => nav("terminal-detail", connectedTerminalId)}>View</Btn>}>
+          <Card title="Connected Terminal" icon="terminal" actions={connectedTerminalNavId && <Btn variant="ghost" sm icon="chevRight" onClick={() => nav("terminal-detail", connectedTerminalNavId)}>View</Btn>}>
             <div style={{ padding: "4px 20px 16px" }}>
               {[
                 ["Serial", connectedTerminalId],

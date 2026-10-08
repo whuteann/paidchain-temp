@@ -1,4 +1,5 @@
 /* Bumipay — Paper roll inventory */
+import { SortableTable } from "./table-sorting";
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";
@@ -270,35 +271,46 @@ export function PaperRolls({}: { nav: NavFn }) {
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : filtered.length === 0 ? <Empty icon="receipt" title="No entries match" /> : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-              <tr>{["Date","Type","Quantity","Balance","Reference","Note","Attachment","Created by"].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {filtered.map((e) => (
-                  <tr key={e.id}>
-                    <td className="td-mono td-mut">{e.date}</td>
-                    <td><TypeChip type={e.type} /></td>
-                    <td>
-                      <span style={{ fontWeight: 700, fontFamily: "var(--mono)", fontSize: 14, color: e.quantity > 0 ? "var(--green-700)" : "var(--bad)" }}>
-                        {e.quantity > 0 ? "+" : ""}{e.quantity}
-                      </span>
-                    </td>
-                    <td className="td-mono td-mut">{runningMap[e.id] ?? "—"}</td>
-                    <td className="td-mut">{e.reference || "—"}</td>
-                    <td className="td-mut">{e.note || "—"}</td>
-                    <td className="td-mut">
-                      {e.file_url ? (
-                        <a href={e.file_url} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}>
-                          View file
-                        </a>
-                      ) : "—"}
-                    </td>
-                    <td className="td-mut">{e.created_by}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={filtered} columns={[
+              { key: "Date", header: "Date", sortValue: (r) => r.date },
+              { key: "Type", header: "Type", sortValue: (r) => r.type },
+              { key: "Quantity", header: "Quantity", sortValue: (r) => r.quantity },
+              { key: "Balance", header: "Balance", sortValue: (r) => runningMap[r.id] },
+              { key: "Reference", header: "Reference", sortValue: (r) => r.reference },
+              { key: "Note", header: "Note", sortValue: (r) => r.note },
+              { key: "Attachment", header: "Attachment", sortValue: (r) => Boolean(r.file_url) },
+              { key: "Created by", header: "Created by", sortValue: (r) => r.created_by }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((e) => (
+                      <tr key={e.id}>
+                        <td className="td-mono td-mut">{e.date}</td>
+                        <td><TypeChip type={e.type} /></td>
+                        <td>
+                          <span style={{ fontWeight: 700, fontFamily: "var(--mono)", fontSize: 14, color: e.quantity > 0 ? "var(--green-700)" : "var(--bad)" }}>
+                            {e.quantity > 0 ? "+" : ""}{e.quantity}
+                          </span>
+                        </td>
+                        <td className="td-mono td-mut">{runningMap[e.id] ?? "—"}</td>
+                        <td className="td-mut">{e.reference || "—"}</td>
+                        <td className="td-mut">{e.note || "—"}</td>
+                        <td className="td-mut">
+                          {e.file_url ? (
+                            <a href={e.file_url} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}>
+                              View file
+                            </a>
+                          ) : "—"}
+                        </td>
+                        <td className="td-mut">{e.created_by}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
         <Pagination total={entries.length} shown={filtered.length} />

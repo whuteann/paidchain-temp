@@ -1,4 +1,5 @@
 /* Bumipay — Merchant listing + detail */
+import { useServerSort } from "./table-sorting";
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
@@ -727,12 +728,12 @@ function AcceptanceCatalogTab({ canEdit }: { canEdit: boolean }) {
           rows={rows}
           getKey={(r) => r.id}
           columns={[
-            { key: "name", header: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.name}</span> },
-            { key: "id", header: "ID", render: (r) => <span className="td-mono td-mut">{r.id}</span> },
-            { key: "requires", header: "Requires TID/MID", render: (r) => r.requires_tid_mid ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
-            { key: "default", header: "Default compulsory", render: (r) => r.default_compulsory ? <Chip cls="chip-ok">Yes</Chip> : <span className="td-mut">No</span> },
-            { key: "optinout", header: "Opt In/Out", render: (r) => r.can_opt_in_out ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
-            { key: "status", header: "Status", render: (r) => <Chip cls={r.active ? "chip-ok" : "chip-neutral"} dot>{r.active ? "Active" : "Inactive"}</Chip> },
+            { key: "name", header: "Name", sortValue: (r) => r.name, render: (r) => <span style={{ fontWeight: 600 }}>{r.name}</span> },
+            { key: "id", header: "ID", sortValue: (r) => r.id, render: (r) => <span className="td-mono td-mut">{r.id}</span> },
+            { key: "requires", header: "Requires TID/MID", sortValue: (r) => r.requires_tid_mid, render: (r) => r.requires_tid_mid ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
+            { key: "default", header: "Default compulsory", sortValue: (r) => r.default_compulsory, render: (r) => r.default_compulsory ? <Chip cls="chip-ok">Yes</Chip> : <span className="td-mut">No</span> },
+            { key: "optinout", header: "Opt In/Out", sortValue: (r) => r.can_opt_in_out, render: (r) => r.can_opt_in_out ? <Chip cls="chip-info">Yes</Chip> : <span className="td-mut">No</span> },
+            { key: "status", header: "Status", sortValue: (r) => r.active ? "Active" : "Inactive", render: (r) => <Chip cls={r.active ? "chip-ok" : "chip-neutral"} dot>{r.active ? "Active" : "Inactive"}</Chip> },
             ...(canEdit ? [{
               key: "actions", header: "", render: (r: AcceptanceSettingOut) => (
                 <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
@@ -789,6 +790,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
@@ -802,6 +804,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
     const timer = setTimeout(() => {
       setLoading(true);
       api.merchants.list({
+        ...sortParams,
         page,
         per_page: MERCHANTS_PAGE_SIZE,
         query: q.trim() || undefined,
@@ -823,10 +826,11 @@ export function Merchants({ nav }: { nav: NavFn }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [page, q, status]);
+  }, [page, q, status, sortParams]);
 
   function handleMerchantCreated(merchant: MerchantOut) {
-    setMerchantList((prev) => [merchant, ...prev]);
+    if (sort) refreshSort();
+    else setMerchantList((prev) => [merchant, ...prev]);
     setTotal((prev) => prev + 1);
     setCreateCustomer(null);
     setToast("Merchant " + merchant.name + " created");
@@ -877,16 +881,17 @@ export function Merchants({ nav }: { nav: NavFn }) {
             <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
           ) : merchantList.length === 0 ? <Empty title="No merchants match" sub="Try a different search or filter" /> : (
             <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
               rows={merchantList}
               getKey={(m) => m.id}
               onRowClick={(m) => nav("merchant-detail", m.id)}
               columns={[
-                { key: "merchant", header: "Merchant", render: (m) => <Entity name={m.name} sub={m.id + " · " + m.type} /> },
-                { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
-                { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
-                { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
-                { key: "terminals", header: "Terminals", render: (m) => { const n = m.terminal_count ?? 0; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
-                { key: "jobs", header: "Jobs", render: (m) => (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : <span className="td-mut">None</span> },
+                { key: "merchant", header: "Merchant", sortValue: (r) => r.name, render: (m) => <Entity name={m.name} sub={m.id + " · " + m.type} /> },
+                { key: "mid", header: "MID", sortValue: (r) => r.mids?.[0]?.mid_value, render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
+                { key: "bank", header: "Bank", sortValue: (r) => r.bank, render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={15} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
+                { key: "status", header: "Status", sortValue: (r) => r.status, render: (m) => <MerchantStatus status={m.status} /> },
+                { key: "terminals", header: "Terminals", sortValue: (r) => r.terminal_count, render: (m) => { const n = m.terminal_count ?? 0; return n === 0 ? <span className="td-mut">—</span> : <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="terminal" size={15} style={{ color: "var(--ink-3)" }} />{n}</span>; } },
+                { key: "jobs", header: "Jobs", sortValue: (r) => r.open_jobs_count, render: (m) => (m.open_jobs_count ?? 0) > 0 ? <Chip cls="chip-warn">{m.open_jobs_count} open</Chip> : <span className="td-mut">None</span> },
                 ...(can("Merchants.Hard Delete") ? [{
                   key: "actions", header: "", render: (m: MerchantOut) => (
                     <button
@@ -933,6 +938,7 @@ export function Merchants({ nav }: { nav: NavFn }) {
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => {
             setMerchantList((prev) => prev.filter((m) => m.id !== deleteTarget.id));
+            refreshSort();
             setTotal((prev) => Math.max(0, prev - 1));
             setDeleteTarget(null);
           }}
@@ -1888,13 +1894,15 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
                       <dt>Terminal Serial</dt>
                       <dd className="mono">
                         {mid.terminal_serial ? (
-                          <button
-                            type="button"
-                            style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
-                            onClick={() => nav("terminal-detail", mid.terminal_serial!)}
-                          >
-                            {mid.terminal_serial}
-                          </button>
+                          mid.terminal_id ? (
+                            <button
+                              type="button"
+                              style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+                              onClick={() => nav("terminal-detail", mid.terminal_id!)}
+                            >
+                              {mid.terminal_serial}
+                            </button>
+                          ) : mid.terminal_serial
                         ) : "-"}
                       </dd>
                       <dt>Status</dt><dd>{mid.status ? <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip> : "-"}</dd>
@@ -2062,16 +2070,16 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
     <Card>
       <ResponsiveTable
         rows={rows}
-        getKey={(t) => t.serial}
-        onRowClick={(t) => nav("terminal-detail", t.serial)}
+        getKey={(t) => t.id}
+        onRowClick={(t) => nav("terminal-detail", t.id)}
         columns={[
-          { key: "serial", header: "Serial", render: (t) => <span className="td-mono td-strong">{t.serial}</span> },
-          { key: "device", header: "Device", render: (t) => <div className="cell-2"><span className="td-strong">{t.brand}</span><span className="c2-sub">{t.model}</span></div> },
-          { key: "tid", header: "TID", render: (t) => <span className="td-mono td-mut">{t.tid || "—"}</span> },
-          { key: "sim", header: "SIM", render: (t) => <span className="td-mut">{merchantTerminalSimLabel(t) || "—"}</span> },
-          { key: "status", header: "Status", render: (t) => <TerminalStatus status={t.status} /> },
-          { key: "location", header: "Location", render: (t) => <span className="td-mut">{t.location}</span> },
-          { key: "rental", header: "Rental", render: (t) => <>RM {t.rental_rate}/mo</> },
+          { key: "serial", header: "Serial", sortValue: (r) => r.serial, render: (t) => <span className="td-mono td-strong">{t.serial}</span> },
+          { key: "device", header: "Device", sortValue: (r) => [r.brand, r.model].join(" "), render: (t) => <div className="cell-2"><span className="td-strong">{t.brand}</span><span className="c2-sub">{t.model}</span></div> },
+          { key: "tid", header: "TID", sortValue: (r) => r.tid, render: (t) => <span className="td-mono td-mut">{t.tid || "—"}</span> },
+          { key: "sim", header: "SIM", sortValue: (r) => merchantTerminalSimLabel(r), render: (t) => <span className="td-mut">{merchantTerminalSimLabel(t) || "—"}</span> },
+          { key: "status", header: "Status", sortValue: (r) => r.status, render: (t) => <TerminalStatus status={t.status} /> },
+          { key: "location", header: "Location", sortValue: (r) => r.location, render: (t) => <span className="td-mut">{t.location}</span> },
+          { key: "rental", header: "Rental", sortValue: (r) => r.rental_rate, render: (t) => <>RM {t.rental_rate}/mo</> },
         ]}
         renderMobile={(t) => (
           <MobileListItem
@@ -2084,7 +2092,7 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
               { label: "Location", value: t.location },
               { label: "Rental", value: <>RM {t.rental_rate}/mo</> },
             ]}
-            onClick={() => nav("terminal-detail", t.serial)}
+            onClick={() => nav("terminal-detail", t.id)}
             chevron
           />
         )}
@@ -2102,13 +2110,13 @@ function JobsTab({ rows, nav }: { rows: MerchantJobOut[]; nav: NavFn }) {
         getKey={(j) => j.id}
         onRowClick={(j) => nav("job-detail", j.id)}
         columns={[
-          { key: "id", header: "Job ID", render: (j) => <span className="td-mono td-strong">{j.id}</span> },
-          { key: "type", header: "Type", render: (j) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type]?.icon ?? "jobs"} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
-          { key: "status", header: "Status", render: (j) => <JobStatus status={j.stage} /> },
-          { key: "sla", header: "SLA", render: (j) => <SlaChip sla={j.sla} /> },
-          { key: "assignee", header: "Assignee", render: (j) => <span className="td-mut">{j.assignee}</span> },
-          { key: "created", header: "Created", render: (j) => <span className="td-mut td-mono">{j.created_at.slice(5, 10)}</span> },
-          { key: "due", header: "Due", render: (j) => <span className="td-mut td-mono">{j.due_date.slice(5)}</span> },
+          { key: "id", header: "Job ID", sortValue: (r) => r.id, render: (j) => <span className="td-mono td-strong">{j.id}</span> },
+          { key: "type", header: "Type", sortValue: (r) => r.type, render: (j) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name={JOB_TYPES[j.type]?.icon ?? "jobs"} size={15} style={{ color: "var(--ink-3)" }} />{j.type}</span> },
+          { key: "status", header: "Status", sortValue: (r) => r.stage, render: (j) => <JobStatus status={j.stage} /> },
+          { key: "sla", header: "SLA", sortValue: (r) => r.sla, render: (j) => <SlaChip sla={j.sla} /> },
+          { key: "assignee", header: "Assignee", sortValue: (r) => r.assignee, render: (j) => <span className="td-mut">{j.assignee}</span> },
+          { key: "created", header: "Created", sortValue: (r) => r.created_at, render: (j) => <span className="td-mut td-mono">{j.created_at.slice(5, 10)}</span> },
+          { key: "due", header: "Due", sortValue: (r) => r.due_date, render: (j) => <span className="td-mut td-mono">{j.due_date.slice(5)}</span> },
         ]}
         renderMobile={(j) => (
           <MobileListItem
