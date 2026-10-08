@@ -1,4 +1,5 @@
 /* Bumipay — legacy payout listing + upload + detail */
+import { SortableTable, useServerSort } from "./table-sorting";
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, PayoutStatus, Pagination, Empty, Chip, Modal, Field, SingleFileDropzone } from "./components";
@@ -365,6 +366,7 @@ export function Payouts({ nav }: { nav: NavFn }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
@@ -372,8 +374,10 @@ export function Payouts({ nav }: { nav: NavFn }) {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
       api.payouts.list({
+        ...sortParams,
         page,
         per_page: PAYOUTS_PAGE_SIZE,
         query: q || undefined,
@@ -382,14 +386,16 @@ export function Payouts({ nav }: { nav: NavFn }) {
       api.payouts.details(),
     ])
       .then(([payoutsPage, nextDetails]) => {
+        if (cancelled) return;
         setRows(payoutsPage.items);
         setPages(payoutsPage.pages);
         setTotal(payoutsPage.total);
         setDetails(nextDetails);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, status]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, status, sortParams]);
 
   function resetPage() {
     setLoading(true);
@@ -406,6 +412,7 @@ export function Payouts({ nav }: { nav: NavFn }) {
     try {
       const [payoutsPage, nextDetails] = await Promise.all([
         api.payouts.list({
+          ...sortParams,
           page,
           per_page: PAYOUTS_PAGE_SIZE,
           query: q || undefined,
@@ -482,40 +489,50 @@ export function Payouts({ nav }: { nav: NavFn }) {
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : rows.length === 0 ? <Empty icon="payouts" title="No payouts match" /> : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  {["Payout ID","Merchant","Txns","Gross","Net","Status","Checks","eInvoice",""].map((h) => <th key={h}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((p) => (
-                  <tr key={p.id}>
-                    <td><span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                      <span className="td-mono td-strong">{p.id}</span>
-                      {newIds.has(p.id) && <Chip cls="chip-ok" sq>New</Chip>}
-                    </span></td>
-                    <td><div className="cell-2">
-                      <span className="td-strong">{p.merchant.name}</span>
-                      <span className="c2-sub mono">{p.mid}</span>
-                    </div></td>
-                    <td className="td-mut">{p.txns}</td>
-                    <td className="td-mono td-mut">{money(p.gross)}</td>
-                    <td className="td-mono td-strong">{money(p.net)}</td>
-                    <td><PayoutStatus status={p.status} /></td>
-                    <td><ExceptionBadge checks={p.checks} /></td>
-                    <td>
-                      {p.einvoice
-                        ? <Chip cls="chip-indigo"><Icon name="invoice" size={13} />Issued</Chip>
-                        : <span className="td-mut">—</span>}
-                    </td>
-                    <td>
-                      <Btn variant="ghost" sm icon="eye" onClick={() => nav("payout-detail", p.id)}>View</Btn>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={rows} sort={sort} onSortChange={onSortChange} columns={[
+              { key: "Payout ID", header: "Payout ID", sortValue: (r) => r.id },
+              { key: "Merchant", header: "Merchant", sortValue: (r) => r.merchant.name },
+              { key: "Txns", header: "Txns", sortValue: (r) => r.txn_count },
+              { key: "Gross", header: "Gross", sortValue: (r) => r.gross },
+              { key: "Net", header: "Net", sortValue: (r) => r.net },
+              { key: "Status", header: "Status", sortValue: (r) => r.status },
+              { key: "Checks", header: "Checks", sortLabel: "Checks (failed count)", sortValue: (r) => r.checks?.filter((c) => !c.passed && c.severity !== "info").length ?? 0 },
+              { key: "eInvoice", header: "eInvoice", sortValue: (r) => r.einvoice },
+              { key: "actions", header: "" }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((p) => (
+                      <tr key={p.id}>
+                        <td><span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <span className="td-mono td-strong">{p.id}</span>
+                          {newIds.has(p.id) && <Chip cls="chip-ok" sq>New</Chip>}
+                        </span></td>
+                        <td><div className="cell-2">
+                          <span className="td-strong">{p.merchant.name}</span>
+                          <span className="c2-sub mono">{p.mid}</span>
+                        </div></td>
+                        <td className="td-mut">{p.txn_count}</td>
+                        <td className="td-mono td-mut">{money(p.gross)}</td>
+                        <td className="td-mono td-strong">{money(p.net)}</td>
+                        <td><PayoutStatus status={p.status} /></td>
+                        <td><ExceptionBadge checks={p.checks} /></td>
+                        <td>
+                          {p.einvoice
+                            ? <Chip cls="chip-indigo"><Icon name="invoice" size={13} />Issued</Chip>
+                            : <span className="td-mut">—</span>}
+                        </td>
+                        <td>
+                          <Btn variant="ghost" sm icon="eye" onClick={() => nav("payout-detail", p.id)}>View</Btn>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
         <Pagination total={total} shown={rows.length} page={page} pages={pages} onPageChange={changePage} />
@@ -721,22 +738,30 @@ export function PayoutDetail({ id, nav }: { id: string; nav: NavFn }) {
               <span className="tb-meta">{filteredTxns.length} of {txns.length} transactions</span>
             </Toolbar>
             <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>{["Transaction ID","Date","Merchant","Amount (RM)","Payment Method"].map((h) => <th key={h}>{h}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {filteredTxns.map((t) => (
-                    <tr key={t.id}>
-                      <td className="td-mono td-strong">{t.id}</td>
-                      <td className="td-mono td-mut">{t.txn_date}</td>
-                      <td>{t.merchant_name}</td>
-                      <td className="td-mono">{money(t.amount)}</td>
-                      <td><Chip cls="chip-neutral">{t.payment_method}</Chip></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <SortableTable rows={filteredTxns} columns={[
+                { key: "Transaction ID", header: "Transaction ID", sortValue: (r) => r.id },
+                { key: "Date", header: "Date", sortValue: (r) => r.txn_date },
+                { key: "Merchant", header: "Merchant", sortValue: (r) => r.merchant_name },
+                { key: "Amount (RM)", header: "Amount (RM)", sortValue: (r) => r.amount },
+                { key: "Payment Method", header: "Payment Method", sortValue: (r) => r.payment_method }
+              ]}>
+                {(sortedRows, headers) => (
+                  <table className="tbl">
+                    <thead><tr>{headers}</tr></thead>
+                    <tbody>
+                      {sortedRows.map((t) => (
+                        <tr key={t.id}>
+                          <td className="td-mono td-strong">{t.id}</td>
+                          <td className="td-mono td-mut">{t.txn_date}</td>
+                          <td>{t.merchant_name}</td>
+                          <td className="td-mono">{money(t.amount)}</td>
+                          <td><Chip cls="chip-neutral">{t.payment_method}</Chip></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </SortableTable>
             </div>
             <Pagination total={txns.length} shown={filteredTxns.length} />
           </>

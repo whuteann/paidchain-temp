@@ -1,3 +1,4 @@
+import { useServerSort } from "./table-sorting";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type {
@@ -151,6 +152,7 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
   const [rows, setRows] = useState<ProfitShareOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
@@ -177,6 +179,7 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
   useEffect(() => {
     let cancelled = false;
     api.profitShares.list({
+      ...sortParams,
       page,
       per_page: PAGE_SIZE,
       query: query || undefined,
@@ -188,7 +191,7 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
       setTotal(result.total);
     }).catch(console.error).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [page, query, status]);
+  }, [page, query, status, sortParams]);
 
   return (
     <div>
@@ -214,16 +217,17 @@ export function ProfitShares({ nav }: { nav: NavFn }) {
           <Empty icon="cash" title="No profit-share reports" sub="Upload a monthly sales report to begin" />
         ) : (
           <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
             rows={rows}
             getKey={(row) => row.id}
             onRowClick={(row) => nav("profit-share-detail", row.id)}
             columns={[
-              { key: "report", header: "Report", render: (row) => <div className="cell-2"><span className="td-strong">{periodLabel(row.period_year, row.period_month)}</span><span className="c2-sub mono">{row.id}</span></div> },
-              { key: "file", header: "Source", render: (row) => <span className="td-mut">{row.source_filename}</span> },
-              { key: "progress", header: "Resolved", render: (row) => <span><strong>{row.line_count - row.unlinked_count - row.untyped_count}</strong> / {row.line_count}</span> },
-              { key: "unresolved", header: "Unresolved", render: (row) => row.unlinked_count + row.untyped_count ? <Chip cls="chip-warn">{row.unlinked_count + row.untyped_count}</Chip> : <Chip cls="chip-ok">0</Chip> },
-              { key: "amount", header: "Total", render: (row) => <span className="td-mono td-strong">{money(row.total_amount)}</span> },
-              { key: "status", header: "Status", render: (row) => statusChip(row.status) },
+              { key: "report", header: "Report", sortValue: (r) => r.period_year * 12 + r.period_month, render: (row) => <div className="cell-2"><span className="td-strong">{periodLabel(row.period_year, row.period_month)}</span><span className="c2-sub mono">{row.id}</span></div> },
+              { key: "file", header: "Source", sortValue: (r) => r.source_filename, render: (row) => <span className="td-mut">{row.source_filename}</span> },
+              { key: "progress", header: "Resolved", sortValue: (r) => r.line_count - r.unlinked_count - r.untyped_count, render: (row) => <span><strong>{row.line_count - row.unlinked_count - row.untyped_count}</strong> / {row.line_count}</span> },
+              { key: "unresolved", header: "Unresolved", sortValue: (r) => r.unlinked_count + r.untyped_count, render: (row) => row.unlinked_count + row.untyped_count ? <Chip cls="chip-warn">{row.unlinked_count + row.untyped_count}</Chip> : <Chip cls="chip-ok">0</Chip> },
+              { key: "amount", header: "Total", sortValue: (r) => r.total_amount, render: (row) => <span className="td-mono td-strong">{money(row.total_amount)}</span> },
+              { key: "status", header: "Status", sortValue: (r) => r.status, render: (row) => statusChip(row.status) },
             ]}
             renderMobile={(row) => (
               <MobileListItem
@@ -1045,12 +1049,12 @@ export function ProfitShareDetail({ id, nav }: { id: string; nav: NavFn }) {
             rows={visibleLines}
             getKey={(line) => line.id}
             columns={[
-              { key: "label", header: "Row Labels", render: (line) => <div className="cell-2"><span className="td-strong">{line.row_label}</span><span className="c2-sub">Excel row {line.source_row_number} · {line.match_note || "—"}</span></div> },
-              { key: "count", header: "MERCH_NO", render: (line) => <span className="td-mono">{line.merchant_count}</span> },
-              { key: "amount", header: "Profit Share", render: (line) => <span className="td-mono td-strong">{money(line.amount)}</span> },
-              { key: "customer", header: "Customer", render: (line) => line.customer ? <div className="cell-2"><span className="td-strong">{line.customer.name}</span><span className="c2-sub mono">{line.customer.id}</span></div> : <span className="td-mut">Not linked</span> },
-              { key: "type", header: "Type", render: (line) => line.customer?.type ? <Chip cls="chip-info">{line.customer.type}</Chip> : <span className="td-mut">—</span> },
-              { key: "resolution", header: "Resolution", render: resolutionChip },
+              { key: "label", header: "Row Labels", sortValue: (r) => r.row_label, render: (line) => <div className="cell-2"><span className="td-strong">{line.row_label}</span><span className="c2-sub">Excel row {line.source_row_number} · {line.match_note || "—"}</span></div> },
+              { key: "count", header: "MERCH_NO", sortValue: (r) => r.merchant_count, render: (line) => <span className="td-mono">{line.merchant_count}</span> },
+              { key: "amount", header: "Profit Share", sortValue: (r) => r.amount, render: (line) => <span className="td-mono td-strong">{money(line.amount)}</span> },
+              { key: "customer", header: "Customer", sortValue: (r) => r.customer?.name, render: (line) => line.customer ? <div className="cell-2"><span className="td-strong">{line.customer.name}</span><span className="c2-sub mono">{line.customer.id}</span></div> : <span className="td-mut">Not linked</span> },
+              { key: "type", header: "Type", sortValue: (r) => r.customer?.type, render: (line) => line.customer?.type ? <Chip cls="chip-info">{line.customer.type}</Chip> : <span className="td-mut">—</span> },
+              { key: "resolution", header: "Resolution", sortValue: (r) => r.resolution, render: resolutionChip },
               { key: "action", header: "", render: (line) => report.status === "Draft" && can("Profit Shares.Edit") ? <Btn sm variant="ghost" icon="link" onClick={() => setLinkLine(line)}>{line.customer ? "Replace" : "Link"}</Btn> : null },
             ]}
             renderMobile={(line) => (

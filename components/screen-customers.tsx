@@ -1,4 +1,5 @@
 /* Bumipay — Customer listing + detail + onboarding */
+import { useServerSort } from "./table-sorting";
 import { useCallback, useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field, MerchantStatus, MobileListItem, ResponsiveTable } from "./components";
@@ -336,6 +337,7 @@ export function Customers({ nav }: { nav: NavFn }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [details, setDetails] = useState<CustomerDetails | null>(null);
@@ -351,25 +353,30 @@ export function Customers({ nav }: { nav: NavFn }) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     api.customers.list({
+      ...sortParams,
       page,
       per_page: CUSTOMERS_PAGE_SIZE,
       query: q || undefined,
       status: status !== "All" ? status : undefined,
     })
       .then((p) => {
+        if (cancelled) return;
         setCustomers(p.items);
         setPages(p.pages);
         setTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, status]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, status, sortParams]);
 
   function resetPage() { setPage(1); }
 
   function handleCreate(c: CustomerOut) {
-    setCustomers((prev) => [c, ...prev]);
+    if (sort) refreshSort();
+    else setCustomers((prev) => [c, ...prev]);
     setNewIds((prev) => new Set([...prev, c.id]));
     setShowCreate(false);
     setOnboardingCustomer(c);
@@ -429,16 +436,17 @@ export function Customers({ nav }: { nav: NavFn }) {
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : customers.length === 0 ? <Empty icon="building" title="No customers match" /> : (
           <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
             rows={customers}
             getKey={(c) => c.id}
             onRowClick={(c) => nav("customer-detail", c.id)}
             columns={[
-              { key: "customer", header: "Customer", render: (c) => <div className="cell-2"><span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</span><span className="c2-sub mono">{c.id}</span></div> },
-              { key: "reg", header: "Reg No", mobileLabel: "Registration", render: (c) => <span className="td-mono td-mut">{c.reg_no || "—"}</span> },
-              { key: "merchants", header: "Merchants", render: (c) => <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
-              { key: "contact", header: "Contact", render: (c) => <span className="td-mut">{c.contact}</span> },
-              { key: "onboarded", header: "Onboarded", render: (c) => <span className="td-mono td-mut">{c.onboarded_date}</span> },
-              { key: "status", header: "Status", render: (c) => <CustomerStatus status={c.status} /> },
+              { key: "customer", header: "Customer", sortValue: (r) => r.name, render: (c) => <div className="cell-2"><span className="td-strong" style={{ display: "flex", alignItems: "center", gap: 7 }}>{c.name}{newIds.has(c.id) && <Chip cls="chip-ok" sq>New</Chip>}</span><span className="c2-sub mono">{c.id}</span></div> },
+              { key: "reg", header: "Reg No", sortValue: (r) => r.reg_no, mobileLabel: "Registration", render: (c) => <span className="td-mono td-mut">{c.reg_no || "—"}</span> },
+              { key: "merchants", header: "Merchants", sortValue: (r) => r.merchant_count, render: (c) => <span style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600 }}><Icon name="merchants" size={14} style={{ color: "var(--ink-3)" }} />{c.merchant_count}</span> },
+              { key: "contact", header: "Contact", sortValue: (r) => r.contact, render: (c) => <span className="td-mut">{c.contact}</span> },
+              { key: "onboarded", header: "Onboarded", sortValue: (r) => r.onboarded_date, render: (c) => <span className="td-mono td-mut">{c.onboarded_date}</span> },
+              { key: "status", header: "Status", sortValue: (r) => r.status, render: (c) => <CustomerStatus status={c.status} /> },
               ...(can("Customers.Hard Delete") ? [{
                 key: "actions", header: "", render: (c: CustomerOut) => (
                   <button
@@ -484,6 +492,7 @@ export function Customers({ nav }: { nav: NavFn }) {
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => {
             setCustomers((prev) => prev.filter((c) => c.id !== deleteTarget.id));
+            refreshSort();
             setTotal((prev) => Math.max(0, prev - 1));
             setDeleteTarget(null);
             api.customers.details().then(setDetails).catch(console.error);
@@ -690,13 +699,13 @@ export function CustomerDetail({ id, nav }: { id: string; nav: NavFn }) {
             getKey={(m) => m.id}
             onRowClick={(m) => nav("merchant-detail", m.id)}
             columns={[
-              { key: "merchant", header: "Merchant", render: (m) => <div className="cell-2"><span className="td-strong">{m.name}</span><span className="c2-sub mono">{m.id}</span></div> },
+              { key: "merchant", header: "Merchant", sortValue: (r) => r.name, render: (m) => <div className="cell-2"><span className="td-strong">{m.name}</span><span className="c2-sub mono">{m.id}</span></div> },
               // { key: "mid", header: "MID", render: (m) => <span className="td-mono td-mut">{merchantDisplayMid(m)}</span> },
-              { key: "bank", header: "Bank", render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
-              { key: "type", header: "Type", render: (m) => <span className="td-mut">{m.type}</span> },
-              { key: "terminals", header: "Terminals", render: (m) => <span className="td-mut">{m.terminal_count || "—"}</span> },
-              { key: "finance", header: "Finance", render: (m) => <MerchantStatus status={m.finance_status} /> },
-              { key: "status", header: "Status", render: (m) => <MerchantStatus status={m.status} /> },
+              { key: "bank", header: "Bank", sortValue: (r) => r.bank, render: (m) => <span style={{ display: "flex", gap: 7, alignItems: "center" }}><Icon name="bank" size={14} style={{ color: "var(--ink-3)" }} />{merchantDisplayBank(m)}</span> },
+              { key: "type", header: "Type", sortValue: (r) => r.type, render: (m) => <span className="td-mut">{m.type}</span> },
+              { key: "terminals", header: "Terminals", sortValue: (r) => r.terminal_count, render: (m) => <span className="td-mut">{m.terminal_count || "—"}</span> },
+              { key: "finance", header: "Finance", sortValue: (r) => r.finance_status, render: (m) => <MerchantStatus status={m.finance_status} /> },
+              { key: "status", header: "Status", sortValue: (r) => r.status, render: (m) => <MerchantStatus status={m.status} /> },
             ]}
             renderMobile={(m) => (
               <MobileListItem

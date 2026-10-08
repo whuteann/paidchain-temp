@@ -105,11 +105,11 @@ export function PaperRollBilling() {
             getKey={(r) => r.job_id}
             columns={[
               {
-                key: "job_id", header: "Job ID",
+                key: "job_id", header: "Job ID", sortValue: (r) => r.job_id,
                 render: (r) => <span className="td-mono td-strong">{r.job_id}</span>,
               },
               {
-                key: "merchant", header: "Merchant",
+                key: "merchant", header: "Merchant", sortValue: (r) => r.merchant_name,
                 render: (r) => (
                   <div className="cell-2">
                     <span className="td-strong">{r.merchant_name}</span>
@@ -118,19 +118,19 @@ export function PaperRollBilling() {
                 ),
               },
               {
-                key: "quantity", header: "Qty",
+                key: "quantity", header: "Qty", sortValue: (r) => r.quantity,
                 render: (r) => <span>{r.quantity}</span>,
               },
               {
-                key: "payment_target", header: "Pay by",
+                key: "payment_target", header: "Pay by", sortValue: (r) => r.payment_target,
                 render: (r) => <span className="td-mut">{r.payment_target || "—"}</span>,
               },
               {
-                key: "invoice_party", header: "Invoice party",
+                key: "invoice_party", header: "Invoice party", sortValue: (r) => r.invoice_party,
                 render: (r) => <span className="td-mut">{r.invoice_party || "—"}</span>,
               },
               {
-                key: "invoice_required", header: "Inv. req.",
+                key: "invoice_required", header: "Inv. req.", sortValue: (r) => r.invoice_required,
                 render: (r) => (
                   <span className="td-mut">
                     {r.invoice_required === null ? "—" : r.invoice_required ? "Yes" : "No"}
@@ -138,19 +138,19 @@ export function PaperRollBilling() {
                 ),
               },
               {
-                key: "invoice_status", header: "Inv. status",
+                key: "invoice_status", header: "Inv. status", sortValue: (r) => r.invoice_status,
                 render: (r) => <InvoiceStatusChip status={r.invoice_status} />,
               },
               {
-                key: "accounting_handling", header: "Accounting",
+                key: "accounting_handling", header: "Accounting", sortValue: (r) => r.accounting_handling,
                 render: (r) => <span className="td-mut">{r.accounting_handling || "—"}</span>,
               },
               {
-                key: "billing_reference", header: "Billing ref.",
+                key: "billing_reference", header: "Billing ref.", sortValue: (r) => r.billing_reference,
                 render: (r) => <span className="td-mono td-mut">{r.billing_reference || "—"}</span>,
               },
               {
-                key: "completed_at", header: "Completed",
+                key: "completed_at", header: "Completed", sortValue: (r) => r.completed_at,
                 render: (r) => <span className="td-mono td-mut">{formatDate(r.completed_at)}</span>,
               },
             ]}

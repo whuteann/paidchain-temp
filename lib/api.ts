@@ -1,3 +1,4 @@
+import type { SortParams } from "./table-sort";
 /* Bumipay — typed API client (OpenAPI 3.1.0) */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL;
@@ -229,6 +230,7 @@ export interface MerchantRef {
 }
 
 export interface TerminalRef {
+  id?: string;
   serial: string;
   serial_no?: string;
   brand?: string | null;
@@ -326,6 +328,8 @@ export interface DashboardActivityItem {
 
 export interface DashboardOut {
   total_active_merchants: number;
+  total_merchants: number;
+  total_jobs: number;
   open_jobs_count: number;
   open_jobs_by_type: Record<string, number>;
   terminal_status_breakdown: Record<string, number>;
@@ -393,7 +397,7 @@ export interface CustomerUpdate {
   status?: string | null;
 }
 
-export interface CustomerListParams {
+export interface CustomerListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -565,7 +569,7 @@ export interface ProfitSharePage {
   pages: number;
 }
 
-export interface ProfitShareListParams {
+export interface ProfitShareListParams extends SortParams {
   page?: number;
   per_page?: number;
   status?: string;
@@ -640,6 +644,7 @@ export interface MerchantMidAcceptanceOut {
   mdr_rate_id: string | null;
   mdr_rate: MdrOut | null;
   terminal_serial: string | null;
+  terminal_id?: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -654,6 +659,7 @@ export interface MerchantMidOut {
   mdr_rate: MdrOut | null;
   status: string;
   terminal_serial: string | null;
+  terminal_id?: string | null;
   created_at: string;
   updated_at: string;
   acceptances: MerchantMidAcceptanceOut[];
@@ -828,7 +834,7 @@ export interface MerchantUpdate {
   finance_status?: string | null;
 }
 
-export interface MerchantListParams {
+export interface MerchantListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -852,6 +858,7 @@ export interface MerchantDetails {
 }
 
 export interface MerchantTerminalOut {
+  id: string;
   serial: string;
   serial_no?: string;
   term_setting_id: string;
@@ -890,8 +897,8 @@ export interface MerchantJobOut {
   notes: string;
   customer: { id: string; name: string };
   merchant: { id: string; name: string };
-  terminal: { serial: string; brand: string; model: string } | null;
-  previous_terminal: { serial: string; brand: string; model: string } | null;
+  terminal: { id: string; serial: string; brand: string; model: string } | null;
+  previous_terminal: { id: string; serial: string; brand: string; model: string } | null;
 }
 
 export interface MerchantCommercialProfileOut {
@@ -1027,9 +1034,6 @@ export interface TermSettingOut {
   brand: string;
   model: string;
   category: string;
-  monthly_rental: number;
-  deposit: number;
-  setup_fee: number;
   units: number;
   active: boolean;
 }
@@ -1038,9 +1042,6 @@ export interface TermSettingCreate {
   brand: string;
   model: string;
   category: string;
-  monthly_rental: number;
-  deposit: number;
-  setup_fee: number;
   active?: boolean;
 }
 
@@ -1052,6 +1053,7 @@ export const termSettings = {
   update: (id: string, body: Partial<TermSettingCreate>) =>
     req<TermSettingOut>("PATCH", `/terminals/settings/${id}`, { body }),
   remove: (id: string) => req<void>("DELETE", `/terminals/settings/${id}`),
+  hardDelete: (id: string) => req<HardDeleteResult>("DELETE", `/terminals/settings/${id}/hard`),
 };
 
 // ─── SIM Settings ────────────────────────────────────────────────────────────
@@ -1083,6 +1085,7 @@ export const simSettings = {
 // ─── Terminals ────────────────────────────────────────────────────────────────
 
 export interface TerminalOut {
+  id: string;
   serial_no: string;
   serial?: string;
   brand: string;
@@ -1112,6 +1115,13 @@ export function terminalSerial(t: TerminalOut): string {
   return t.serial_no || t.serial || "";
 }
 
+/** Terminal.id is the stable, URL-safe identifier — use this for navigation and
+ * API calls. terminalSerial() stays for display and human-entered search/lookup
+ * (e.g. picking a device by its physical serial during job device assignment). */
+export function terminalId(t: TerminalOut): string {
+  return t.id;
+}
+
 // A terminal's TID/MID is no longer set at registration — it's registered bare (In
 // Stock, no merchant yet) and only gets a TID/MID once a MerchantMid/Acceptance is
 // mounted on it (Installation Job, or the standalone mount endpoint below).
@@ -1124,6 +1134,7 @@ export interface TerminalCreate {
 }
 
 export interface TerminalUpdate {
+  term_setting_id?: string;
   status?: string;
   merchant_id?: string | null;
   location?: string;
@@ -1133,12 +1144,13 @@ export interface TerminalUpdate {
   condition_note?: string;
 }
 
-export interface TerminalListParams {
+export interface TerminalListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
   status?: string;
   brand?: string;
+  term_setting_id?: string;
 }
 
 export interface TerminalPage {
@@ -1175,18 +1187,18 @@ export interface TerminalBulkCreate {
 
 export const terminals = {
   list: (p?: TerminalListParams) => req<TerminalPage>("GET", "/terminals", { params: p }),
-  get: (serial: string) => req<TerminalOut>("GET", `/terminals/${serial}`),
+  get: (id: string) => req<TerminalOut>("GET", `/terminals/${encodeURIComponent(id)}`),
   downloadTemplate: () => reqBlob("GET", "/terminals/template"),
-  simCard: (serial: string) => req<SimCardOut>("GET", `/terminals/${serial}/simcard`),
+  simCard: (id: string) => req<SimCardOut>("GET", `/terminals/${encodeURIComponent(id)}/simcard`),
   create: (body: TerminalCreate) => req<TerminalOut>("POST", "/terminals", { body }),
   bulkCreate: (body: TerminalBulkCreate) => req<BulkCreateResult>("POST", "/terminals/bulk", { body }),
-  update: (serial: string, body: TerminalUpdate) =>
-    req<TerminalOut>("PATCH", `/terminals/${serial}`, { body }),
-  assignMerchant: (serial: string, body: TerminalMerchantAssign) =>
-    req<TerminalOut>("POST", `/terminals/${serial}/merchant`, { body }),
-  activity: (serial: string) => req<ActivityOut[]>("GET", `/terminals/${serial}/activity`),
+  update: (id: string, body: TerminalUpdate) =>
+    req<TerminalOut>("PATCH", `/terminals/${encodeURIComponent(id)}`, { body }),
+  assignMerchant: (id: string, body: TerminalMerchantAssign) =>
+    req<TerminalOut>("POST", `/terminals/${encodeURIComponent(id)}/merchant`, { body }),
+  activity: (id: string) => req<ActivityOut[]>("GET", `/terminals/${encodeURIComponent(id)}/activity`),
   linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
-  unlinkSim: (serial: string) => req<TerminalOut>("DELETE", `/terminals/${serial}/simcard`),
+  unlinkSim: (id: string) => req<TerminalOut>("DELETE", `/terminals/${encodeURIComponent(id)}/simcard`),
 };
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -1236,9 +1248,9 @@ export interface JobTerminalOut {
   mid: string | null;
   mdr_rate_id: string | null;
   previous_terminal_status: string | null;
-  term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
-  terminal: { serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
-  service_terminal: { serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
+  term_setting: { id: string; brand: string; model: string; category: string } | null;
+  terminal: { id: string; serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
+  service_terminal: { id: string; serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
   mid_source: AvailableTidOut | null;
 }
 
@@ -1266,10 +1278,10 @@ export interface JobOut {
   bank: string;
   customer: { id: string; name: string } | null;
   merchant: { id: string; name: string; bank?: string | null };
-  terminal: { serial: string; brand: string; model: string } | null;
-  previous_terminal: { serial: string; brand: string; model: string } | null;
+  terminal: { id: string; serial: string; brand: string; model: string } | null;
+  previous_terminal: { id: string; serial: string; brand: string; model: string } | null;
   merchant_detail: { id: string; name: string; bank: string } | null;
-  term_setting: { id: string; brand: string; model: string; category: string; monthly_rental: number } | null;
+  term_setting: { id: string; brand: string; model: string; category: string } | null;
   job_terminals?: JobTerminalOut[];
   shipment_tracking?: ShipmentTrackingOut | null;
   print_form: boolean;
@@ -1377,12 +1389,7 @@ export interface EscalateToReplacementBody {
   notes?: string;
 }
 
-export interface EscalateToReplacementResult {
-  repair_job: JobOut;
-  replacement_job: JobOut;
-}
-
-export interface JobListParams {
+export interface JobListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -1436,7 +1443,7 @@ export const jobs = {
     }),
 
   escalateToReplacement: (id: string, body: EscalateToReplacementBody) =>
-    req<EscalateToReplacementResult>("POST", `/jobs/${id}/escalate-to-replacement`, { body }),
+    req<JobOut>("POST", `/jobs/${id}/escalate-to-replacement`, { body }),
 
   cancel: (id: string, body: JobCancel = {}) =>
     req<JobOut>("POST", `/jobs/${id}/cancel`, { body }),
@@ -1513,7 +1520,7 @@ export interface SimCardUpdate {
   status?: string | null;
 }
 
-export interface SimCardListParams {
+export interface SimCardListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -1630,7 +1637,7 @@ export interface RentalOut {
   id: string;
   customer: { id: string; name: string; tin: string };
   merchant: { id: string; name: string; mid: string };
-  terminal: { serial: string; brand: string; model: string; tid: string | null };
+  terminal: { id: string; serial: string; brand: string; model: string; tid: string | null };
   plan: string;
   rental_plan_id: string | null;
   plan_period: string | null;
@@ -1667,7 +1674,7 @@ export interface RentalUpdate {
 
 
 
-export interface RentalListParams {
+export interface RentalListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -1708,7 +1715,7 @@ export interface PayoutOut {
   gross: number;
   fee: number;
   net: number;
-  txns: number;
+  txn_count: number;
   period_start: string;
   period_end: string;
   status: string;
@@ -1740,7 +1747,7 @@ export interface PayoutDetails {
   pending_count: number;
 }
 
-export interface PayoutListParams {
+export interface PayoutListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -1901,7 +1908,9 @@ export interface ReferralProcessingUpdate {
   next_follow_up_date?: string | null;
 }
 
-export interface ReferralListParams {
+export interface ReferralListParams extends SortParams {
+  lead_status?: string;
+  commission_status?: string;
   page?: number;
   per_page?: number;
   query?: string | null;
@@ -1940,13 +1949,13 @@ export interface ReferralBonusBatchOut {
   status: string;
   total_amount?: number;
   line_count?: number;
-  generated_at?: string | null;
+  created_at?: string | null;
   paid_date?: string | null;
   payment_proof_filename?: string | null;
   lines?: ReferralBonusLineOut[];
 }
 
-export interface ReferralBonusBatchListParams {
+export interface ReferralBonusBatchListParams extends SortParams {
   page?: number;
   per_page?: number;
   year?: number;
@@ -2052,7 +2061,7 @@ export interface UserOut {
   role_id?: string | null;
   status: string;
   last_active: string | null;
-  jobs: number;
+  open_jobs_count: number;
   bank_ids?: string[];
   banks?: string[];
 }
@@ -2075,7 +2084,7 @@ export interface UserUpdate {
   banks?: string[];
 }
 
-export interface UserListParams {
+export interface UserListParams extends SortParams {
   page?: number;
   per_page?: number;
   query?: string;
@@ -2141,9 +2150,9 @@ export interface AuditLogOut {
   entity_id: string | null;
 }
 
-export interface AuditLogListParams {
+export interface AuditLogListParams extends SortParams {
   page?: number;
-  size?: number;
+  per_page?: number;
   query?: string;
   type?: string;
   entity_type?: string;

@@ -1,5 +1,6 @@
 /* Bumipay — Referral lead management + bonus batches */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useServerSort } from "./table-sorting";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "./icons";
 import { Btn, Card, Chip, Empty, Entity, Field, Modal, PageHead, Pagination, SearchBox, Toolbar, useToast, MobileListItem, ResponsiveTable, SingleFileDropzone } from "./components";
@@ -870,6 +871,7 @@ export function Referrals({ nav }: { nav: NavFn }) {
   const [rows, setRows] = useState<ReferralOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
@@ -877,25 +879,27 @@ export function Referrals({ nav }: { nav: NavFn }) {
   const [recordStatus, setRecordStatus] = useState("All");
   const [commissionStatus, setCommissionStatus] = useState("All");
   const [showCreate, setShowCreate] = useState(false);
-  const visibleRows = useMemo(() => rows.filter((r) => {
-    if (leadStatus !== "All" && r.lead_status !== leadStatus) return false;
-    if (commissionStatus !== "All" && r.commission_status !== commissionStatus) return false;
-    return true;
-  }), [commissionStatus, leadStatus, rows]);
+  const visibleRows = rows;
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     api.referrals.list({
+      ...sortParams,
       page,
       per_page: REFERRALS_PAGE_SIZE,
       query: q || undefined,
       status: recordStatus === "All" ? undefined : recordStatus,
+      lead_status: leadStatus === "All" ? undefined : leadStatus,
+      commission_status: commissionStatus === "All" ? undefined : commissionStatus,
     }).then((p) => {
+        if (cancelled) return;
       setRows(p.items);
       setTotal(p.total);
       setPages(p.pages || 1);
-    }).catch(console.error).finally(() => setLoading(false));
-  }, [page, q, recordStatus]);
+    }).catch(console.error).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, recordStatus, leadStatus, commissionStatus, sortParams]);
 
   function resetPage(v: string, setter: (value: string) => void) {
     setter(v);
@@ -929,19 +933,20 @@ export function Referrals({ nav }: { nav: NavFn }) {
           <Empty icon="link" title="No referrals match" sub="Try a different search or filter" />
         ) : (
           <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
             rows={visibleRows}
             getKey={(r) => r.id}
             onRowClick={(r) => nav("referral-detail", r.id)}
             columns={[
-              { key: "referral", header: "Referral", render: (r) => <span className="td-mono td-strong">{r.id}</span> },
-              { key: "merchant", header: "Merchant", render: (r) => <Entity name={r.merchant_name} sub={r.contact_name || r.business_reg_no || r.lead_type} /> },
-              { key: "referrer", header: "Referrer", render: (r) => userLabel(r.referrer) },
-              { key: "processor", header: "Processor", render: (r) => r.processor ? userLabel(r.processor) : <span className="td-mut">Unassigned</span> },
-              { key: "lead", header: "Lead Progress", render: (r) => statusChip(r.lead_status, "lead") },
-              { key: "record", header: "Record Status", render: (r) => statusChip(r.status, "record") },
-              { key: "commission", header: "Commission", render: (r) => statusChip(r.commission_status, "commission") },
-              { key: "linked", header: "Linked", render: (r) => r.merchant_id || r.merchant ? <Chip cls="chip-ok">Linked</Chip> : <Chip cls="chip-neutral">No</Chip> },
-              { key: "reversal", header: "Reversal", render: (r) => r.reversal_required ? <Chip cls="chip-bad">Required</Chip> : <span className="td-mut">-</span> },
+              { key: "referral", header: "Referral", sortValue: (r) => r.id, render: (r) => <span className="td-mono td-strong">{r.id}</span> },
+              { key: "merchant", header: "Merchant", sortValue: (r) => r.merchant_name, render: (r) => <Entity name={r.merchant_name} sub={r.contact_name || r.business_reg_no || r.lead_type} /> },
+              { key: "referrer", header: "Referrer", sortValue: (r) => r.referrer?.name, render: (r) => userLabel(r.referrer) },
+              { key: "processor", header: "Processor", sortValue: (r) => r.processor?.name, render: (r) => r.processor ? userLabel(r.processor) : <span className="td-mut">Unassigned</span> },
+              { key: "lead", header: "Lead Progress", sortValue: (r) => r.lead_status, render: (r) => statusChip(r.lead_status, "lead") },
+              { key: "record", header: "Record Status", sortValue: (r) => r.status, render: (r) => statusChip(r.status, "record") },
+              { key: "commission", header: "Commission", sortValue: (r) => r.commission_status, render: (r) => statusChip(r.commission_status, "commission") },
+              { key: "linked", header: "Linked", sortValue: (r) => Boolean(r.merchant_id || r.merchant), render: (r) => r.merchant_id || r.merchant ? <Chip cls="chip-ok">Linked</Chip> : <Chip cls="chip-neutral">No</Chip> },
+              { key: "reversal", header: "Reversal", sortValue: (r) => r.reversal_required, render: (r) => r.reversal_required ? <Chip cls="chip-bad">Required</Chip> : <span className="td-mut">-</span> },
             ]}
             renderMobile={(r) => (
               <MobileListItem
@@ -1196,6 +1201,7 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
   const [rows, setRows] = useState<ReferralBonusBatchOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [year, setYear] = useState(String(now.getFullYear()));
@@ -1204,18 +1210,22 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
   const [showGenerate, setShowGenerate] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     api.referralBonusBatches.list({
+      ...sortParams,
       page,
       per_page: BATCHES_PAGE_SIZE,
       year: year ? Number(year) : undefined,
       quarter: quarter === "All" ? undefined : Number(quarter),
       status: status === "All" ? undefined : status,
     }).then((p) => {
+        if (cancelled) return;
       setRows(p.items);
       setTotal(p.total);
       setPages(p.pages || 1);
-    }).catch(console.error).finally(() => setLoading(false));
-  }, [page, year, quarter, status]);
+    }).catch(console.error).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, year, quarter, status, sortParams]);
 
   function resetPage(v: string, setter: (value: string) => void) {
     setter(v);
@@ -1247,17 +1257,18 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
           <Empty icon="cash" title="No batches match" sub="Try a different year, quarter or status" />
         ) : (
           <ResponsiveTable
+            sort={sort} onSortChange={onSortChange}
             rows={rows}
             getKey={(b) => b.id}
             onRowClick={(b) => nav("referral-bonus-batch-detail", b.id)}
             columns={[
-              { key: "batch", header: "Batch", render: (b) => <span className="td-mono td-strong">{b.id}</span> },
-              { key: "quarter", header: "Quarter", render: (b) => <>{b.year} Q{b.quarter}</> },
-              { key: "status", header: "Status", render: (b) => statusChip(b.status, "batch") },
-              { key: "lines", header: "Lines", render: (b) => b.line_count ?? b.lines?.length ?? 0 },
-              { key: "total", header: "Total", render: (b) => <span className="td-strong">{money(b.total_amount)}</span> },
-              { key: "generated", header: "Generated", render: (b) => <span className="td-mut">{fmtDate(b.generated_at)}</span> },
-              { key: "paid", header: "Paid Date", render: (b) => <span className="td-mut">{fmtDate(b.paid_date)}</span> },
+              { key: "batch", header: "Batch", sortValue: (r) => r.id, render: (b) => <span className="td-mono td-strong">{b.id}</span> },
+              { key: "quarter", header: "Quarter", sortValue: (r) => r.year * 4 + r.quarter, render: (b) => <>{b.year} Q{b.quarter}</> },
+              { key: "status", header: "Status", sortValue: (r) => r.status, render: (b) => statusChip(b.status, "batch") },
+              { key: "lines", header: "Lines", sortValue: (r) => r.line_count ?? r.lines?.length ?? 0, render: (b) => b.line_count ?? b.lines?.length ?? 0 },
+              { key: "total", header: "Total", sortValue: (r) => Number(r.total_amount), render: (b) => <span className="td-strong">{money(b.total_amount)}</span> },
+              { key: "generated", header: "Generated", sortValue: (r) => r.created_at, render: (b) => <span className="td-mut">{fmtDate(b.created_at)}</span> },
+              { key: "paid", header: "Paid Date", sortValue: (r) => r.paid_date, render: (b) => <span className="td-mut">{fmtDate(b.paid_date)}</span> },
             ]}
             renderMobile={(b) => (
               <MobileListItem
@@ -1267,7 +1278,7 @@ export function ReferralBonusBatches({ nav }: { nav: NavFn }) {
                 meta={[
                   { label: "Lines", value: b.line_count ?? b.lines?.length ?? 0 },
                   { label: "Total", value: <span className="td-strong">{money(b.total_amount)}</span> },
-                  { label: "Generated", value: fmtDate(b.generated_at) },
+                  { label: "Generated", value: fmtDate(b.created_at) },
                   { label: "Paid Date", value: fmtDate(b.paid_date) },
                 ]}
                 onClick={() => nav("referral-bonus-batch-detail", b.id)}
@@ -1290,13 +1301,13 @@ function BatchLinesTable({ lines }: { lines: ReferralBonusLineOut[] }) {
       rows={lines}
       getKey={(line, index) => line.id || line.line_id || index}
       columns={[
-        { key: "line", header: "Line", render: (line) => <span className="td-mono td-strong">{line.line_id || line.id}</span> },
-        { key: "role", header: "Role", render: (line) => line.commission_role },
-        { key: "staff", header: "Staff", render: (line) => <Entity name={line.staff_name} sub={line.staff_email || line.staff_user_id} slate /> },
-        { key: "merchant", header: "Merchant", render: (line) => <div className="cell-2"><span className="td-strong">{line.merchant_name}</span><span className="c2-sub">{line.merchant_id || "-"}</span></div> },
-        { key: "referral", header: "Referral", render: (line) => <span className="td-mono">{line.referral_id}</span> },
-        { key: "amount", header: "Amount", render: (line) => <span className="td-strong" style={{ color: Number(line.amount) < 0 ? "var(--bad)" : undefined }}>{money(line.amount)}</span> },
-        { key: "reason", header: "Reason", render: (line) => <span className="td-mut">{fieldValue(line.reason)}</span> },
+        { key: "line", header: "Line", sortValue: (r) => r.line_id || r.id, render: (line) => <span className="td-mono td-strong">{line.line_id || line.id}</span> },
+        { key: "role", header: "Role", sortValue: (r) => r.commission_role, render: (line) => line.commission_role },
+        { key: "staff", header: "Staff", sortValue: (r) => r.staff_name, render: (line) => <Entity name={line.staff_name} sub={line.staff_email || line.staff_user_id} slate /> },
+        { key: "merchant", header: "Merchant", sortValue: (r) => r.merchant_name, render: (line) => <div className="cell-2"><span className="td-strong">{line.merchant_name}</span><span className="c2-sub">{line.merchant_id || "-"}</span></div> },
+        { key: "referral", header: "Referral", sortValue: (r) => r.referral_id, render: (line) => <span className="td-mono">{line.referral_id}</span> },
+        { key: "amount", header: "Amount", sortValue: (r) => Number(r.amount), render: (line) => <span className="td-strong" style={{ color: Number(line.amount) < 0 ? "var(--bad)" : undefined }}>{money(line.amount)}</span> },
+        { key: "reason", header: "Reason", sortValue: (r) => r.reason, render: (line) => <span className="td-mut">{fieldValue(line.reason)}</span> },
       ]}
       renderMobile={(line) => (
         <MobileListItem
@@ -1374,7 +1385,7 @@ export function ReferralBonusBatchDetail({ id, nav }: { id: string; nav: NavFn }
             <h1 className="page-title">{batch.year} Q{batch.quarter} Referral Bonus</h1>
             {statusChip(batch.status, "batch")}
           </div>
-          <p className="page-sub">{batch.id} · generated {fmtDate(batch.generated_at)}</p>
+          <p className="page-sub">{batch.id} · generated {fmtDate(batch.created_at)}</p>
         </div>
         <div className="page-head-actions">
           {can("Referral Bonuses.Export") && <Btn variant="ghost" icon="download" disabled={exporting} onClick={exportCsv}>{exporting ? "Exporting..." : "Export CSV"}</Btn>}

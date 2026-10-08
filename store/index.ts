@@ -10,6 +10,7 @@ import {
   REGISTER,
 } from "redux-persist";
 import authReducer from "./authSlice";
+import navCountsReducer from "./navCountsSlice";
 
 // localStorage is browser-only; use a no-op for SSR
 const createNoopStorage = () => ({
@@ -24,10 +25,10 @@ const storage =
       (require("redux-persist/lib/storage").default as typeof import("redux-persist/lib/storage").default)
     : createNoopStorage();
 
-const rootReducer = combineReducers({ auth: authReducer });
+const rootReducer = combineReducers({ auth: authReducer, navCounts: navCountsReducer });
 
 const persistedReducer = persistReducer(
-  { key: "pc", version: 1, storage },
+  { key: "pc", version: 1, storage, blacklist: ["navCounts"] },
   rootReducer
 );
 

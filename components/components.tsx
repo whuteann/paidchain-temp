@@ -1,3 +1,5 @@
+import { SortableTable, type SortColumn } from "./table-sorting";
+import type { SortState } from "@/lib/table-sort";
 /* Bumipay — shared UI components */
 import { useState, useRef, useEffect, useCallback, ReactNode } from "react";
 import { Icon } from "./icons";
@@ -428,15 +430,15 @@ export function MobileListItem({ title, sub, status, meta = [], actions, onClick
   return <div className={"mobile-list-item " + className}>{content}</div>;
 }
 
-interface ResponsiveTableColumn<T> {
-  key: string;
-  header: ReactNode;
+interface ResponsiveTableColumn<T> extends SortColumn<T> {
   render: (row: T) => ReactNode;
   mobileLabel?: string;
   hideOnMobile?: boolean;
 }
 
 interface ResponsiveTableProps<T> {
+  sort?: SortState;
+  onSortChange?: (sort: SortState) => void;
   rows: T[];
   columns: ResponsiveTableColumn<T>[];
   getKey: (row: T, index: number) => string | number;
@@ -446,49 +448,53 @@ interface ResponsiveTableProps<T> {
   className?: string;
 }
 
-export function ResponsiveTable<T>({ rows, columns, getKey, onRowClick, renderMobile, empty, className = "" }: ResponsiveTableProps<T>) {
+export function ResponsiveTable<T>({ rows, columns, getKey, onRowClick, renderMobile, empty, className = "", sort, onSortChange }: ResponsiveTableProps<T>) {
   if (!rows.length && empty) return <>{empty}</>;
 
   return (
-    <div className={"responsive-table " + className}>
-      <div className="tbl-wrap responsive-table-desktop">
-        <table className="tbl">
-          <thead>
-            <tr>
-              {columns.map((column) => <th key={column.key}>{column.header}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={getKey(row, index)} className={onRowClick ? "clickable" : ""} onClick={() => onRowClick?.(row)}>
-                {columns.map((column) => (
-                  <td key={column.key} data-label={typeof column.mobileLabel === "string" ? column.mobileLabel : typeof column.header === "string" ? column.header : undefined}>
-                    {column.render(row)}
-                  </td>
+    <SortableTable rows={rows} columns={columns} sort={sort} onSortChange={onSortChange}>
+      {(sortedRows, headers) => (
+        <div className={"responsive-table " + className}>
+          <div className="tbl-wrap responsive-table-desktop">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  {headers}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.map((row, index) => (
+                  <tr key={getKey(row, index)} className={onRowClick ? "clickable" : ""} onClick={() => onRowClick?.(row)}>
+                    {columns.map((column) => (
+                      <td key={column.key} data-label={typeof column.mobileLabel === "string" ? column.mobileLabel : typeof column.header === "string" ? column.header : undefined}>
+                        {column.render(row)}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mobile-list responsive-table-mobile">
-        {rows.map((row, index) => (
-          <div key={getKey(row, index)}>
-            {renderMobile ? renderMobile(row, index) : (
-              <MobileListItem
-                title={columns[0]?.render(row)}
-                meta={columns.slice(1).filter((column) => !column.hideOnMobile).map((column) => ({
-                  label: column.mobileLabel || (typeof column.header === "string" ? column.header : column.key),
-                  value: column.render(row),
-                }))}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                chevron={Boolean(onRowClick)}
-              />
-            )}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="mobile-list responsive-table-mobile">
+            {sortedRows.map((row, index) => (
+              <div key={getKey(row, index)}>
+                {renderMobile ? renderMobile(row, index) : (
+                  <MobileListItem
+                    title={columns[0]?.render(row)}
+                    meta={columns.slice(1).filter((column) => !column.hideOnMobile).map((column) => ({
+                      label: column.mobileLabel || (typeof column.header === "string" ? column.header : column.key),
+                      value: column.render(row),
+                    }))}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    chevron={Boolean(onRowClick)}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </SortableTable>
   );
 }
 

@@ -1,4 +1,5 @@
 /* Bumipay — Rental listing + detail + create modal */
+import { SortableTable, useServerSort } from "./table-sorting";
 import { useState, useEffect } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, Pagination, Empty, Chip, Modal, Field } from "./components";
@@ -53,7 +54,7 @@ function CreateRentalModal({ onClose, onCreate }: { onClose: () => void; onCreat
       id: "RNT-" + Math.floor(4100 + Math.random() * 400),
       customer: { id: c.id, name: c.name, tin: c.tin || "" },
       merchant: { id: m.id, name: m.name, mid: m.mid },
-      terminal: { serial: t.serial, brand: t.brand, model: t.model, tid: t.tid || null },
+      terminal: { id: t.serial, serial: t.serial, brand: t.brand, model: t.model, tid: t.tid || null },
       plan: form.plan,
       rental_plan_id: null,
       plan_period: null,
@@ -245,6 +246,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
+  const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
@@ -252,20 +254,24 @@ export function Rentals({ nav }: { nav: NavFn }) {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     api.rentals.list({
+      ...sortParams,
       page,
       per_page: RENTALS_PAGE_SIZE,
       query: q || undefined,
       status: status !== "All" ? status : undefined,
     })
       .then((p) => {
+        if (cancelled) return;
         setRentals(p.items);
         setPages(p.pages);
         setTotal(p.total);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [page, q, status]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, q, status, sortParams]);
 
   function resetPage() {
     setLoading(true);
@@ -289,7 +295,8 @@ export function Rentals({ nav }: { nav: NavFn }) {
     const matchesQuery = !q || hay.includes(q.toLowerCase());
     const matchesStatus = status === "All" || r.status === status;
     const matchesCurrentFilters = matchesQuery && matchesStatus;
-    setRentals((prev) => page === 1 && matchesCurrentFilters ? [r, ...prev].slice(0, RENTALS_PAGE_SIZE) : prev);
+    if (sort) refreshSort();
+    else setRentals((prev) => page === 1 && matchesCurrentFilters ? [r, ...prev].slice(0, RENTALS_PAGE_SIZE) : prev);
     setNewIds((prev) => new Set([...prev, r.id]));
     if (matchesCurrentFilters) {
       const nextTotal = total + 1;
@@ -342,48 +349,60 @@ export function Rentals({ nav }: { nav: NavFn }) {
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
         ) : rentals.length === 0 ? <Empty icon="receipt" title="No rentals match" /> : (
           <div className="tbl-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>{["Rental ID","Customer","Merchant","Terminal","Plan","Monthly Rate","Start Date","Status",""].map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {rentals.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                        <span className="td-mono td-strong">{r.id}</span>
-                        {newIds.has(r.id) && <Chip cls="chip-ok" sq>New</Chip>}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong">{r.customer.name}</span>
-                        <span className="c2-sub mono">{r.customer.id}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong">{r.merchant.name}</span>
-                        <span className="c2-sub mono">{r.merchant.mid}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="cell-2">
-                        <span className="td-strong">{r.terminal.brand} {r.terminal.model}</span>
-                        <span className="c2-sub mono">{r.terminal.serial}</span>
-                      </div>
-                    </td>
-                    <td className="td-mut">{r.plan}</td>
-                    <td className="td-mono td-strong">{money(r.monthly_rate)}</td>
-                    <td className="td-mono td-mut">{r.start_date}</td>
-                    <td><RentalStatus status={r.status} /></td>
-                    <td>
-                      <Btn variant="ghost" sm icon="eye" onClick={() => nav("rental-detail", r.id)}>View</Btn>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <SortableTable rows={rentals} sort={sort} onSortChange={onSortChange} columns={[
+              { key: "Rental ID", header: "Rental ID", sortValue: (r) => r.id },
+              { key: "Customer", header: "Customer", sortValue: (r) => r.customer.name },
+              { key: "Merchant", header: "Merchant", sortValue: (r) => r.merchant.name },
+              { key: "Terminal", header: "Terminal", sortValue: (r) => [r.terminal.brand, r.terminal.model].join(" ") },
+              { key: "Plan", header: "Plan", sortValue: (r) => r.plan },
+              { key: "Monthly Rate", header: "Monthly Rate", sortValue: (r) => r.monthly_rate },
+              { key: "Start Date", header: "Start Date", sortValue: (r) => r.start_date },
+              { key: "Status", header: "Status", sortValue: (r) => r.status },
+              { key: "actions", header: "" }
+            ]}>
+              {(sortedRows, headers) => (
+                <table className="tbl">
+                  <thead><tr>{headers}</tr></thead>
+                  <tbody>
+                    {sortedRows.map((r) => (
+                      <tr key={r.id}>
+                        <td>
+                          <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                            <span className="td-mono td-strong">{r.id}</span>
+                            {newIds.has(r.id) && <Chip cls="chip-ok" sq>New</Chip>}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="cell-2">
+                            <span className="td-strong">{r.customer.name}</span>
+                            <span className="c2-sub mono">{r.customer.id}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="cell-2">
+                            <span className="td-strong">{r.merchant.name}</span>
+                            <span className="c2-sub mono">{r.merchant.mid}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="cell-2">
+                            <span className="td-strong">{r.terminal.brand} {r.terminal.model}</span>
+                            <span className="c2-sub mono">{r.terminal.serial}</span>
+                          </div>
+                        </td>
+                        <td className="td-mut">{r.plan}</td>
+                        <td className="td-mono td-strong">{money(r.monthly_rate)}</td>
+                        <td className="td-mono td-mut">{r.start_date}</td>
+                        <td><RentalStatus status={r.status} /></td>
+                        <td>
+                          <Btn variant="ghost" sm icon="eye" onClick={() => nav("rental-detail", r.id)}>View</Btn>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </SortableTable>
           </div>
         )}
         <Pagination total={total} shown={rentals.length} page={page} pages={pages} onPageChange={changePage} />
