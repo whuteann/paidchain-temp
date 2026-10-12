@@ -55,6 +55,7 @@ function CreateRentalModal({ onClose, onCreate }: { onClose: () => void; onCreat
       customer: { id: c.id, name: c.name, tin: c.tin || "" },
       merchant: { id: m.id, name: m.name, mid: m.mid },
       terminal: { id: t.serial, serial: t.serial, brand: t.brand, model: t.model, tid: t.tid || null },
+      connection_type: "Rental",
       plan: form.plan,
       rental_plan_id: null,
       plan_period: null,
@@ -245,6 +246,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
+  const [connectionType, setConnectionType] = useState("All");
   const [page, setPage] = useState(1);
   const { sort, onSortChange, sortParams, refreshSort } = useServerSort(setPage, () => setLoading(true));
   const [pages, setPages] = useState(1);
@@ -261,6 +263,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
       per_page: RENTALS_PAGE_SIZE,
       query: q || undefined,
       status: status !== "All" ? status : undefined,
+      connection_type: connectionType !== "All" ? connectionType : undefined,
     })
       .then((p) => {
         if (cancelled) return;
@@ -271,7 +274,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
       .catch(console.error)
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [page, q, status, sortParams]);
+  }, [page, q, status, connectionType, sortParams]);
 
   function resetPage() {
     setLoading(true);
@@ -286,7 +289,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
   const stats = {
     total,
     active:  rentals.filter((r) => r.status === "Active").length,
-    revenue: rentals.filter((r) => r.status === "Active").reduce((a, r) => a + r.monthly_rate, 0),
+    revenue: rentals.filter((r) => r.status === "Active").reduce((a, r) => a + (r.monthly_rate ?? 0), 0),
     ended:   rentals.filter((r) => r.status === "Ended").length,
   };
 
@@ -310,8 +313,8 @@ export function Rentals({ nav }: { nav: NavFn }) {
   return (
     <div>
       <PageHead
-        title="Rentals"
-        sub="Terminal rental agreements · customer, merchant and device billing relationships"
+        title="Terminal Connections"
+        sub="Terminal–Merchant connections · Rental billing or MDR Split"
         actions={<>
           {can("Rentals.Export") && <Btn variant="ghost" icon="download" onClick={() => setShowExport(true)}>Export</Btn>}
           {/* <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>Create Rental</Btn> */}
@@ -343,7 +346,12 @@ export function Rentals({ nav }: { nav: NavFn }) {
               <option key={s} value={s}>{s === "All" ? "All Statuses" : s}</option>
             ))}
           </select>
-          <span className="tb-meta">{loading ? "Loading…" : `${total} rentals`}</span>
+          <select className="select" value={connectionType} onChange={(e) => { setConnectionType(e.target.value); resetPage(); }}>
+            {["All", "Rental", "MDR Split"].map((t) => (
+              <option key={t} value={t}>{t === "All" ? "All Types" : t}</option>
+            ))}
+          </select>
+          <span className="tb-meta">{loading ? "Loading…" : `${total} connections`}</span>
         </Toolbar>
         {loading ? (
           <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
@@ -354,6 +362,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
               { key: "Customer", header: "Customer", sortValue: (r) => r.customer.name },
               { key: "Merchant", header: "Merchant", sortValue: (r) => r.merchant.name },
               { key: "Terminal", header: "Terminal", sortValue: (r) => [r.terminal.brand, r.terminal.model].join(" ") },
+              { key: "Type", header: "Type", sortValue: (r) => r.connection_type },
               { key: "Plan", header: "Plan", sortValue: (r) => r.plan },
               { key: "Monthly Rate", header: "Monthly Rate", sortValue: (r) => r.monthly_rate },
               { key: "Start Date", header: "Start Date", sortValue: (r) => r.start_date },
@@ -390,8 +399,9 @@ export function Rentals({ nav }: { nav: NavFn }) {
                             <span className="c2-sub mono">{r.terminal.serial}</span>
                           </div>
                         </td>
+                        <td><Chip cls={r.connection_type === "MDR Split" ? "chip-indigo" : "chip-neutral"}>{r.connection_type}</Chip></td>
                         <td className="td-mut">{r.plan}</td>
-                        <td className="td-mono td-strong">{money(r.monthly_rate)}</td>
+                        <td className="td-mono td-strong">{r.monthly_rate != null ? money(r.monthly_rate) : "—"}</td>
                         <td className="td-mono td-mut">{r.start_date}</td>
                         <td><RentalStatus status={r.status} /></td>
                         <td>
@@ -500,6 +510,8 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [toast, setToast] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [docBusy, setDocBusy] = useState<"invoice" | "einvoice" | null>(null);
+  const [showTypeConfirm, setShowTypeConfirm] = useState(false);
+  const [togglingType, setTogglingType] = useState(false);
 
   useEffect(() => {
     api.rentals.get(id)
@@ -536,6 +548,21 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
   async function refreshRental() {
     const next = await api.rentals.get(id);
     setRental(next);
+  }
+
+  async function toggleConnectionType() {
+    const nextType = rental!.connection_type === "Rental" ? "MDR Split" : "Rental";
+    setTogglingType(true);
+    try {
+      const updated = await api.rentals.update(rental!.id, { connection_type: nextType });
+      setRental(updated);
+      setShowTypeConfirm(false);
+      showToast(`Switched to ${nextType}`);
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : "Failed to change connection type");
+    } finally {
+      setTogglingType(false);
+    }
   }
 
   function openDocument(blob: Blob) {
@@ -591,6 +618,9 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={rental.customer.name + " · " + rental.merchant.name + " · " + rental.terminal.brand + " " + rental.terminal.model}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back</Btn>
+          {can("Rentals.Edit") && <Btn variant="ghost" icon="swap" onClick={() => setShowTypeConfirm(true)}>
+            {rental.connection_type === "Rental" ? "Switch to MDR Split" : "Switch to Rental"}
+          </Btn>}
           {can("Rentals.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>}
           {can("Rentals.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
         </>}
@@ -599,6 +629,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       {/* Status bar */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
         <RentalStatus status={rental.status} />
+        <Chip cls={rental.connection_type === "MDR Split" ? "chip-indigo" : "chip-neutral"}>{rental.connection_type}</Chip>
         <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{rental.plan}</span>
         {rental.invoice_issued && <Chip cls="chip-info">Invoice {rental.invoice_issued}</Chip>}
         {rental.einvoice_issued && <Chip cls="chip-indigo"><Icon name="invoice" size={13} />eInvoice {rental.einvoice_issued}</Chip>}
@@ -623,6 +654,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
+          {rental.connection_type === "Rental" && (
           <Card title="Billing Documents" icon="invoice" style={{ flex: 1 }} actions={<>
             {can("Rentals.Edit") && <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
               {docBusy === "invoice" ? "Generating…" : rental.invoice_issued ? "Regenerate Invoice" : "Generate Invoice"}
@@ -648,6 +680,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
               )}
             </div>
           </Card>
+          )}
         </div>
 
         {/* Right column: Customer + Merchant in one card */}
@@ -688,14 +721,15 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       {/* Rental terms card */}
+      {rental.connection_type === "Rental" && (
       <Card title="Rental Terms" icon="receipt">
         <div style={{ padding: "4px 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
           {([
             ["Plan",         rental.plan],
             rental.rental_plan_id ? ["Plan ID",      rental.rental_plan_id] : null,
             rental.plan_period    ? ["Period",        rental.plan_period]    : null,
-            ["Monthly Rate", money(rental.monthly_rate)],
-            ["Deposit Paid", money(rental.deposit)],
+            ["Monthly Rate", money(rental.monthly_rate ?? 0)],
+            ["Deposit Paid", money(rental.deposit ?? 0)],
             ["Start Date",   rental.start_date],
             ["End Date",     rental.end_date || "Ongoing"],
             ["Duration",     months > 0 ? months + " month" + (months !== 1 ? "s" : "") : "< 1 month"],
@@ -711,8 +745,48 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
           ))}
         </div>
       </Card>
+      )}
+
+      {rental.connection_type === "MDR Split" && (
+      <Card title="Connection Terms" icon="receipt">
+        <div style={{ padding: "4px 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
+          {[
+            ["Start Date", rental.start_date],
+            ["End Date",   rental.end_date || "Ongoing"],
+            ["Duration",   months > 0 ? months + " month" + (months !== 1 ? "s" : "") : "< 1 month"],
+          ].map(([l, v]) => (
+            <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+              <span style={{ color: "var(--ink-2)" }}>{l}</span>
+              <span style={{ fontWeight: 500 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+      )}
 
       {showEdit && can("Rentals.Edit") && <EditRentalModal rental={rental} onClose={() => setShowEdit(false)} onSave={(r) => { setRental(r); showToast("Rental updated"); }} />}
+      {showTypeConfirm && (
+        <Modal
+          title={rental.connection_type === "Rental" ? "Switch to MDR Split?" : "Switch to Rental?"}
+          sub={`${rental.id} · ${rental.merchant.name}`}
+          icon="swap"
+          size="slim"
+          onClose={() => setShowTypeConfirm(false)}
+          foot={<>
+            <div className="mf-spacer" />
+            <Btn variant="ghost" onClick={() => setShowTypeConfirm(false)}>Back</Btn>
+            <Btn variant="primary" icon="swap" disabled={togglingType} onClick={toggleConnectionType}>
+              {togglingType ? "Switching…" : "Switch"}
+            </Btn>
+          </>}
+        >
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+            {rental.connection_type === "Rental"
+              ? "This will clear the monthly rate, deposit, and rental plan on this connection, and hide billing documents. Any existing invoice/eInvoice history stays recorded. This change takes effect immediately."
+              : "This will restore rental billing on this connection. The monthly rate and deposit will reset to RM 0 — set the correct amount via Edit afterwards."}
+          </p>
+        </Modal>
+      )}
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
     </div>
   );

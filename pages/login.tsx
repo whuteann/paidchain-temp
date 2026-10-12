@@ -27,7 +27,7 @@ export default function LoginPage() {
           user: res.user,
         })
       );
-      router.replace("/dashboard");
+      router.replace(res.user.must_change_password ? "/change-password" : "/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login failed");
     } finally {

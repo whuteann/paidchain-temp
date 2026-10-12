@@ -29,6 +29,9 @@ import { TerminalsProvider } from "@/components/terminals-context";
 import { PaperRollsProvider } from "@/components/paper-rolls-context";
 
 const PUBLIC_PATHS = ["/login"];
+// Not public (still requires auth) but exempt from the forced-password-change
+// redirect below — otherwise the redirect would loop back onto itself.
+const PASSWORD_CHANGE_PATH = "/change-password";
 
 function permissionsMatchUser(user: AuthUser, roleId: string | null, roleName: string | null) {
   if (user.role_id && roleId) return user.role_id === roleId;
@@ -44,6 +47,7 @@ function meToAuthUser(me: MeOut, fallback: AuthUser): AuthUser {
     role_id: me.role_id ?? fallback.role_id,
     status: me.status,
     last_active: me.last_active,
+    must_change_password: me.must_change_password ?? false,
     open_jobs_count: me.open_jobs_count ?? me.jobs ?? fallback.open_jobs_count,
     permissions: me.permissions ?? [],
   };
@@ -160,8 +164,19 @@ function AuthGuard({ children, pathname }: { children: React.ReactNode; pathname
     router,
   ]);
 
+  useEffect(() => {
+    if (isPublic || !isAuthed || devMode || !authUser) return;
+    if (pathname === PASSWORD_CHANGE_PATH) return;
+    if (authUser.must_change_password) {
+      router.replace(PASSWORD_CHANGE_PATH);
+    }
+  }, [authUser, devMode, isAuthed, isPublic, pathname, router]);
+
   // Prevent protected page flash before redirect completes
   if (!isPublic && !isAuthed) return null;
+  if (!isPublic && isAuthed && !devMode && authUser?.must_change_password && pathname !== PASSWORD_CHANGE_PATH) {
+    return null;
+  }
   if (!isPublic && isAuthed && !devMode && requiredPermission) {
     if (permissionError) return <PermissionLoadError />;
     if (!authUser || !hasCurrentRolePermissions) return null;

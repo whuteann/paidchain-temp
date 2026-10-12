@@ -271,6 +271,7 @@ export interface MeOut {
   role_id?: string;
   status: string;
   last_active: string | null;
+  must_change_password?: boolean;
   jobs: number;
   open_jobs_count?: number;
   permissions: string[];
@@ -652,7 +653,8 @@ export interface MerchantMidAcceptanceOut {
 
 export interface MerchantMidOut {
   id: string;
-  merchant_id: string;
+  merchant_id: string | null;
+  merchant?: MerchantRef | null;
   mid_value: string;
   tid_value: string;
   mdr_rate_id: string | null;
@@ -957,10 +959,20 @@ export const merchants = {
 export const merchantMidsApi = {
   mountOnTerminal: (midId: string, terminal_serial: string) =>
     req<MerchantMidOut>("POST", `/merchant-mids/${midId}/terminal`, { body: { terminal_serial } }),
+  unmountFromTerminal: (midId: string) => req<MerchantMidOut>("DELETE", `/merchant-mids/${midId}/terminal`),
+  // Top-level MID pool: list across all merchants, unlink from a merchant (stays
+  // available), assign an unassigned MID to a merchant.
+  list: (params?: { page?: number; per_page?: number; query?: string; unassigned?: boolean }) =>
+    req<Page<MerchantMidOut>>("GET", "/merchant-mids", { params }),
+  unlink: (midId: string) => req<MerchantMidOut>("POST", `/merchant-mids/${midId}/unlink`),
+  assign: (midId: string, merchantId: string) =>
+    req<MerchantMidOut>("POST", `/merchant-mids/${midId}/assign`, { body: { merchant_id: merchantId } }),
 };
 export const merchantMidAcceptancesApi = {
   mountOnTerminal: (acceptanceId: string, terminal_serial: string) =>
     req<MerchantMidAcceptanceOut>("POST", `/merchant-mid-acceptances/${acceptanceId}/terminal`, { body: { terminal_serial } }),
+  unmountFromTerminal: (acceptanceId: string) =>
+    req<MerchantMidAcceptanceOut>("DELETE", `/merchant-mid-acceptances/${acceptanceId}/terminal`),
 };
 
 // ─── Acceptance Settings (admin catalog) ───────────────────────────────────────
@@ -1196,6 +1208,8 @@ export const terminals = {
     req<TerminalOut>("PATCH", `/terminals/${encodeURIComponent(id)}`, { body }),
   assignMerchant: (id: string, body: TerminalMerchantAssign) =>
     req<TerminalOut>("POST", `/terminals/${encodeURIComponent(id)}/merchant`, { body }),
+  forceUnlinkMerchant: (id: string) =>
+    req<TerminalOut>("POST", `/terminals/${encodeURIComponent(id)}/unlink-merchant`),
   activity: (id: string) => req<ActivityOut[]>("GET", `/terminals/${encodeURIComponent(id)}/activity`),
   linkSim: (body: SimCardLinkBody) => req<TerminalOut>("POST", "/terminals/simcard", { body }),
   unlinkSim: (id: string) => req<TerminalOut>("DELETE", `/terminals/${encodeURIComponent(id)}/simcard`),
@@ -1343,6 +1357,7 @@ export interface JobCreate {
   due_date: string;
   notes?: string | null;
   term_setting_id?: string | null;
+  connection_type?: string | null;
   terminals?: JobCreateTerminal[];
   service_terminals?: JobServiceTerminalCreate[];
   terminal_replace?: string | null;
@@ -1638,11 +1653,12 @@ export interface RentalOut {
   customer: { id: string; name: string; tin: string };
   merchant: { id: string; name: string; mid: string };
   terminal: { id: string; serial: string; brand: string; model: string; tid: string | null };
+  connection_type: string;
   plan: string;
   rental_plan_id: string | null;
   plan_period: string | null;
-  monthly_rate: number;
-  deposit: number;
+  monthly_rate: number | null;
+  deposit: number | null;
   start_date: string;
   end_date: string | null;
   status: string;
@@ -1669,6 +1685,7 @@ export interface RentalUpdate {
   status?: string | null;
   plan?: string | null;
   monthly_rate?: number | null;
+  connection_type?: string | null;
   end_date?: string | null;
 }
 
@@ -1679,6 +1696,7 @@ export interface RentalListParams extends SortParams {
   per_page?: number;
   query?: string;
   status?: string;
+  connection_type?: string;
 }
 
 export const rentals = {
@@ -1688,7 +1706,7 @@ export const rentals = {
   update: (id: string, body: RentalUpdate) => req<RentalOut>("PATCH", `/rentals/${id}`, { body }),
   invoice: (id: string) => reqBlob("GET", `/rentals/${id}/invoice`),
   einvoice: (id: string) => reqBlob("GET", `/rentals/${id}/einvoice`),
-  export: (p?: { query?: string; status?: string; bank?: string; date_from?: string; date_to?: string; date_field?: string }) =>
+  export: (p?: { query?: string; status?: string; connection_type?: string; bank?: string; date_from?: string; date_to?: string; date_field?: string }) =>
     reqBlob("GET", "/rentals/export", { params: p }),
 };
 

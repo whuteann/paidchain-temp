@@ -8,6 +8,7 @@ export interface AuthUser {
   role_id: string;
   status: string;
   last_active: string | null;
+  must_change_password?: boolean;
   open_jobs_count: number;
   permissions?: string[];
   bank_ids?: string[];
