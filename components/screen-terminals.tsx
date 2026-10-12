@@ -1276,6 +1276,12 @@ export function TerminalDetail({
   // currently mounted on this device, no separate fetch needed.
   const [showLinkTid, setShowLinkTid] = useState(false);
   const [showAssignMerchant, setShowAssignMerchant] = useState(false);
+  const [unmountTarget, setUnmountTarget] = useState<AvailableTidOut | null>(null);
+  const [unmounting, setUnmounting] = useState(false);
+  const [unmountError, setUnmountError] = useState<string | null>(null);
+  const [showForceUnlink, setShowForceUnlink] = useState(false);
+  const [forceUnlinking, setForceUnlinking] = useState(false);
+  const [forceUnlinkError, setForceUnlinkError] = useState<string | null>(null);
 
   useEffect(() => {
     api.terminals.get(id)
@@ -1331,6 +1337,45 @@ export function TerminalDetail({
       return;
     }
     setShowLinkTid(true);
+  }
+
+  async function unmountEntry() {
+    if (!unmountTarget) return;
+    setUnmounting(true);
+    setUnmountError(null);
+    try {
+      if (unmountTarget.source === "mid") {
+        await api.merchantMids.unmountFromTerminal(unmountTarget.source_id);
+      } else {
+        await api.merchantMidAcceptances.unmountFromTerminal(unmountTarget.source_id);
+      }
+      const refreshed = await api.terminals.get(id);
+      setTerminal(refreshed);
+      setUnmountTarget(null);
+      flash(`${unmountTarget.tid_value} unlinked from this device`);
+    } catch (e) {
+      setUnmountError(e instanceof ApiError ? e.message : "Failed to unlink TID from this device");
+    } finally {
+      setUnmounting(false);
+    }
+  }
+
+  async function forceUnlinkMerchant() {
+    if (!terminal) return;
+    setForceUnlinking(true);
+    setForceUnlinkError(null);
+    try {
+      const updated = await api.terminals.forceUnlinkMerchant(terminal.id);
+      setTerminal(updated);
+      setPendingStatus(updated.status);
+      setPendingLocation(updated.location);
+      setShowForceUnlink(false);
+      flash("Terminal force-unlinked from merchant");
+    } catch (e) {
+      setForceUnlinkError(e instanceof ApiError ? e.message : "Failed to unlink terminal from merchant");
+    } finally {
+      setForceUnlinking(false);
+    }
   }
 
   function handleTerminalUpdated(updated: TerminalOut) {
@@ -1501,14 +1546,21 @@ export function TerminalDetail({
             ) : (
               <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {mountedTids.map((entry) => (
-                  <div key={`${entry.source}:${entry.source_id}`} style={{ padding: "8px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 7 }}>
-                    <div className="mono" style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}>
-                      {entry.tid_value}
-                      <Chip cls={entry.source === "mid" ? "chip-info" : "chip-neutral"}>{entry.source === "acceptance" ? entry.acceptance_name || "Acceptance" : "MID (default)"}</Chip>
+                  <div key={`${entry.source}:${entry.source_id}`} style={{ padding: "8px 10px", background: "var(--bg-2, #f5f5f5)", borderRadius: 7, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                    <div>
+                      <div className="mono" style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}>
+                        {entry.tid_value}
+                        <Chip cls={entry.source === "mid" ? "chip-info" : "chip-neutral"}>{entry.source === "acceptance" ? entry.acceptance_name || "Acceptance" : "MID (default)"}</Chip>
+                      </div>
+                      <div className="td-mut" style={{ fontSize: 12 }}>
+                        MID {entry.mid_value || "—"} · {entry.bank}{entry.mdr_rate_id ? ` · ${entry.mdr_rate_id}` : ""}
+                      </div>
                     </div>
-                    <div className="td-mut" style={{ fontSize: 12 }}>
-                      MID {entry.mid_value || "—"} · {entry.bank}{entry.mdr_rate_id ? ` · ${entry.mdr_rate_id}` : ""}
-                    </div>
+                    {can("Terminals.Edit") && (
+                      <button className="icon-btn" title="Unlink from this device" onClick={() => { setUnmountError(null); setUnmountTarget(entry); }}>
+                        <Icon name="link" size={14} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1519,7 +1571,12 @@ export function TerminalDetail({
             <Card
               title="Assigned Merchant"
               icon="merchants"
-              actions={<Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("merchant-detail", assignedMerchant.id)}>View</Btn>}
+              actions={<>
+                {can("Terminals.Force Unlink") && (
+                  <Btn variant="ghost" sm icon="x" onClick={() => { setForceUnlinkError(null); setShowForceUnlink(true); }}>Force Unlink</Btn>
+                )}
+                <Btn variant="ghost" sm iconRight="chevRight" onClick={() => nav("merchant-detail", assignedMerchant.id)}>View</Btn>
+              </>}
             >
               <div className="card-pad">
                 <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
@@ -1734,6 +1791,66 @@ export function TerminalDetail({
             flash("Terminal assigned to merchant");
           }}
         />
+      )}
+
+      {unmountTarget && can("Terminals.Edit") && (
+        <Modal
+          title="Unlink TID from device"
+          sub={`${unmountTarget.tid_value} · ${terminalSerial(terminal)}`}
+          icon="x"
+          size="slim"
+          onClose={() => setUnmountTarget(null)}
+          foot={<>
+            <div className="mf-spacer" />
+            <Btn variant="ghost" onClick={() => setUnmountTarget(null)}>Back</Btn>
+            <Btn variant="danger" icon="x" disabled={unmounting} onClick={unmountEntry}>
+              {unmounting ? "Unlinking…" : "Unlink TID"}
+            </Btn>
+          </>}
+        >
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+            This TID will be unmounted from this device. The underlying MID
+            {unmountTarget.source === "acceptance" ? " acceptance item" : ""} is not deleted and stays
+            linked to its merchant — it becomes available to mount on a terminal again, here or
+            elsewhere.
+          </p>
+          {unmountError && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{unmountError}</div>}
+        </Modal>
+      )}
+
+      {showForceUnlink && can("Terminals.Force Unlink") && assignedMerchant && (
+        <Modal
+          title="Force unlink from merchant"
+          sub={`${terminalSerial(terminal)} · ${assignedMerchant.name}`}
+          icon="alert"
+          size="slim"
+          onClose={() => setShowForceUnlink(false)}
+          foot={<>
+            <div className="mf-spacer" />
+            <Btn variant="ghost" onClick={() => setShowForceUnlink(false)}>Cancel</Btn>
+            <Btn variant="danger" icon="alert" disabled={forceUnlinking} onClick={forceUnlinkMerchant}>
+              {forceUnlinking ? "Unlinking…" : "Force Unlink"}
+            </Btn>
+          </>}
+        >
+          <div style={{ padding: "10px 12px", background: "var(--bad-bg)", border: "1px solid var(--bad)", borderRadius: 8, marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--bad)", marginBottom: 4 }}>This bypasses the normal Retrieval workflow</div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
+              No Retrieval job is created — there is no courier or physical-return tracking behind this
+              action. Only use this when the device cannot go through a normal Retrieval job.
+            </div>
+          </div>
+          <p style={{ margin: "0 0 10px", fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+            This will immediately, in one step:
+          </p>
+          <ul style={{ margin: "0 0 14px", paddingLeft: 20, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.7 }}>
+            <li>End any active rental tied to this device at {assignedMerchant.name}</li>
+            <li>Disconnect every mounted TID/MID (they stay intact and re-assignable, not deleted)</li>
+            <li>Clear the device's TID and unassign it from {assignedMerchant.name}</li>
+            <li>Move the device to status "Returned" at the Returns Bay</li>
+          </ul>
+          {forceUnlinkError && <div style={{ fontSize: 13, color: "var(--bad)" }}>{forceUnlinkError}</div>}
+        </Modal>
       )}
 
       {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}

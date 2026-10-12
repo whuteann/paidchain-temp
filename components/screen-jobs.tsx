@@ -267,6 +267,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
     items: [],
     loading: Boolean(presetMerchant?.id),
   });
+  const [connectionType, setConnectionType] = useState("Rental");
   const [installationTerminals, setInstallationTerminals] = useState<InstallationTerminalDraft[]>([newInstallationTerminalDraft()]);
   const [serviceTerminals, setServiceTerminals] = useState<ServiceTerminalDraft[]>([newServiceTerminalDraft()]);
   const [availableTids, setAvailableTids] = useState<AvailableTidOut[]>([]);
@@ -415,6 +416,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
       due_date: form.due,
       notes: form.notes || TYPE_META[type],
       term_setting_id: null,
+      connection_type: requiresInstallationTerminals ? connectionType : null,
       terminals: requiresInstallationTerminals
         ? installationTerminals.map((row) => {
           const entry = availableTids.find((t) => tidKey(t) === row.tid_key);
@@ -657,6 +659,17 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
 
           {type === "Installation" && (
             <>
+              <Field label="Connection type" hint="how this merchant-terminal connection is billed">
+                <select
+                  className="input"
+                  value={connectionType}
+                  onChange={(e) => setConnectionType(e.target.value)}
+                >
+                  <option value="Rental">Rental</option>
+                  <option value="MDR Split">MDR Split</option>
+                </select>
+              </Field>
+
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>Terminal lines</div>

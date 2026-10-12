@@ -1,6 +1,6 @@
 /* Bumipay — Merchant listing + detail */
 import { useServerSort } from "./table-sorting";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
@@ -673,6 +673,309 @@ function AcceptanceSettingModal({ existing, onClose, onSaved }: {
   );
 }
 
+/* =================== GENERIC ENTITY SEARCH SELECT =================== */
+function EntitySearchSelect<T extends { id: string }>({
+  label, hint, placeholder, value, onSelect, fetchResults, renderOption, getLabel, disabled, disabledHint, dropdownPlacement = "down",
+}: {
+  label: string;
+  hint?: string;
+  placeholder: string;
+  value: T | null;
+  onSelect: (item: T | null) => void;
+  fetchResults: (query: string) => Promise<T[]>;
+  renderOption: (item: T) => React.ReactNode;
+  getLabel: (item: T) => string;
+  disabled?: boolean;
+  disabledHint?: string;
+  dropdownPlacement?: "down" | "up";
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function runSearch(v: string) {
+    setLoading(true);
+    fetchResults(v).then(setResults).catch(console.error).finally(() => setLoading(false));
+  }
+
+  function handleChange(v: string) {
+    setQuery(v);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => runSearch(v), 300);
+  }
+
+  function handleFocus() {
+    setOpen(true);
+    if (!loading && results.length === 0) runSearch(query);
+  }
+
+  return (
+    <Field label={label} hint={hint}>
+      <div style={{ position: "relative" }}>
+        {value ? (
+          <div className="input" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-2, #f5f5f5)" }}>
+            <span>{getLabel(value)}</span>
+            <button type="button" className="icon-btn" onClick={() => { onSelect(null); setQuery(""); setResults([]); }}>
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+        ) : (
+          <input
+            className="input"
+            placeholder={disabled ? disabledHint : placeholder}
+            value={query}
+            disabled={disabled}
+            onChange={(e) => handleChange(e.target.value)}
+            onFocus={handleFocus}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+          />
+        )}
+        {open && !value && !disabled && (
+          <div style={{
+            position: "absolute",
+            ...(dropdownPlacement === "up" ? { bottom: "calc(100% + 4px)" } : { top: "calc(100% + 4px)" }),
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            background: "#fff", border: "1px solid var(--line)", borderRadius: 10,
+            boxShadow: "var(--sh-sm)", maxHeight: 220, overflowY: "auto",
+          }}>
+            {loading ? (
+              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>Searching...</div>
+            ) : results.length === 0 ? (
+              <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--ink-3)" }}>No matches</div>
+            ) : (
+              results.map((item) => (
+                <div
+                  key={item.id}
+                  className="search-opt"
+                  onMouseDown={() => { onSelect(item); setQuery(""); setOpen(false); }}
+                >
+                  {renderOption(item)}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+/* =================== UNLINK / ASSIGN MID =================== */
+function UnlinkMidModal({ mid, merchantName, onClose, onUnlinked }: {
+  mid: MerchantMidOut;
+  merchantName: string;
+  onClose: () => void;
+  onUnlinked: (midId: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true); setErr(null);
+    try {
+      await api.merchantMids.unlink(mid.id);
+      onUnlinked(mid.id);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to unlink MID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Unlink MID"
+      sub={`${mid.mid_value} · ${merchantName}`}
+      icon="x"
+      size="slim"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Back</Btn>
+        <Btn variant="danger" icon="x" disabled={saving} onClick={submit}>
+          {saving ? "Unlinking…" : "Unlink MID"}
+        </Btn>
+      </>}
+    >
+      <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+        This MID will be unlinked from {merchantName} and become available to assign to a different
+        merchant later. It is not deleted — its acceptance items and history stay intact.
+      </p>
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function AssignMidModal({ mid, merchant, onClose, onAssigned }: {
+  mid?: MerchantMidOut;
+  merchant?: MerchantOut;
+  onClose: () => void;
+  onAssigned: (mid: MerchantMidOut) => void;
+}) {
+  const [selectedMid, setSelectedMid] = useState<MerchantMidOut | null>(mid ?? null);
+  const [selectedMerchant, setSelectedMerchant] = useState<MerchantOut | null>(merchant ?? null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!selectedMid || !selectedMerchant) return;
+    setSaving(true); setErr(null);
+    try {
+      const updated = await api.merchantMids.assign(selectedMid.id, selectedMerchant.id);
+      onAssigned(updated);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to assign MID");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Assign MID"
+      sub={merchant ? `To ${merchant.name}` : mid ? `MID ${mid.mid_value} · TID ${mid.tid_value}` : "Assign an unassigned MID to a merchant"}
+      icon="tag"
+      size="overflow-visible"
+      onClose={onClose}
+      foot={<>
+        <div className="mf-spacer" />
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" disabled={!selectedMid || !selectedMerchant || saving} onClick={submit}>
+          {saving ? "Assigning…" : "Assign"}
+        </Btn>
+      </>}
+    >
+      {!mid && (
+        <EntitySearchSelect<MerchantMidOut>
+          label="MID" hint="required · unassigned MIDs only"
+          placeholder="Search MID or TID value…"
+          value={selectedMid}
+          onSelect={setSelectedMid}
+          fetchResults={(query) => api.merchantMids.list({ query, unassigned: true, per_page: 8 }).then((p) => p.items)}
+          getLabel={(r) => `${r.mid_value} · TID ${r.tid_value}`}
+          renderOption={(r) => (
+            <div className="cell-2">
+              <span className="td-strong">{r.mid_value}</span>
+              <span className="c2-sub">TID {r.tid_value}</span>
+            </div>
+          )}
+        />
+      )}
+      {!merchant && (
+        <EntitySearchSelect<MerchantOut>
+          label="Merchant" hint="required · target merchant"
+          placeholder="Search merchant name or MID…"
+          value={selectedMerchant}
+          onSelect={setSelectedMerchant}
+          fetchResults={(query) => api.merchants.list({ query, per_page: 8 }).then((p) => p.items)}
+          getLabel={(m) => m.name}
+          renderOption={(m) => (
+            <div className="cell-2">
+              <span className="td-strong">{m.name}</span>
+              <span className="c2-sub">{merchantDisplayMid(m)}</span>
+            </div>
+          )}
+        />
+      )}
+      {err && <div style={{ fontSize: 13, color: "var(--bad)", marginTop: 8 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+/* =================== AVAILABLE MIDS (unassigned pool) =================== */
+function AvailableMidsTab({ canEdit }: { canEdit: boolean }) {
+  const PAGE_SIZE = 20;
+  const [rows, setRows] = useState<MerchantMidOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [assignTarget, setAssignTarget] = useState<MerchantMidOut | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      api.merchantMids.list({ page, per_page: PAGE_SIZE, query: q.trim() || undefined, unassigned: true })
+        .then((p) => {
+          if (cancelled) return;
+          setRows(p.items);
+          setTotal(p.total);
+          setPages(p.pages);
+        })
+        .catch(console.error)
+        .finally(() => { if (!cancelled) setLoading(false); });
+    }, q.trim() ? 250 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [page, q]);
+
+  function resetPage() { setPage(1); }
+
+  function handleAssigned(mid: MerchantMidOut) {
+    setRows((prev) => prev.filter((r) => r.id !== mid.id));
+    setTotal((prev) => Math.max(0, prev - 1));
+    setToast(`MID ${mid.mid_value} assigned to ${mid.merchant?.name ?? "merchant"}`);
+    setTimeout(() => setToast(null), 2800);
+  }
+
+  return (
+    <Card>
+      <Toolbar>
+        <SearchBox value={q} onChange={(value) => { setQ(value); resetPage(); }} placeholder="Search MID or TID value…" />
+        <span className="tb-meta">{loading ? "Loading..." : `${total} unassigned`}</span>
+      </Toolbar>
+      {loading ? (
+        <div style={{ padding: "24px 20px", fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+      ) : rows.length === 0 ? (
+        <Empty title="No unassigned MIDs" sub="MIDs unlinked from a merchant appear here, available to assign elsewhere" />
+      ) : (
+        <ResponsiveTable
+          rows={rows}
+          getKey={(r) => r.id}
+          columns={[
+            { key: "mid", header: "MID", sortValue: (r) => r.mid_value, render: (r) => <span className="td-mono" style={{ fontWeight: 700 }}>{r.mid_value}</span> },
+            { key: "tid", header: "TID", sortValue: (r) => r.tid_value, render: (r) => <span className="td-mono td-mut">{r.tid_value}</span> },
+            { key: "mdr", header: "MDR rate", render: (r) => r.mdr_rate ? `${r.mdr_rate.type} · ${r.mdr_rate.rate}%` : "—" },
+            { key: "status", header: "Status", sortValue: (r) => r.status, render: (r) => <Chip cls={r.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{r.status}</Chip> },
+            { key: "updated", header: "Last updated", sortValue: (r) => r.updated_at, render: (r) => new Date(r.updated_at).toLocaleDateString() },
+            ...(canEdit ? [{
+              key: "actions", header: "", render: (r: MerchantMidOut) => (
+                <Btn variant="ghost" sm icon="plus" onClick={() => setAssignTarget(r)}>Assign</Btn>
+              ),
+            }] : []),
+          ]}
+          renderMobile={(r) => (
+            <MobileListItem
+              title={r.mid_value}
+              sub={<>TID {r.tid_value}</>}
+              status={<Chip cls={r.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{r.status}</Chip>}
+              meta={[
+                { label: "MDR rate", value: r.mdr_rate ? `${r.mdr_rate.type} · ${r.mdr_rate.rate}%` : "—" },
+              ]}
+              actions={canEdit ? <Btn variant="primary" sm icon="plus" onClick={() => setAssignTarget(r)}>Assign</Btn> : undefined}
+            />
+          )}
+        />
+      )}
+      <Pagination total={total} shown={rows.length} page={page} pages={pages} onPageChange={setPage} />
+      {assignTarget && canEdit && (
+        <AssignMidModal
+          mid={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={(updated) => { handleAssigned(updated); setAssignTarget(null); }}
+        />
+      )}
+      {toast && <div className="toast"><span className="t-ico"><Icon name="checkCircle" size={17} /></span>{toast}</div>}
+    </Card>
+  );
+}
+
 function AcceptanceCatalogTab({ canEdit }: { canEdit: boolean }) {
   const [rows, setRows] = useState<AcceptanceSettingOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -783,7 +1086,7 @@ function AcceptanceCatalogTab({ canEdit }: { canEdit: boolean }) {
 export function Merchants({ nav }: { nav: NavFn }) {
   const can = useCan();
   const canViewAcceptance = can("Settings.View");
-  const [pageTab, setPageTab] = useState<"merchants" | "acceptance">("merchants");
+  const [pageTab, setPageTab] = useState<"merchants" | "acceptance" | "mids">("merchants");
   const MERCHANTS_PAGE_SIZE = 20;
   const [merchantList, setMerchantList] = useState<MerchantOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -843,31 +1146,35 @@ export function Merchants({ nav }: { nav: NavFn }) {
     <div>
       <PageHead
         title="Merchants"
-        sub={pageTab === "merchants" ? total + " merchants · search by name, MID, TID, terminal serial or merchant ID" : "Global catalog of payment acceptance types"}
+        sub={pageTab === "merchants"
+          ? total + " merchants · search by name, MID, TID, terminal serial or merchant ID"
+          : pageTab === "mids"
+            ? "MIDs unlinked from a merchant — available to assign elsewhere"
+            : "Global catalog of payment acceptance types"}
         actions={pageTab === "merchants" ? <>
           {can("Merchants.Export") && <Btn variant="ghost" icon="download" onClick={() => setShowExport(true)}>Export</Btn>}
           {can("Merchants.Create") && <Btn variant="primary" icon="plus" onClick={() => setShowCustomerPicker(true)}>Create Merchant</Btn>}
         </> : undefined}
       />
 
-      {canViewAcceptance && (
-        <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--line)" }}>
-          {([["merchants", "Merchants"], ["acceptance", "Acceptance"]] as const).map(([t, lbl]) => (
-            <button key={t} onClick={() => setPageTab(t)} style={{
-              padding: "10px 18px", border: "none", background: "none", cursor: "pointer", fontSize: 14,
-              borderBottom: `2px solid ${pageTab === t ? "var(--ink)" : "transparent"}`,
-              fontWeight: pageTab === t ? 700 : 500,
-              color: pageTab === t ? "var(--ink)" : "var(--ink-3)",
-              marginBottom: -1, transition: "color 0.15s",
-            }}>
-              {lbl}
-            </button>
-          ))}
-        </div>
-      )}
+      <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--line)" }}>
+        {([["merchants", "Merchants"], ["mids", "Available MIDs"], ...(canViewAcceptance ? [["acceptance", "Acceptance"]] as const : [])] as const).map(([t, lbl]) => (
+          <button key={t} onClick={() => setPageTab(t)} style={{
+            padding: "10px 18px", border: "none", background: "none", cursor: "pointer", fontSize: 14,
+            borderBottom: `2px solid ${pageTab === t ? "var(--ink)" : "transparent"}`,
+            fontWeight: pageTab === t ? 700 : 500,
+            color: pageTab === t ? "var(--ink)" : "var(--ink-3)",
+            marginBottom: -1, transition: "color 0.15s",
+          }}>
+            {lbl}
+          </button>
+        ))}
+      </div>
 
       {pageTab === "acceptance" && canViewAcceptance ? (
         <AcceptanceCatalogTab canEdit={can("Settings.Edit")} />
+      ) : pageTab === "mids" ? (
+        <AvailableMidsTab canEdit={can("Merchants.Edit")} />
       ) : (
         <Card>
           <Toolbar>
@@ -1189,6 +1496,13 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
     });
   }
 
+  function handleMidUnlinked(midId: string) {
+    setMerchant((prev) => {
+      if (!prev) return prev;
+      return { ...prev, mids: (prev.mids ?? []).filter((item) => item.id !== midId) };
+    });
+  }
+
   function handleAcceptanceSaved(midId: string, row: MerchantMidAcceptanceOut) {
     setMerchant((prev) => {
       if (!prev) return prev;
@@ -1257,7 +1571,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         ))}
       </div>
       <div style={{ marginTop: 20 }}>
-        {tab === "overview" ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onMidSaved={handleMidSaved} onAcceptanceSaved={handleAcceptanceSaved} />
+        {tab === "overview" ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onMidSaved={handleMidSaved} onAcceptanceSaved={handleAcceptanceSaved} onMidUnlinked={handleMidUnlinked} />
           : tab === "commercial" ? <CommercialTab m={merchant} canEdit={can("Merchants.Edit")} onEdit={() => setShowEditCommercial(true)} />
             : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} />
               : <JobsTab rows={merchantJobs} nav={nav} />}
@@ -1569,8 +1883,9 @@ function MerchantMidModal({ merchant, existing, onClose, onSaved }: {
   );
 }
 
-function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
+function AcceptanceModal({ mid, merchantId, merchantName, existing, onClose, onSaved }: {
   mid: MerchantMidOut;
+  merchantId: string;
   merchantName: string;
   existing?: MerchantMidAcceptanceOut | null;
   onClose: () => void;
@@ -1605,7 +1920,7 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
     setSaving(true); setErr(null);
     try {
       const result = editing
-        ? await api.merchants.updateAcceptance(mid.merchant_id, mid.id, existing!.id, {
+        ? await api.merchants.updateAcceptance(merchantId, mid.id, existing!.id, {
           uses_own_tid_mid: usesOwn,
           opted_in: optedIn,
           tid_value: usesOwn ? tidValue.trim() || null : null,
@@ -1613,7 +1928,7 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
           mdr_rate_id: usesOwn ? mdrRateId || null : null,
           reason: reason.trim() || null,
         } satisfies MerchantMidAcceptanceUpdate)
-        : await api.merchants.addAcceptance(mid.merchant_id, mid.id, {
+        : await api.merchants.addAcceptance(merchantId, mid.id, {
           acceptance_setting_id: settingId,
           uses_own_tid_mid: usesOwn,
           opted_in: optedIn,
@@ -1724,8 +2039,9 @@ function AcceptanceModal({ mid, merchantName, existing, onClose, onSaved }: {
   );
 }
 
-function MidHistoryModal({ mid, onClose }: {
+function MidHistoryModal({ mid, merchantId, onClose }: {
   mid: MerchantMidOut;
+  merchantId: string;
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<MerchantMidHistoryOut[]>([]);
@@ -1735,11 +2051,11 @@ function MidHistoryModal({ mid, onClose }: {
   useEffect(() => {
     setLoading(true);
     setErr(null);
-    api.merchants.midHistory(mid.merchant_id, mid.id)
+    api.merchants.midHistory(merchantId, mid.id)
       .then(setRows)
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load MID history"))
       .finally(() => setLoading(false));
-  }, [mid.merchant_id, mid.id]);
+  }, [merchantId, mid.id]);
 
   return (
     <Modal title="MID History" sub={`${mid.mid_value} · ${mid.id}`} icon="clock" size="slim" onClose={onClose}>
@@ -1776,16 +2092,19 @@ function MidHistoryModal({ mid, onClose }: {
   );
 }
 
-function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
+function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved, onMidUnlinked }: {
   m: MerchantOut;
   nav: NavFn;
   canEdit: boolean;
   onMidSaved: (mid: MerchantMidOut) => void;
   onAcceptanceSaved: (midId: string, row: MerchantMidAcceptanceOut) => void;
+  onMidUnlinked: (midId: string) => void;
 }) {
   const [showAddMid, setShowAddMid] = useState(false);
+  const [showAssignMid, setShowAssignMid] = useState(false);
   const [editingMid, setEditingMid] = useState<MerchantMidOut | null>(null);
   const [historyMid, setHistoryMid] = useState<MerchantMidOut | null>(null);
+  const [unlinkTarget, setUnlinkTarget] = useState<MerchantMidOut | null>(null);
   const [midActionId, setMidActionId] = useState<string | null>(null);
   const [midActionError, setMidActionError] = useState<string | null>(null);
   const [acceptanceModalMid, setAcceptanceModalMid] = useState<MerchantMidOut | null>(null);
@@ -1857,7 +2176,10 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
         <Card
           title={"MIDs" + (m.mids.length ? ` (${m.mids.length})` : "")}
           icon="tag"
-          actions={canEdit ? <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddMid(true)}>Add MID</Btn> : undefined}
+          actions={canEdit ? <>
+            <Btn variant="ghost" sm icon="search" onClick={() => setShowAssignMid(true)}>Assign MID</Btn>
+            <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddMid(true)}>Add MID</Btn>
+          </> : undefined}
         >
           <div className="card-pad">
             {m.mids.length ? (
@@ -1882,6 +2204,20 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
                               onClick={() => toggleMidStatus(mid)}
                             >
                               <Icon name={(mid.status ?? "Active").toLowerCase() === "active" ? "x" : "refresh"} size={14} />
+                            </button>
+                            <button
+                              className="icon-btn"
+                              title={mid.terminal_serial ? "Unmount the connected terminal before unlinking" : "Unlink from this merchant"}
+                              onClick={() => {
+                                if (mid.terminal_serial) {
+                                  setMidActionError(`MID ${mid.mid_value} is mounted on terminal ${mid.terminal_serial} — unmount it from the terminal before unlinking.`);
+                                  return;
+                                }
+                                setMidActionError(null);
+                                setUnlinkTarget(mid);
+                              }}
+                            >
+                              <Icon name="link" size={14} />
                             </button>
                           </>
                         )}
@@ -1968,7 +2304,7 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
           </div>
         </Card>
         {historyMid && (
-          <MidHistoryModal mid={historyMid} onClose={() => setHistoryMid(null)} />
+          <MidHistoryModal mid={historyMid} merchantId={m.id} onClose={() => setHistoryMid(null)} />
         )}
         {showAddMid && canEdit && (
           <MerchantMidModal
@@ -1988,10 +2324,26 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved }: {
         {acceptanceModalMid && canEdit && (
           <AcceptanceModal
             mid={acceptanceModalMid}
+            merchantId={m.id}
             merchantName={m.name}
             existing={editingAcceptance}
             onClose={() => { setAcceptanceModalMid(null); setEditingAcceptance(null); }}
             onSaved={(row) => onAcceptanceSaved(acceptanceModalMid.id, row)}
+          />
+        )}
+        {unlinkTarget && canEdit && (
+          <UnlinkMidModal
+            mid={unlinkTarget}
+            merchantName={m.name}
+            onClose={() => setUnlinkTarget(null)}
+            onUnlinked={(midId) => { onMidUnlinked(midId); setUnlinkTarget(null); }}
+          />
+        )}
+        {showAssignMid && canEdit && (
+          <AssignMidModal
+            merchant={m}
+            onClose={() => setShowAssignMid(false)}
+            onAssigned={(mid) => { onMidSaved(mid); setShowAssignMid(false); }}
           />
         )}
       </div>
