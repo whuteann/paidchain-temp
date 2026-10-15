@@ -10,7 +10,7 @@ import type { AppDispatch, RootState } from "@/store";
 import { canAccessPath } from "@/lib/permissions";
 import { api } from "@/lib/api";
 
-export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "profit-shares" | "profit-share-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "rental-plans" | "settings" | "users" | "audit-logs" | "payouts" | "payout-detail" | "change-password";
+export type Route = "dashboard" | "customers" | "customer-detail" | "merchants" | "merchant-detail" | "referrals" | "referral-detail" | "terminals" | "terminal-detail" | "simcards" | "simcard-detail" | "jobs" | "job-detail" | "rentals" | "rental-detail" | "paper-rolls" | "paper-roll-billing" | "profit-shares" | "profit-share-detail" | "referral-bonus-batches" | "referral-bonus-batch-detail" | "mdr" | "settings" | "users" | "audit-logs" | "payouts" | "payout-detail" | "change-password";
 export type NavFn = (to: Route, param?: string) => void;
 
 const NAV = [
@@ -34,7 +34,6 @@ const NAV = [
     { id: "referral-bonus-batches", label: "Referral Bonuses", icon: "cash" },
     { id: "paper-roll-billing",  label: "PR Billing",          icon: "receipt" },
     { id: "mdr",                 label: "MDR Rates",           icon: "percent" },
-    { id: "rental-plans",       label: "Rental Plans",        icon: "tag" },
   ]},
   { group: "Configuration", items: [
     { id: "settings",    label: "Settings",     icon: "tag" },
@@ -57,7 +56,6 @@ const NAV_PATHS: Record<string, string> = {
   "profit-shares": "/profit-shares",
   "referral-bonus-batches": "/referral-bonus-batches",
   mdr: "/mdr",
-  "rental-plans": "/rental-plans",
   settings: "/settings",
   users: "/users",
   "audit-logs": "/audit-logs",
@@ -77,7 +75,6 @@ function getActiveFromPath(pathname: string): string {
   if (pathname.startsWith("/profit-shares")) return "profit-shares";
   if (pathname.startsWith("/referral-bonus-batches")) return "referral-bonus-batches";
   if (pathname === "/mdr") return "mdr";
-  if (pathname === "/rental-plans") return "rental-plans";
   if (pathname === "/settings") return "settings";
   if (pathname === "/users") return "users";
   if (pathname === "/audit-logs") return "audit-logs";
@@ -112,7 +109,6 @@ function getCrumbsFromPath(pathname: string): Crumb[] {
   if (pathname.startsWith("/referral-bonus-batches/")) return [{ label: "Finance" }, { label: "Referral Bonuses", href: "/referral-bonus-batches" }, { label: "Detail" }];
   if (pathname === "/paper-roll-billing")  return [{ label: "Finance" }, { label: "PR Billing" }];
   if (pathname === "/mdr")                 return [{ label: "Finance" }, { label: "MDR Rates" }];
-  if (pathname === "/rental-plans")        return [{ label: "Finance" }, { label: "Rental Plans" }];
   // Configuration
   if (pathname === "/settings")            return [{ label: "Configuration" }, { label: "Settings" }];
   if (pathname === "/users")               return [{ label: "Configuration" }, { label: "Users & Roles" }];

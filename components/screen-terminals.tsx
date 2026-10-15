@@ -999,7 +999,6 @@ export function Terminals({
                   { key: "merchant", header: "Assigned Merchant", sortValue: (r) => r.merchant?.name, mobileLabel: "Merchant", render: (t) => <span className="td-mut">{t.merchant ? t.merchant.name : <span style={{ color: "var(--ink-4)" }}>Unassigned</span>}</span> },
                   { key: "location", header: "Location", sortValue: (r) => r.location, render: (t) => <span style={{ display: "flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
                   { key: "movement", header: "Last Movement", sortValue: (r) => r.last_movement, render: (t) => <span className="td-mut td-mono">{t.last_movement.slice(5)}</span> },
-                  { key: "rental", header: "Rental", sortValue: (r) => r.rental_rate, render: (t) => <span className="td-mut">RM {t.rental_rate}</span> },
                 ]}
                 renderMobile={(t) => (
                   <MobileListItem
@@ -1010,7 +1009,6 @@ export function Terminals({
                       { label: "TID", value: <span className="td-mono">{t.tid || "—"}</span> },
                       { label: "Merchant", value: t.merchant ? t.merchant.name : "Unassigned" },
                       { label: "Location", value: <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Icon name="mapPin" size={14} style={{ color: "var(--ink-3)" }} />{t.location}</span> },
-                      { label: "Rental", value: <>RM {t.rental_rate}</> },
                     ]}
                     onClick={() => nav("terminal-detail", t.id)}
                     chevron
@@ -1699,15 +1697,6 @@ export function TerminalDetail({
                   {can("Terminals.Edit") && <Btn variant="ghost" sm icon="plus" style={{ marginTop: 12, display: "flex" }} onClick={() => setShowSimModal(true)}>Link SIM Card</Btn>}
                 </div>
               )}
-            </div>
-          </Card>
-
-          <Card title="Rental Setup" icon="tag">
-            <div className="card-pad">
-              <dl className="kv" style={{ gridTemplateColumns: "118px 1fr" }}>
-                <dt>Plan</dt><dd>{terminal.rental_plan}</dd>
-                <dt>Monthly</dt><dd>RM {terminal.rental_rate}.00</dd>
-              </dl>
             </div>
           </Card>
 

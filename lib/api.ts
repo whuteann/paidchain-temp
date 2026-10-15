@@ -783,8 +783,8 @@ export function merchantDisplayBank(m: MerchantOut): string {
 }
 
 export interface MerchantCommercialProfileIn {
-  rental_plan_id?: string | null;
   rental_price?: number | null;
+  deposit?: number | null;
   plan_period?: string | null;
   effective_date?: string | null;
 }
@@ -870,8 +870,6 @@ export interface MerchantTerminalOut {
   tid: string | null;
   location: string;
   last_movement: string;
-  rental_rate: number;
-  rental_plan: string;
   sim_type: string;
   condition_note: string;
   merchant: { id: string; name: string };
@@ -906,8 +904,8 @@ export interface MerchantJobOut {
 export interface MerchantCommercialProfileOut {
   id: string;
   merchant_id: string;
-  rental_plan_id: string | null;
   rental_price: number | null;
+  deposit: number | null;
   plan_period: string | null;
   effective_date: string | null;
 }
@@ -1033,7 +1031,7 @@ export interface BankUpdate {
 }
 
 export const banks = {
-  list: () => req<BankOut[]>("GET", "/banks"),
+  list: (params?: { scope?: string }) => req<BankOut[]>("GET", "/banks", { params }),
   create: (body: BankCreate) => req<BankOut>("POST", "/banks", { body }),
   update: (bankId: string, body: BankUpdate) => req<BankOut>("PATCH", `/banks/${bankId}`, { body }),
   remove: (bankId: string) => req<BankOut>("DELETE", `/banks/${bankId}`),
@@ -1108,8 +1106,6 @@ export interface TerminalOut {
   customer?: CustomerRef | null;
   location: string;
   last_movement: string;
-  rental_rate: number;
-  rental_plan: string;
   sim: string;
   condition_note: string;
   term_setting_id: string;
@@ -1150,8 +1146,6 @@ export interface TerminalUpdate {
   status?: string;
   merchant_id?: string | null;
   location?: string;
-  rental_rate?: number;
-  rental_plan?: string;
   sim_type?: string;
   condition_note?: string;
 }
@@ -1469,6 +1463,9 @@ export const jobs = {
   refreshParcel: (id: string) =>
     req<JobOut>("POST", `/jobs/${id}/parcel/refresh`),
 
+  clearParcel: (id: string) =>
+    req<JobOut>("DELETE", `/jobs/${id}/parcel`),
+
   export: (p?: { query?: string; type?: string; status?: string; bank?: string; date_from?: string; date_to?: string; date_field?: string }) =>
     reqBlob("GET", "/jobs/export", { params: p }),
 
@@ -1655,7 +1652,6 @@ export interface RentalOut {
   terminal: { id: string; serial: string; brand: string; model: string; tid: string | null };
   connection_type: string;
   plan: string;
-  rental_plan_id: string | null;
   plan_period: string | null;
   monthly_rate: number | null;
   deposit: number | null;
@@ -2221,43 +2217,6 @@ export const mdr = {
   update: (rate_id: string, body: MdrUpdate) => req<MdrOut>("PATCH", `/mdr/${rate_id}`, { body }),
 };
 
-// ─── Rental Plans ─────────────────────────────────────────────────────────────
-
-export interface RentalPlanOut {
-  id: string;
-  name: string;
-  plan_period: string;
-  monthly_rate: number;
-  deposit: number;
-  setup_fee: number;
-  active: boolean;
-}
-
-export interface RentalPlanCreate {
-  name: string;
-  plan_period?: string;
-  monthly_rate: number;
-  deposit?: number;
-  setup_fee?: number;
-  active?: boolean;
-}
-
-export interface RentalPlanUpdate {
-  name?: string;
-  plan_period?: string;
-  monthly_rate?: number;
-  deposit?: number;
-  setup_fee?: number;
-  active?: boolean;
-}
-
-export const rentalPlans = {
-  list: (params?: { active?: boolean }) => req<RentalPlanOut[]>("GET", "/settings/rental-plans", { params }),
-  create: (body: RentalPlanCreate) => req<RentalPlanOut>("POST", "/settings/rental-plans", { body }),
-  update: (plan_id: string, body: RentalPlanUpdate) => req<RentalPlanOut>("PATCH", `/settings/rental-plans/${plan_id}`, { body }),
-  deactivate: (plan_id: string) => req<RentalPlanOut>("DELETE", `/settings/rental-plans/${plan_id}`),
-};
-
 // ─── Unified export ───────────────────────────────────────────────────────────
 
 export const api = {
@@ -2286,5 +2245,4 @@ export const api = {
   roles,
   auditLogs,
   mdr,
-  rentalPlans,
 };
