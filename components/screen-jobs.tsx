@@ -154,6 +154,16 @@ function formatDateTime(iso: string) {
   });
 }
 
+const CARRIER_LABELS: Record<string, string> = {
+  pos_malaysia: "Pos Malaysia",
+};
+
+/** Display-only — the backend stores carrier as a lowercase_underscore slug;
+ * never show that raw value in the UI. */
+function carrierLabel(carrier: string): string {
+  return CARRIER_LABELS[carrier] ?? carrier.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
 function parseStamp(stamp: string) {
   if (stamp.includes(" · ")) {
     return new Date(stamp.replace(" · ", "T") + ":00Z");
@@ -659,7 +669,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
 
           {type === "Installation" && (
             <>
-              <Field label="Connection type" hint="how this merchant-terminal connection is billed">
+              <Field label="Engagement Terms" hint="how this merchant-terminal connection is billed">
                 <select
                   className="input"
                   value={connectionType}
@@ -667,6 +677,7 @@ export function CreateJobModal({ onClose, onCreate, nav, presetCustomer = null, 
                 >
                   <option value="Rental">Rental</option>
                   <option value="MDR Split">MDR Split</option>
+                  <option value="Rental + MDR">Rental + MDR</option>
                 </select>
               </Field>
 
@@ -1438,7 +1449,7 @@ function TrackParcelModal({ job, onClose, onSaved }: {
 
   return (
     <Modal
-      title={job.shipment_tracking ? "Change Tracking Number" : "Track Parcel"}
+      title={job.shipment_tracking ? "Update Tracking Number" : "Add Tracking Number"}
       sub={job.id + " · " + job.type}
       icon="truck"
       size="slim"
@@ -1447,11 +1458,11 @@ function TrackParcelModal({ job, onClose, onSaved }: {
         <div className="mf-spacer" />
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" disabled={saving || !trackingNumber.trim()} onClick={submit}>
-          {saving ? "Saving…" : "Track Parcel"}
+          {saving ? "Saving…" : job.shipment_tracking ? "Update Tracking Number" : "Add Tracking Number"}
         </Btn>
       </>}
     >
-      <Field label="Tracking number" hint="required">
+      <Field label="Tracking number" hint="required · optional for this job, applies to any job type and stage">
         <input className="input" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="EE123456789MY" />
       </Field>
       {err && <div style={{ marginTop: 8, fontSize: 13, color: "var(--bad)" }}>{err}</div>}
@@ -1483,6 +1494,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [showCancel, setShowCancel] = useState(false);
   const [showTrackParcel, setShowTrackParcel] = useState(false);
   const [refreshingParcel, setRefreshingParcel] = useState(false);
+  const [showClearParcel, setShowClearParcel] = useState(false);
+  const [clearingParcel, setClearingParcel] = useState(false);
   const [docBusy, setDocBusy] = useState<"form" | "do" | "pickup" | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -1539,9 +1552,6 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const hasPreparedDevice = hasJobTerminals ? allJobTerminalsAssigned : Boolean(job.terminal);
   const devicePreparationBlocked = ["Installation", "Replacement"].includes(job.type) && nextStage === "Device Prepared" && !hasPreparedDevice;
   const jobTerminalAssignmentRequired = job.type === "Installation" || job.type === "Replacement";
-  const deviceReturnedIdx = stages.indexOf("Device Returned");
-  const parcelTrackingStage = deviceReturnedIdx > 0 ? stages[deviceReturnedIdx - 1] : null;
-  const showTrackParcelAction = parcelTrackingStage !== null && job.stage === parcelTrackingStage && !done;
   const jobTerminalCardTitle =
     job.type === "Installation" ? "Installation Devices"
       : job.type === "Replacement" ? "Replacement Devices"
@@ -1588,6 +1598,21 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
       flash("Failed to refresh tracking");
     } finally {
       setRefreshingParcel(false);
+    }
+  }
+
+  async function clearParcel() {
+    if (!job || !can("Jobs.Edit")) return;
+    setClearingParcel(true);
+    try {
+      const updated = await api.jobs.clearParcel(job.id);
+      setJob(updated);
+      setShowClearParcel(false);
+      flash("Tracking number removed");
+    } catch {
+      flash("Failed to remove tracking number");
+    } finally {
+      setClearingParcel(false);
     }
   }
 
@@ -1755,9 +1780,9 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
           {can("Jobs.Delete") && isCancellableStage(job.stage) && (
             <Btn variant="danger" icon="x" onClick={() => setShowCancel(true)}>Cancel Job</Btn>
           )}
-          {can("Jobs.Edit") && showTrackParcelAction && (
+          {can("Jobs.Edit") && (
             <Btn variant="ghost" icon="truck" onClick={() => setShowTrackParcel(true)}>
-              {job.shipment_tracking ? "Change Tracking #" : "Track Parcel"}
+              {job.shipment_tracking ? "Update Tracking #" : "Add Tracking #"}
             </Btn>
           )}
           {can("Jobs.Export") && job.print_form && (
@@ -2033,15 +2058,18 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
               title="Shipment Tracking"
               icon="truck"
               actions={can("Jobs.Edit") ? (
-                <Btn variant="ghost" sm icon="refresh" disabled={refreshingParcel} onClick={refreshParcel}>
-                  {refreshingParcel ? "Refreshing…" : "Refresh status"}
-                </Btn>
+                <>
+                  <Btn variant="ghost" sm icon="refresh" disabled={refreshingParcel} onClick={refreshParcel}>
+                    {refreshingParcel ? "Refreshing…" : "Refresh status"}
+                  </Btn>
+                  <Btn variant="ghost" sm icon="x" onClick={() => setShowClearParcel(true)}>Remove tracking</Btn>
+                </>
               ) : undefined}
             >
               <div className="card-pad">
                 <dl className="kv" style={{ gridTemplateColumns: "128px 1fr" }}>
                   <dt>Tracking #</dt><dd className="mono">{job.shipment_tracking.tracking_number}</dd>
-                  <dt>Carrier</dt><dd>{job.shipment_tracking.carrier}</dd>
+                  <dt>Carrier</dt><dd>{carrierLabel(job.shipment_tracking.carrier)}</dd>
                   <dt>Status</dt><dd>{job.shipment_tracking.status ? <Chip cls="chip-neutral" dot>{job.shipment_tracking.status}</Chip> : "—"}</dd>
                   {job.shipment_tracking.status_description && (<><dt>Details</dt><dd>{job.shipment_tracking.status_description}</dd></>)}
                   <dt>Last event</dt><dd className="mono">{job.shipment_tracking.last_event_at ? formatDateTime(job.shipment_tracking.last_event_at) : "—"}</dd>
@@ -2264,6 +2292,29 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             flash("Tracking number saved");
           }}
         />
+      )}
+
+      {showClearParcel && can("Jobs.Edit") && job.shipment_tracking && (
+        <Modal
+          title="Remove tracking number"
+          sub={`${job.id} · ${job.shipment_tracking.tracking_number}`}
+          icon="x"
+          size="slim"
+          onClose={() => setShowClearParcel(false)}
+          foot={<>
+            <div className="mf-spacer" />
+            <Btn variant="ghost" onClick={() => setShowClearParcel(false)}>Back</Btn>
+            <Btn variant="danger" icon="x" disabled={clearingParcel} onClick={clearParcel}>
+              {clearingParcel ? "Removing…" : "Remove Tracking"}
+            </Btn>
+          </>}
+        >
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+            This removes the tracking number from this job. The tracking record itself
+            isn&apos;t deleted — it stays looked up by number and can be re-added here
+            later if needed.
+          </p>
+        </Modal>
       )}
 
       {showCancel && can("Jobs.Delete") && (

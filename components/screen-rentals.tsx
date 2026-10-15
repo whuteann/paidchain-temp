@@ -19,6 +19,14 @@ function RentalStatus({ status }: { status: string }) {
   return <Chip cls={m.chip} dot>{status}</Chip>;
 }
 
+const CONNECTION_TYPE_CHIP: Record<string, string> = {
+  "MDR Split": "chip-indigo",
+  "Rental + MDR": "chip-orange",
+};
+function connectionTypeChipClass(type: string): string {
+  return CONNECTION_TYPE_CHIP[type] ?? "chip-neutral";
+}
+
 function monthsBetween(start: string, end: string): number {
   const a = new Date(start), b = new Date(end);
   return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
@@ -57,7 +65,6 @@ function CreateRentalModal({ onClose, onCreate }: { onClose: () => void; onCreat
       terminal: { id: t.serial, serial: t.serial, brand: t.brand, model: t.model, tid: t.tid || null },
       connection_type: "Rental",
       plan: form.plan,
-      rental_plan_id: null,
       plan_period: null,
       monthly_rate: parseFloat(form.monthlyRate) || t.rentalRate,
       deposit: parseFloat(form.deposit) || 0,
@@ -158,11 +165,18 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+const EXPORT_CONNECTION_TYPES = ["Rental", "MDR Split", "Rental + MDR"];
+
 function ExportRentalsModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ query: "", status: "", bank: "", date_from: "", date_to: "", date_field: "start_date" });
+  const [connectionTypes, setConnectionTypes] = useState<string[]>([]);
   const [banks, setBanks] = useState<BankOut[]>([]);
   const [exporting, setExporting] = useState(false);
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  function toggleConnectionType(type: string, checked: boolean) {
+    setConnectionTypes((prev) => checked ? [...prev, type] : prev.filter((t) => t !== type));
+  }
 
   useEffect(() => {
     api.banks.list().then(setBanks).catch(console.error);
@@ -172,12 +186,13 @@ function ExportRentalsModal({ onClose }: { onClose: () => void }) {
     setExporting(true);
     try {
       const blob = await api.rentals.export({
-        query:      form.query      || undefined,
-        status:     form.status     || undefined,
-        bank:       form.bank       || undefined,
-        date_from:  form.date_from  || undefined,
-        date_to:    form.date_to    || undefined,
-        date_field: form.date_field || undefined,
+        query:           form.query      || undefined,
+        status:          form.status     || undefined,
+        bank:            form.bank       || undefined,
+        date_from:       form.date_from  || undefined,
+        date_to:         form.date_to    || undefined,
+        date_field:      form.date_field || undefined,
+        connection_type: connectionTypes.length ? connectionTypes.join(",") : undefined,
       });
       downloadBlob(blob, "rentals-export.csv");
       onClose();
@@ -217,6 +232,21 @@ function ExportRentalsModal({ onClose }: { onClose: () => void }) {
           </select>
         </Field>
       </div>
+      <Field label="Engagement Terms" hint="leave all unchecked to export every type">
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          {EXPORT_CONNECTION_TYPES.map((type) => (
+            <label key={type} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={connectionTypes.includes(type)}
+                onChange={(e) => toggleConnectionType(type, e.target.checked)}
+                style={{ width: 14, height: 14, cursor: "pointer" }}
+              />
+              {type}
+            </label>
+          ))}
+        </div>
+      </Field>
       <div className="field-row">
         <Field label="Date from">
           <input className="input" type="date" value={form.date_from} onChange={(e) => set("date_from", e.target.value)} />
@@ -347,7 +377,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
             ))}
           </select>
           <select className="select" value={connectionType} onChange={(e) => { setConnectionType(e.target.value); resetPage(); }}>
-            {["All", "Rental", "MDR Split"].map((t) => (
+            {["All", "Rental", "MDR Split", "Rental + MDR"].map((t) => (
               <option key={t} value={t}>{t === "All" ? "All Types" : t}</option>
             ))}
           </select>
@@ -399,7 +429,7 @@ export function Rentals({ nav }: { nav: NavFn }) {
                             <span className="c2-sub mono">{r.terminal.serial}</span>
                           </div>
                         </td>
-                        <td><Chip cls={r.connection_type === "MDR Split" ? "chip-indigo" : "chip-neutral"}>{r.connection_type}</Chip></td>
+                        <td><Chip cls={connectionTypeChipClass(r.connection_type)}>{r.connection_type}</Chip></td>
                         <td className="td-mut">{r.plan}</td>
                         <td className="td-mono td-strong">{r.monthly_rate != null ? money(r.monthly_rate) : "—"}</td>
                         <td className="td-mono td-mut">{r.start_date}</td>
@@ -512,6 +542,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [docBusy, setDocBusy] = useState<"invoice" | "einvoice" | null>(null);
   const [showTypeConfirm, setShowTypeConfirm] = useState(false);
   const [togglingType, setTogglingType] = useState(false);
+  const [selectedType, setSelectedType] = useState("");
 
   useEffect(() => {
     api.rentals.get(id)
@@ -550,14 +581,14 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
     setRental(next);
   }
 
-  async function toggleConnectionType() {
-    const nextType = rental!.connection_type === "Rental" ? "MDR Split" : "Rental";
+  async function changeConnectionType() {
+    if (!selectedType || selectedType === rental!.connection_type) return;
     setTogglingType(true);
     try {
-      const updated = await api.rentals.update(rental!.id, { connection_type: nextType });
+      const updated = await api.rentals.update(rental!.id, { connection_type: selectedType });
       setRental(updated);
       setShowTypeConfirm(false);
-      showToast(`Switched to ${nextType}`);
+      showToast(`Switched to ${selectedType}`);
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : "Failed to change connection type");
     } finally {
@@ -618,8 +649,8 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
         sub={rental.customer.name + " · " + rental.merchant.name + " · " + rental.terminal.brand + " " + rental.terminal.model}
         actions={<>
           <Btn variant="ghost" icon="arrowLeft" onClick={() => nav("rentals")}>Back</Btn>
-          {can("Rentals.Edit") && <Btn variant="ghost" icon="swap" onClick={() => setShowTypeConfirm(true)}>
-            {rental.connection_type === "Rental" ? "Switch to MDR Split" : "Switch to Rental"}
+          {can("Rentals.Edit") && <Btn variant="ghost" icon="swap" onClick={() => { setSelectedType(rental.connection_type); setShowTypeConfirm(true); }}>
+            Change Engagement Terms
           </Btn>}
           {can("Rentals.Edit") && <Btn variant="ghost" icon="edit" onClick={() => setShowEdit(true)}>Edit</Btn>}
           {can("Rentals.Export") && <Btn variant="ghost" icon="download">Export</Btn>}
@@ -629,7 +660,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       {/* Status bar */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
         <RentalStatus status={rental.status} />
-        <Chip cls={rental.connection_type === "MDR Split" ? "chip-indigo" : "chip-neutral"}>{rental.connection_type}</Chip>
+        <Chip cls={connectionTypeChipClass(rental.connection_type)}>{rental.connection_type}</Chip>
         <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{rental.plan}</span>
         {rental.invoice_issued && <Chip cls="chip-info">Invoice {rental.invoice_issued}</Chip>}
         {rental.einvoice_issued && <Chip cls="chip-indigo"><Icon name="invoice" size={13} />eInvoice {rental.einvoice_issued}</Chip>}
@@ -654,7 +685,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
             </div>
           </Card>
 
-          {rental.connection_type === "Rental" && (
+          {rental.connection_type !== "MDR Split" && (
           <Card title="Billing Documents" icon="invoice" style={{ flex: 1 }} actions={<>
             {can("Rentals.Edit") && <Btn variant="ghost" sm icon="invoice" disabled={docBusy !== null} onClick={generateInvoice}>
               {docBusy === "invoice" ? "Generating…" : rental.invoice_issued ? "Regenerate Invoice" : "Generate Invoice"}
@@ -721,12 +752,11 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       {/* Rental terms card */}
-      {rental.connection_type === "Rental" && (
+      {rental.connection_type !== "MDR Split" && (
       <Card title="Rental Terms" icon="receipt">
         <div style={{ padding: "4px 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
           {([
             ["Plan",         rental.plan],
-            rental.rental_plan_id ? ["Plan ID",      rental.rental_plan_id] : null,
             rental.plan_period    ? ["Period",        rental.plan_period]    : null,
             ["Monthly Rate", money(rental.monthly_rate ?? 0)],
             ["Deposit Paid", money(rental.deposit ?? 0)],
@@ -767,7 +797,7 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       {showEdit && can("Rentals.Edit") && <EditRentalModal rental={rental} onClose={() => setShowEdit(false)} onSave={(r) => { setRental(r); showToast("Rental updated"); }} />}
       {showTypeConfirm && (
         <Modal
-          title={rental.connection_type === "Rental" ? "Switch to MDR Split?" : "Switch to Rental?"}
+          title="Change Engagement Terms"
           sub={`${rental.id} · ${rental.merchant.name}`}
           icon="swap"
           size="slim"
@@ -775,15 +805,26 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
           foot={<>
             <div className="mf-spacer" />
             <Btn variant="ghost" onClick={() => setShowTypeConfirm(false)}>Back</Btn>
-            <Btn variant="primary" icon="swap" disabled={togglingType} onClick={toggleConnectionType}>
+            <Btn variant="primary" icon="swap" disabled={togglingType || !selectedType || selectedType === rental.connection_type} onClick={changeConnectionType}>
               {togglingType ? "Switching…" : "Switch"}
             </Btn>
           </>}
         >
+          <Field label="New engagement terms" hint={`currently ${rental.connection_type}`}>
+            <select className="input" value={selectedType} onChange={(e) => setSelectedType(e.target.value)}>
+              {["Rental", "MDR Split", "Rental + MDR"].map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </Field>
           <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
-            {rental.connection_type === "Rental"
-              ? "This will clear the monthly rate, deposit, and rental plan on this connection, and hide billing documents. Any existing invoice/eInvoice history stays recorded. This change takes effect immediately."
-              : "This will restore rental billing on this connection. The monthly rate and deposit will reset to RM 0 — set the correct amount via Edit afterwards."}
+            {selectedType === rental.connection_type
+              ? "Select a different type above to change this connection's engagement terms."
+              : selectedType === "MDR Split"
+                ? "This will clear the monthly rate, deposit, and rental plan on this connection, and hide billing documents. Any existing invoice/eInvoice history stays recorded. This change takes effect immediately."
+                : rental.connection_type === "MDR Split"
+                  ? "This will restore billing on this connection. The monthly rate and deposit will reset to RM 0 — set the correct amount via Edit afterwards."
+                  : "This only changes the label on this connection — the existing monthly rate, deposit, and plan stay exactly as they are."}
           </p>
         </Modal>
       )}

@@ -5,7 +5,7 @@ import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, MerchantStatus, Readiness, Entity, Pagination, Empty, Chip, TerminalStatus, JobStatus, SlaChip, Modal, Field, MobileListItem, ResponsiveTable } from "./components";
 import { BANKS, JOB_TYPES } from "./data";
 import { api, ApiError, merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
-import type { AddressIn, BankOut, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, RentalPlanOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, MerchantMidOut, MerchantMidCreate, MerchantMidUpdate, MerchantMidAcceptanceOut, MerchantMidAcceptanceCreate, MerchantMidAcceptanceUpdate, MerchantMidHistoryOut, MerchantMidAcceptanceHistoryOut, AcceptanceSettingOut, AcceptanceSettingCreate, AcceptanceSettingUpdate, MdrOut } from "@/lib/api";
+import type { AddressIn, BankOut, CustomerOut, MerchantOut, MerchantCreate, MerchantUpdate, MerchantTerminalOut, MerchantJobOut, MerchantCommercialProfileIn, MerchantCommercialProfileOut, MerchantMidOut, MerchantMidCreate, MerchantMidUpdate, MerchantMidAcceptanceOut, MerchantMidAcceptanceCreate, MerchantMidAcceptanceUpdate, MerchantMidHistoryOut, MerchantMidAcceptanceHistoryOut, AcceptanceSettingOut, AcceptanceSettingCreate, AcceptanceSettingUpdate, MdrOut } from "@/lib/api";
 import { NavFn } from "./shell";
 import { CreateJobModal } from "./screen-jobs";
 import { HardDeleteModal } from "./hard-delete-modal";
@@ -110,7 +110,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
 
   useEffect(() => {
     let cancelled = false;
-    api.banks.list()
+    api.banks.list(editing ? undefined : { scope: "all" })
       .then((items) => {
         if (cancelled) return;
         setBankOptions(items);
@@ -131,11 +131,9 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
   // Commercial profile step (create-only)
   const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
   const [step, setStep] = useState<1 | 2>(1);
-  const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
-  const [rentalPlansLoading, setRentalPlansLoading] = useState(false);
   const [commercial, setCommercial] = useState({
-    rental_plan_id: "",
     rental_price: "",
+    deposit: "",
     plan_period: "Monthly",
     effective_date: "",
   });
@@ -206,21 +204,7 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       return;
     }
     if (!valid) return;
-    setRentalPlansLoading(true);
-    api.rentalPlans.list({ active: true })
-      .then(setRentalPlans)
-      .catch(console.error)
-      .finally(() => setRentalPlansLoading(false));
     setStep(2);
-  }
-
-  function setCommercialRentalPlan(planId: string) {
-    const plan = rentalPlans.find((p) => p.id === planId);
-    setCommercial((prev) => ({
-      ...prev,
-      rental_plan_id: planId,
-      ...(plan ? { rental_price: String(plan.monthly_rate), plan_period: plan.plan_period } : {}),
-    }));
   }
 
   async function saveCommercial() {
@@ -233,8 +217,8 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       const body: MerchantCreate = {
         ...buildBaseBody(),
         commercial_profile: {
-          rental_plan_id: commercial.rental_plan_id || null,
           rental_price: commercial.rental_price ? parseFloat(commercial.rental_price) : null,
+          deposit: commercial.deposit ? parseFloat(commercial.deposit) : null,
           plan_period: commercial.plan_period || null,
           effective_date: commercial.effective_date || null,
         },
@@ -419,29 +403,20 @@ export function CreateMerchantModal({ onClose, onSave, customerId, customerName,
       {/* ── Step 2: Commercial profile ── */}
       {step === 2 && (
         <>
-          <Field label="Rental plan">
-            {rentalPlansLoading ? (
-              <div className="input" style={{ color: "var(--ink-3)" }}>Loading plans…</div>
-            ) : (
-              <select className="input" value={commercial.rental_plan_id} onChange={(e) => setCommercialRentalPlan(e.target.value)}>
-                <option value="">— None —</option>
-                {rentalPlans.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} · RM {p.monthly_rate.toFixed(2)}/{p.plan_period}</option>
-                ))}
-              </select>
-            )}
-          </Field>
-
           <div className="field-row">
             <Field label="Rental price (RM)">
-              <input className="input" type="number" min="0" step="0.01" placeholder="Auto-filled from plan" value={commercial.rental_price} onChange={(e) => setC("rental_price", e.target.value)} />
+              <input className="input" type="number" min="0" step="0.01" placeholder="e.g. 80.00" value={commercial.rental_price} onChange={(e) => setC("rental_price", e.target.value)} />
             </Field>
-            <Field label="Billing period">
-              <select className="input" value={commercial.plan_period} onChange={(e) => setC("plan_period", e.target.value)}>
-                {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
-              </select>
+            <Field label="Deposit (RM)">
+              <input className="input" type="number" min="0" step="0.01" placeholder="e.g. 200.00" value={commercial.deposit} onChange={(e) => setC("deposit", e.target.value)} />
             </Field>
           </div>
+
+          <Field label="Billing period">
+            <select className="input" value={commercial.plan_period} onChange={(e) => setC("plan_period", e.target.value)}>
+              {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </Field>
 
           <Field label="Effective date">
             <input className="input" type="date" value={commercial.effective_date} onChange={(e) => setC("effective_date", e.target.value)} />
@@ -1343,11 +1318,9 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   const PLAN_PERIODS = ["Monthly", "Quarterly", "Bi-Annual", "Annual"];
   const editing = Boolean(existing);
 
-  const [rentalPlans, setRentalPlans] = useState<RentalPlanOut[]>([]);
-  const [rentalPlansLoading, setRentalPlansLoading] = useState(true);
   const [f, setF] = useState({
-    rental_plan_id: existing?.rental_plan_id ?? "",
     rental_price: existing?.rental_price != null ? String(existing.rental_price) : "",
+    deposit: existing?.deposit != null ? String(existing.deposit) : "",
     plan_period: existing?.plan_period ?? "Monthly",
     effective_date: existing?.effective_date ?? "",
   });
@@ -1355,38 +1328,12 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function setRentalPlan(planId: string, plans = rentalPlans) {
-    const plan = plans.find((p) => p.id === planId);
-    setF((prev) => ({
-      ...prev,
-      rental_plan_id: planId,
-      ...(plan ? { rental_price: String(plan.monthly_rate), plan_period: plan.plan_period } : {}),
-    }));
-  }
-
-  useEffect(() => {
-    api.rentalPlans.list({ active: true })
-      .then((plans) => {
-        setRentalPlans(plans);
-        const plan = plans.find((p) => p.id === existing?.rental_plan_id);
-        if (plan) {
-          setF((prev) => ({
-            ...prev,
-            rental_price: String(plan.monthly_rate),
-            plan_period: plan.plan_period,
-          }));
-        }
-      })
-      .catch(console.error)
-      .finally(() => setRentalPlansLoading(false));
-  }, [existing?.rental_plan_id]);
-
   async function save() {
     setSaving(true); setErr(null);
     try {
       const body: MerchantCommercialProfileIn = {
-        rental_plan_id: f.rental_plan_id || null,
         rental_price: f.rental_price ? parseFloat(f.rental_price) : null,
+        deposit: f.deposit ? parseFloat(f.deposit) : null,
         plan_period: f.plan_period || null,
         effective_date: f.effective_date || null,
       };
@@ -1413,29 +1360,20 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
         </Btn>
       </>}
     >
-      <Field label="Rental plan">
-        {rentalPlansLoading ? (
-          <div className="input" style={{ color: "var(--ink-3)" }}>Loading plans…</div>
-        ) : (
-          <select className="input" value={f.rental_plan_id} onChange={(e) => setRentalPlan(e.target.value)}>
-            <option value="">— None —</option>
-            {rentalPlans.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} · RM {p.monthly_rate.toFixed(2)}/{p.plan_period}</option>
-            ))}
-          </select>
-        )}
-      </Field>
-
       <div className="field-row">
         <Field label="Rental price (RM)">
-          <input className="input" type="number" min="0" step="0.01" placeholder="Auto-filled from plan" value={f.rental_price} onChange={(e) => set("rental_price", e.target.value)} />
+          <input className="input" type="number" min="0" step="0.01" placeholder="e.g. 80.00" value={f.rental_price} onChange={(e) => set("rental_price", e.target.value)} />
         </Field>
-        <Field label="Billing period">
-          <select className="input" value={f.plan_period} onChange={(e) => set("plan_period", e.target.value)}>
-            {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
-          </select>
+        <Field label="Deposit (RM)">
+          <input className="input" type="number" min="0" step="0.01" placeholder="e.g. 200.00" value={f.deposit} onChange={(e) => set("deposit", e.target.value)} />
         </Field>
       </div>
+
+      <Field label="Billing period">
+        <select className="input" value={f.plan_period} onChange={(e) => set("plan_period", e.target.value)}>
+          {PLAN_PERIODS.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </Field>
 
       <Field label="Effective date">
         <input className="input" type="date" value={f.effective_date} onChange={(e) => set("effective_date", e.target.value)} />
@@ -2392,7 +2330,7 @@ function CommercialTab({ m, canEdit, onEdit }: { m: MerchantOut; canEdit: boolea
   if (!m.commercial_profile) {
     return (
       <Card>
-        <Empty icon="percent" title="No commercial profile" sub="Set up a commercial profile to configure rental plan and billing terms" />
+        <Empty icon="percent" title="No commercial profile" sub="Set up a commercial profile to configure rental pricing and billing terms" />
         {canEdit && (
           <div style={{ display: "flex", justifyContent: "center", paddingBottom: 20 }}>
             <Btn variant="primary" icon="plus" onClick={onEdit}>Set Up Commercial Profile</Btn>
@@ -2406,8 +2344,8 @@ function CommercialTab({ m, canEdit, onEdit }: { m: MerchantOut; canEdit: boolea
     <Card title="Commercial Profile" icon="percent" actions={canEdit ? <Btn variant="ghost" sm icon="edit" onClick={onEdit}>Edit</Btn> : undefined}>
       <div className="card-pad">
         <dl className="kv">
-          {cp.rental_plan_id && <><dt>Rental Plan</dt><dd className="mono">{cp.rental_plan_id}</dd></>}
           {cp.rental_price != null && <><dt>Rental Price</dt><dd>RM {cp.rental_price.toFixed(2)}</dd></>}
+          {cp.deposit != null && <><dt>Deposit</dt><dd>RM {cp.deposit.toFixed(2)}</dd></>}
           {cp.plan_period && <><dt>Billing Period</dt><dd>{cp.plan_period}</dd></>}
           {cp.effective_date && <><dt>Effective Date</dt><dd>{cp.effective_date}</dd></>}
         </dl>
@@ -2431,7 +2369,6 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
           { key: "sim", header: "SIM", sortValue: (r) => merchantTerminalSimLabel(r), render: (t) => <span className="td-mut">{merchantTerminalSimLabel(t) || "—"}</span> },
           { key: "status", header: "Status", sortValue: (r) => r.status, render: (t) => <TerminalStatus status={t.status} /> },
           { key: "location", header: "Location", sortValue: (r) => r.location, render: (t) => <span className="td-mut">{t.location}</span> },
-          { key: "rental", header: "Rental", sortValue: (r) => r.rental_rate, render: (t) => <>RM {t.rental_rate}/mo</> },
         ]}
         renderMobile={(t) => (
           <MobileListItem
@@ -2442,7 +2379,6 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
               { label: "TID", value: <span className="td-mono">{t.tid || "—"}</span> },
               { label: "SIM", value: merchantTerminalSimLabel(t) || "—" },
               { label: "Location", value: t.location },
-              { label: "Rental", value: <>RM {t.rental_rate}/mo</> },
             ]}
             onClick={() => nav("terminal-detail", t.id)}
             chevron
