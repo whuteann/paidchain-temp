@@ -901,6 +901,14 @@ export interface MerchantJobOut {
   previous_terminal: { id: string; serial: string; brand: string; model: string } | null;
 }
 
+export interface MerchantJobPage {
+  items: MerchantJobOut[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
 export interface MerchantCommercialProfileOut {
   id: string;
   merchant_id: string;
@@ -922,8 +930,8 @@ export const merchants = {
   export: (p?: { query?: string; status?: string; customer_id?: string }) =>
     reqBlob("GET", "/merchants/export", { params: p }),
   terminals: (merchantId: string) => req<MerchantTerminalOut[]>("GET", `/merchants/${merchantId}/terminals`),
-  jobs: (merchantId: string, status?: string) =>
-    req<MerchantJobOut[]>("GET", `/merchants/${merchantId}/jobs`, { params: { status } }),
+  jobs: (merchantId: string, params?: { status?: string; scope?: "open" | "closed"; page?: number; per_page?: number }) =>
+    req<MerchantJobPage>("GET", `/merchants/${merchantId}/jobs`, { params }),
   updateCommercial: (merchantId: string, body: MerchantCommercialProfileIn) =>
     req<MerchantCommercialProfileOut>("PATCH", `/merchants/${merchantId}/commercial`, { body }),
 
@@ -1664,6 +1672,9 @@ export interface RentalOut {
   discount_value: number | null;
   invoice_issued: string | null;
   einvoice_issued: string | null;
+  mid_value?: string | null;
+  mdr_rate_id?: string | null;
+  mdr_rate?: MdrOut | null;
 }
 
 export interface RentalCreate {
