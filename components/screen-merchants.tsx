@@ -1384,6 +1384,8 @@ function CommercialProfileModal({ merchantId, existing, onClose, onSaved }: {
   );
 }
 
+const MERCHANT_JOBS_PAGE_SIZE = 10;
+
 /* =================== DETAIL =================== */
 export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const can = useCan();
@@ -1393,6 +1395,10 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [tab, setTab] = useState("overview");
   const [linkedTerminals, setLinkedTerminals] = useState<MerchantTerminalOut[]>([]);
   const [merchantJobs, setMerchantJobs] = useState<MerchantJobOut[]>([]);
+  const [jobsScope, setJobsScope] = useState<"all" | "open" | "closed">("all");
+  const [jobsPage, setJobsPage] = useState(1);
+  const [jobsPages, setJobsPages] = useState(1);
+  const [jobsTotal, setJobsTotal] = useState(0);
   const [showCreateJob, setShowCreateJob] = useState(false);
   const [showEditMerchant, setShowEditMerchant] = useState(false);
   const [showEditCommercial, setShowEditCommercial] = useState(false);
@@ -1403,8 +1409,29 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       .catch((e) => { if (e instanceof ApiError && e.status === 404) setNotFound(true); })
       .finally(() => setLoading(false));
     api.merchants.terminals(id).then(setLinkedTerminals).catch(console.error);
-    api.merchants.jobs(id).then(setMerchantJobs).catch(console.error);
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.merchants.jobs(id, {
+      page: jobsPage,
+      per_page: MERCHANT_JOBS_PAGE_SIZE,
+      scope: jobsScope !== "all" ? jobsScope : undefined,
+    })
+      .then((p) => {
+        if (cancelled) return;
+        setMerchantJobs(p.items);
+        setJobsPages(p.pages);
+        setJobsTotal(p.total);
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [id, jobsPage, jobsScope]);
+
+  function handleJobsScopeChange(next: "all" | "open" | "closed") {
+    setJobsScope(next);
+    setJobsPage(1);
+  }
 
   if (loading) return (
     <div>
@@ -1490,7 +1517,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 20 }}>
         {[
           { l: "Merchant Terminals", v: linkedTerminals.length, ico: "terminal", c: "var(--info)" },
-          { l: "Open Jobs", v: merchantJobs.filter((j) => j.stage !== "Completed").length, ico: "jobs", c: "var(--warn)" },
+          { l: "Open Jobs", v: merchant.open_jobs_count ?? 0, ico: "jobs", c: "var(--warn)" },
           // { l: "Finance Readiness",  v: merchant.finance,           ico: "shield",   c: merchant.finance === "Ready" ? "var(--ok)" : "var(--warn)", small: true },
         ].map((s, i) => (
           <div key={i} className="stat">
@@ -1504,7 +1531,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
       </div>
 
       <div className="tabs">
-        {[["overview", "Overview"], ["commercial", "Commercial Profile"], ["terminals", "Linked Terminals (" + linkedTerminals.length + ")"], ["jobs", "Job History (" + merchantJobs.length + ")"]].map(([k, lbl]) => (
+        {[["overview", "Overview"], ["commercial", "Commercial Profile"], ["terminals", "Linked Terminals (" + linkedTerminals.length + ")"], ["jobs", "Job History (" + jobsTotal + ")"]].map(([k, lbl]) => (
           <div key={k} className={"tab" + (tab === k ? " active" : "")} onClick={() => setTab(k)}>{lbl}</div>
         ))}
       </div>
@@ -1512,7 +1539,7 @@ export function MerchantDetail({ id, nav }: { id: string; nav: NavFn }) {
         {tab === "overview" ? <OverviewTab m={merchant} nav={nav} canEdit={can("Merchants.Edit")} onMidSaved={handleMidSaved} onAcceptanceSaved={handleAcceptanceSaved} onMidUnlinked={handleMidUnlinked} />
           : tab === "commercial" ? <CommercialTab m={merchant} canEdit={can("Merchants.Edit")} onEdit={() => setShowEditCommercial(true)} />
             : tab === "terminals" ? <TerminalsTab rows={linkedTerminals} nav={nav} />
-              : <JobsTab rows={merchantJobs} nav={nav} />}
+              : <JobsTab rows={merchantJobs} nav={nav} total={jobsTotal} page={jobsPage} pages={jobsPages} onPageChange={setJobsPage} scope={jobsScope} onScopeChange={handleJobsScopeChange} />}
       </div>
 
       {showCreateJob && can("Jobs.Create") && (
@@ -2389,10 +2416,24 @@ function TerminalsTab({ rows, nav }: { rows: MerchantTerminalOut[]; nav: NavFn }
   );
 }
 
-function JobsTab({ rows, nav }: { rows: MerchantJobOut[]; nav: NavFn }) {
-  if (!rows.length) return <Card><Empty icon="jobs" title="No job history" sub="This merchant has no jobs on record yet" /></Card>;
+function JobsTab({ rows, nav, total, page, pages, onPageChange, scope, onScopeChange }: {
+  rows: MerchantJobOut[]; nav: NavFn; total: number; page: number; pages: number; onPageChange: (page: number) => void;
+  scope: "all" | "open" | "closed"; onScopeChange: (scope: "all" | "open" | "closed") => void;
+}) {
   return (
     <Card>
+      <Toolbar>
+        <select className="select" value={scope} onChange={(e) => onScopeChange(e.target.value as "all" | "open" | "closed")}>
+          <option value="all">All Jobs</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+        <span className="tb-meta">{total} results</span>
+      </Toolbar>
+      {!total ? (
+        <Empty icon="jobs" title="No job history" sub={scope === "all" ? "This merchant has no jobs on record yet" : `No ${scope} jobs for this merchant`} />
+      ) : (
+        <>
       <ResponsiveTable
         rows={rows}
         getKey={(j) => j.id}
@@ -2422,6 +2463,9 @@ function JobsTab({ rows, nav }: { rows: MerchantJobOut[]; nav: NavFn }) {
           />
         )}
       />
+      <Pagination total={total} shown={rows.length} page={page} pages={pages} onPageChange={onPageChange} />
+        </>
+      )}
     </Card>
   );
 }

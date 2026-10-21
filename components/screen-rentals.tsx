@@ -780,14 +780,18 @@ export function RentalDetail({ id, nav }: { id: string; nav: NavFn }) {
       {rental.connection_type === "MDR Split" && (
       <Card title="Connection Terms" icon="receipt">
         <div style={{ padding: "4px 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
-          {[
+          {([
+            ["MID", rental.mid_value || "No MID mounted on this terminal"],
+            ["MDR Rate", rental.mdr_rate
+              ? `${rental.mdr_rate.rate}% · ${rental.mdr_rate.type} (${rental.mdr_rate.network})`
+              : rental.mid_value ? "No MDR rate set on this MID — set one from the merchant's MID settings" : "—"],
             ["Start Date", rental.start_date],
             ["End Date",   rental.end_date || "Ongoing"],
             ["Duration",   months > 0 ? months + " month" + (months !== 1 ? "s" : "") : "< 1 month"],
-          ].map(([l, v]) => (
+          ] as [string, string][]).map(([l, v]) => (
             <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
               <span style={{ color: "var(--ink-2)" }}>{l}</span>
-              <span style={{ fontWeight: 500 }}>{v}</span>
+              <span style={{ fontWeight: 500, textAlign: "right", maxWidth: "60%" }}>{v}</span>
             </div>
           ))}
         </div>
