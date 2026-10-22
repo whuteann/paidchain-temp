@@ -1982,6 +1982,98 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             </Card>
           )}
 
+          <Card
+            title="Additional Attachments"
+            icon="fileCheck"
+            actions={can("Jobs.Edit") && (
+              <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddAttachment(true)}>Add attachment</Btn>
+            )}
+          >
+            <div className="card-pad">
+              {job.attachments.length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No additional attachments.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {job.attachments.map((file) => {
+                    const href = evidenceUrl(file.path);
+                    const isImage = evidenceIsImage(file);
+                    return (
+                      <div
+                        key={file.id}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                          padding: "12px",
+                          border: "1px solid var(--line)",
+                          borderRadius: 12,
+                          background: "var(--bg-2, #f7f7f7)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                              <span style={{ width: 28, height: 28, borderRadius: 8, background: "var(--surface)", border: "1px solid var(--line)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                                <Icon name={isImage ? "image" : "file"} size={15} />
+                              </span>
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: "var(--ink-1)", fontWeight: 600, fontSize: 13, textDecoration: "none", wordBreak: "break-word" }}
+                              >
+                                {evidenceFilename(file)}
+                              </a>
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                              Uploaded by {file.uploaded_by} · {formatDateTime(file.uploaded_at)}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", textDecoration: "none", fontSize: 12.5, fontWeight: 600 }}
+                            >
+                              <Icon name="link" size={13} />
+                              Open
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => downloadEvidenceFile(href, evidenceFilename(file))}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
+                            >
+                              <Icon name="download" size={13} />
+                              Download
+                            </button>
+                            {can("Jobs.Edit") && (
+                              <button
+                                type="button"
+                                onClick={() => setAttachmentToDelete(file)}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--bad)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
+                              >
+                                <Icon name="trash" size={13} />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {isImage && (
+                          <img
+                            alt={file.filename}
+                            src={href}
+                            style={{ width: "100%", height: 240, objectFit: "contain", border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </Card>
+
           <Card title="Evidence & Notes" icon="file">
             <div className="card-pad">
               <p style={{ margin: "0 0 14px", fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>{job.notes}</p>
@@ -2065,100 +2157,6 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
               </div>
             </div>
           </Card>
-
-          {done && (
-            <Card
-              title="Additional Attachments"
-              icon="fileCheck"
-              actions={can("Jobs.Edit") && (
-                <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddAttachment(true)}>Add attachment</Btn>
-              )}
-            >
-              <div className="card-pad">
-                {job.attachments.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No additional attachments.</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {job.attachments.map((file) => {
-                      const href = evidenceUrl(file.path);
-                      const isImage = evidenceIsImage(file);
-                      return (
-                        <div
-                          key={file.id}
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 10,
-                            padding: "12px",
-                            border: "1px solid var(--line)",
-                            borderRadius: 12,
-                            background: "var(--bg-2, #f7f7f7)",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                                <span style={{ width: 28, height: 28, borderRadius: 8, background: "var(--surface)", border: "1px solid var(--line)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                                  <Icon name={isImage ? "image" : "file"} size={15} />
-                                </span>
-                                <a
-                                  href={href}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={{ color: "var(--ink-1)", fontWeight: 600, fontSize: 13, textDecoration: "none", wordBreak: "break-word" }}
-                                >
-                                  {evidenceFilename(file)}
-                                </a>
-                              </div>
-                              <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
-                                Uploaded by {file.uploaded_by} · {formatDateTime(file.uploaded_at)}
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", textDecoration: "none", fontSize: 12.5, fontWeight: 600 }}
-                              >
-                                <Icon name="link" size={13} />
-                                Open
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => downloadEvidenceFile(href, evidenceFilename(file))}
-                                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
-                              >
-                                <Icon name="download" size={13} />
-                                Download
-                              </button>
-                              {can("Jobs.Edit") && (
-                                <button
-                                  type="button"
-                                  onClick={() => setAttachmentToDelete(file)}
-                                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--bad)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
-                                >
-                                  <Icon name="trash" size={13} />
-                                  Delete
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          {isImage && (
-                            <img
-                              alt={file.filename}
-                              src={href}
-                              style={{ width: "100%", height: 240, objectFit: "contain", border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </Card>
-          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
