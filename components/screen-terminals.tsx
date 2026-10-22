@@ -56,6 +56,7 @@ function EntitySearchSelect<T extends { id: string }>({
   }
 
   function handleChange(v: string) {
+    v = v.replace(/^\s+/, "");
     setQuery(v);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => runSearch(v), 300);
@@ -544,7 +545,7 @@ function SimLinkModal({ terminal, hasExisting, onClose, onLink }: {
         <input
           className="input"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => setQuery(e.target.value.replace(/^\s+/, ""))}
           placeholder="Search SIM card..."
           autoFocus
         />

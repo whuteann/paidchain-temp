@@ -38,6 +38,7 @@ function EntitySearchSelect<T extends { id: string }>({
   }
 
   function handleChange(v: string) {
+    v = v.replace(/^\s+/, "");
     setQuery(v);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => runSearch(v), 300);

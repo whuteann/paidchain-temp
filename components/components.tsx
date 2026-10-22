@@ -115,7 +115,7 @@ export function SearchBox({ value, onChange, placeholder, fullWidth }: { value: 
   return (
     <div className="search-box" style={fullWidth ? { maxWidth: "none" } : undefined}>
       <Icon name="search" size={16} />
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder || "Search…"} />
+      <input value={value} onChange={(e) => onChange(e.target.value.replace(/^\s+/, ""))} placeholder={placeholder || "Search…"} />
     </div>
   );
 }

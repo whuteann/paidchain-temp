@@ -1228,6 +1228,14 @@ export interface JobEvidenceOut {
   uploaded_at: string;
 }
 
+export interface JobAttachmentOut {
+  id: number;
+  filename: string;
+  path: string;
+  uploaded_by: string;
+  uploaded_at: string;
+}
+
 export interface JobHistoryEntryOut {
   stage: string;
   at: string;
@@ -1334,6 +1342,7 @@ export interface JobOut {
   sla_leg: JobSlaLeg | null;
   stage_sequence: string[];
   evidence_by_stage: Record<string, JobEvidenceOut[]>;
+  attachments: JobAttachmentOut[];
 }
 
 export interface JobCreateTerminal {
@@ -1453,6 +1462,17 @@ export const jobs = {
     }
     return req<JobOut>("PATCH", `/jobs/${id}/next`, { form });
   },
+
+  uploadAttachments: (id: string, files: Array<File | { file: File }>) => {
+    const form = new FormData();
+    for (const item of files) {
+      const file = item instanceof File ? item : item.file;
+      if (file instanceof File) form.append("files", file, file.name);
+    }
+    return req<JobOut>("POST", `/jobs/${id}/attachments`, { form });
+  },
+  removeAttachment: (id: string, attachmentId: number) =>
+    req<JobOut>("DELETE", `/jobs/${id}/attachments/${attachmentId}`),
 
   assignDevice: (id: string, serial_no: string, job_terminal_id?: string | null) =>
     req<JobOut>("POST", `/jobs/${id}/device`, {

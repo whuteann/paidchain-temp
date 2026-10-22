@@ -9,7 +9,7 @@ import { JOB_TYPES } from "./data";
 import type { SlaTransitionRule } from "./data";
 import { api, ApiError, terminalSerial } from "@/lib/api";
 import { merchantDisplayMid, merchantDisplayBank } from "@/lib/api";
-import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, EscalateToReplacementBody, MdrOut, JobLookupTermSettingOut, JobLookupAssigneeOut, SimCardRef } from "@/lib/api";
+import type { JobOut, JobCreate, TerminalOut, TermSettingOut, CustomerOut, MerchantOut, AvailableTidOut, MerchantTerminalOut, UserOut, JobEvidenceOut, JobAttachmentOut, EscalateToReplacementBody, MdrOut, JobLookupTermSettingOut, JobLookupAssigneeOut, SimCardRef } from "@/lib/api";
 import { useJobSla } from "./job-sla-context";
 import { NavFn } from "./shell";
 import { useCan } from "@/lib/use-permissions";
@@ -41,6 +41,7 @@ function EntitySearchSelect<T extends { id: string }>({
   }
 
   function handleChange(v: string) {
+    v = v.replace(/^\s+/, "");
     setQuery(v);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => runSearch(v), 300);
@@ -228,7 +229,7 @@ function transitionNeedsEvidence(jobType: string, nextStage: string) {
   return jobType === "Remote Support" && nextStage === "Completed";
 }
 
-function evidenceFilename(evidence: JobEvidenceOut) {
+function evidenceFilename(evidence: { filename: string }) {
   return evidence.filename;
 }
 
@@ -243,7 +244,7 @@ function evidenceUrl(path: string) {
   }
 }
 
-function evidenceIsImage(evidence: JobEvidenceOut) {
+function evidenceIsImage(evidence: { filename: string }) {
   return /\.(png|jpe?g)$/i.test(evidence.filename);
 }
 
@@ -1496,6 +1497,11 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
   const [refreshingParcel, setRefreshingParcel] = useState(false);
   const [showClearParcel, setShowClearParcel] = useState(false);
   const [clearingParcel, setClearingParcel] = useState(false);
+  const [showAddAttachment, setShowAddAttachment] = useState(false);
+  const [attachmentFiles, setAttachmentFiles] = useState<DropzoneFile[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachmentToDelete, setAttachmentToDelete] = useState<JobAttachmentOut | null>(null);
+  const [deletingAttachment, setDeletingAttachment] = useState(false);
   const [docBusy, setDocBusy] = useState<"form" | "do" | "pickup" | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -1613,6 +1619,37 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
       flash("Failed to remove tracking number");
     } finally {
       setClearingParcel(false);
+    }
+  }
+
+  async function uploadAttachments() {
+    if (!job || !can("Jobs.Edit") || attachmentFiles.length === 0) return;
+    setUploadingAttachment(true);
+    try {
+      const updated = await api.jobs.uploadAttachments(job.id, attachmentFiles.map((f) => f.file));
+      setJob(updated);
+      setShowAddAttachment(false);
+      setAttachmentFiles([]);
+      flash("Attachment(s) added");
+    } catch {
+      flash("Failed to add attachment");
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
+  async function deleteAttachment() {
+    if (!job || !can("Jobs.Edit") || !attachmentToDelete) return;
+    setDeletingAttachment(true);
+    try {
+      const updated = await api.jobs.removeAttachment(job.id, attachmentToDelete.id);
+      setJob(updated);
+      setAttachmentToDelete(null);
+      flash("Attachment removed");
+    } catch {
+      flash("Failed to remove attachment");
+    } finally {
+      setDeletingAttachment(false);
     }
   }
 
@@ -1907,7 +1944,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                             <><dt>Requested</dt><dd>{terminal.term_setting.brand} {terminal.term_setting.model}</dd></>
                           )}
                           {terminal.terminal_setting_id && (<><dt>Brand & Model</dt><dd className="mono">{terminal.term_setting?.brand} {terminal.term_setting?.model}</dd></>)}
-                          {job.type === "Installation" && (<>
+                          {(job.type === "Installation" || job.type === "Replacement") && (<>
                             <dt>TID</dt><dd className="mono">{terminal.mid_source?.tid_value || "—"}</dd>
                             <dt>MID</dt>
                             <dd>
@@ -2028,6 +2065,100 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
               </div>
             </div>
           </Card>
+
+          {done && (
+            <Card
+              title="Additional Attachments"
+              icon="fileCheck"
+              actions={can("Jobs.Edit") && (
+                <Btn variant="ghost" sm icon="plus" onClick={() => setShowAddAttachment(true)}>Add attachment</Btn>
+              )}
+            >
+              <div className="card-pad">
+                {job.attachments.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No additional attachments.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {job.attachments.map((file) => {
+                      const href = evidenceUrl(file.path);
+                      const isImage = evidenceIsImage(file);
+                      return (
+                        <div
+                          key={file.id}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                            padding: "12px",
+                            border: "1px solid var(--line)",
+                            borderRadius: 12,
+                            background: "var(--bg-2, #f7f7f7)",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                <span style={{ width: 28, height: 28, borderRadius: 8, background: "var(--surface)", border: "1px solid var(--line)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                                  <Icon name={isImage ? "image" : "file"} size={15} />
+                                </span>
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ color: "var(--ink-1)", fontWeight: 600, fontSize: 13, textDecoration: "none", wordBreak: "break-word" }}
+                                >
+                                  {evidenceFilename(file)}
+                                </a>
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                                Uploaded by {file.uploaded_by} · {formatDateTime(file.uploaded_at)}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", textDecoration: "none", fontSize: 12.5, fontWeight: 600 }}
+                              >
+                                <Icon name="link" size={13} />
+                                Open
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => downloadEvidenceFile(href, evidenceFilename(file))}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-1)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
+                              >
+                                <Icon name="download" size={13} />
+                                Download
+                              </button>
+                              {can("Jobs.Edit") && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAttachmentToDelete(file)}
+                                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--bad)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}
+                                >
+                                  <Icon name="trash" size={13} />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {isImage && (
+                            <img
+                              alt={file.filename}
+                              src={href}
+                              style={{ width: "100%", height: 240, objectFit: "contain", border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -2313,6 +2444,48 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
             This removes the tracking number from this job. The tracking record itself
             isn&apos;t deleted — it stays looked up by number and can be re-added here
             later if needed.
+          </p>
+        </Modal>
+      )}
+
+      {showAddAttachment && can("Jobs.Edit") && (
+        <Modal
+          title="Add attachment"
+          sub={job.id}
+          icon="upload"
+          size="slim"
+          onClose={() => { setShowAddAttachment(false); setAttachmentFiles([]); }}
+          foot={<>
+            <div className="mf-spacer" />
+            <Btn variant="ghost" onClick={() => { setShowAddAttachment(false); setAttachmentFiles([]); }}>Cancel</Btn>
+            <Btn variant="primary" icon="upload" disabled={uploadingAttachment || attachmentFiles.length === 0} onClick={uploadAttachments}>
+              {uploadingAttachment ? "Uploading…" : "Upload"}
+            </Btn>
+          </>}
+        >
+          <Field label="Files">
+            <Dropzone files={attachmentFiles} setFiles={setAttachmentFiles} hint="Attach any additional files for this completed job" />
+          </Field>
+        </Modal>
+      )}
+
+      {attachmentToDelete && can("Jobs.Edit") && (
+        <Modal
+          title="Delete attachment"
+          sub={`${job.id} · ${attachmentToDelete.filename}`}
+          icon="trash"
+          size="slim"
+          onClose={() => setAttachmentToDelete(null)}
+          foot={<>
+            <div className="mf-spacer" />
+            <Btn variant="ghost" onClick={() => setAttachmentToDelete(null)}>Back</Btn>
+            <Btn variant="danger" icon="trash" disabled={deletingAttachment} onClick={deleteAttachment}>
+              {deletingAttachment ? "Deleting…" : "Delete Attachment"}
+            </Btn>
+          </>}
+        >
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+            This permanently deletes this file. This cannot be undone.
           </p>
         </Modal>
       )}
