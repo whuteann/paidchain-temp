@@ -41,6 +41,7 @@ function EntitySearchSelect<T extends { id: string }>({
   }
 
   function handleChange(v: string) {
+    v = v.replace(/^\s+/, "");
     setQuery(v);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => runSearch(v), 300);
@@ -1907,7 +1908,7 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                             <><dt>Requested</dt><dd>{terminal.term_setting.brand} {terminal.term_setting.model}</dd></>
                           )}
                           {terminal.terminal_setting_id && (<><dt>Brand & Model</dt><dd className="mono">{terminal.term_setting?.brand} {terminal.term_setting?.model}</dd></>)}
-                          {job.type === "Installation" && (<>
+                          {(job.type === "Installation" || job.type === "Replacement") && (<>
                             <dt>TID</dt><dd className="mono">{terminal.mid_source?.tid_value || "—"}</dd>
                             <dt>MID</dt>
                             <dd>

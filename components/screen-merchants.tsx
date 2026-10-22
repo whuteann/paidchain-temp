@@ -476,7 +476,7 @@ function CustomerPickerModal({ onClose, onSelect }: {
           className="input"
           placeholder="Search customer name, registration or contact..."
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => setQuery(e.target.value.replace(/^\s+/, ""))}
           autoFocus
         />
       </Field>
@@ -676,6 +676,7 @@ function EntitySearchSelect<T extends { id: string }>({
   }
 
   function handleChange(v: string) {
+    v = v.replace(/^\s+/, "");
     setQuery(v);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => runSearch(v), 300);
@@ -1296,7 +1297,7 @@ function ExportMerchantsModal({ onClose }: { onClose: () => void }) {
       </>}
     >
       <Field label="Search query">
-        <input className="input" placeholder="Merchant name, ID, customer, terminal serial…" value={form.query} onChange={(e) => set("query", e.target.value)} />
+        <input className="input" placeholder="Merchant name, ID, customer, terminal serial…" value={form.query} onChange={(e) => set("query", e.target.value.replace(/^\s+/, ""))} />
       </Field>
       <Field label="Status">
         <select className="input" value={form.status} onChange={(e) => set("status", e.target.value)}>

@@ -216,7 +216,7 @@ function ExportRentalsModal({ onClose }: { onClose: () => void }) {
       </>}
     >
       <Field label="Search query">
-        <input className="input" placeholder="Rental ID, customer, merchant…" value={form.query} onChange={(e) => set("query", e.target.value)} />
+        <input className="input" placeholder="Rental ID, customer, merchant…" value={form.query} onChange={(e) => set("query", e.target.value.replace(/^\s+/, ""))} />
       </Field>
       <div className="field-row">
         <Field label="Status">
