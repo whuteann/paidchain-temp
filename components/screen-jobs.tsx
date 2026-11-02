@@ -1251,6 +1251,8 @@ function AssignDeviceModal({ job, onClose, onAssign, initialJobTerminalId = null
                       ? `TID ${selectedJobTerminal.mid_source.tid_value}`
                       : "No linked service terminal"}
                   {(() => {
+                    const transfer = selectedJobTerminal.transfer_tids ?? [];
+                    if (transfer.length) return ` · TID ${transfer.map((t) => t.tid_value).join(", ")}`;
                     const mid = selectedJobTerminal.mid || selectedJobTerminal.mid_source?.mid_value;
                     return mid ? ` · MID ${mid}` : "";
                   })()}
@@ -1765,8 +1767,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
       setShowAssignDevice(false);
       setAssignJobTerminalId(null);
       flash("Device " + serial + " assigned to " + job.id);
-    } catch {
-      flash("Failed to assign device");
+    } catch (e) {
+      flash(e instanceof ApiError ? e.message : "Failed to assign device");
     }
   }
 
@@ -1783,8 +1785,8 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
       setJob(updated);
       setShowSwap(false);
       flash("Device swapped to " + serial);
-    } catch {
-      flash("Failed to swap device");
+    } catch (e) {
+      flash(e instanceof ApiError ? e.message : "Failed to swap device");
     }
   }
 
@@ -1944,7 +1946,34 @@ export function JobDetail({ id, nav }: { id: string; nav: NavFn }) {
                             <><dt>Requested</dt><dd>{terminal.term_setting.brand} {terminal.term_setting.model}</dd></>
                           )}
                           {terminal.terminal_setting_id && (<><dt>Brand & Model</dt><dd className="mono">{terminal.term_setting?.brand} {terminal.term_setting?.model}</dd></>)}
-                          {(job.type === "Installation" || job.type === "Replacement") && (<>
+                          {job.type === "Replacement" && (<>
+                            <dt>{job.stage === "Completed" ? "Transferred" : "TIDs to transfer"}</dt>
+                            <dd>
+                              <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 6 }}>
+                                {job.stage === "Completed"
+                                  ? `Moved from ${serviceSerial || "—"} to ${assignedSerial || "—"}`
+                                  : `From ${serviceSerial || "—"}${assignedSerial ? ` — move to ${assignedSerial} when the job completes` : ""}`}
+                              </div>
+                              {(terminal.transfer_tids ?? []).length === 0 ? (
+                                <div style={{ fontSize: 12.5, color: "var(--warn)" }}>
+                                  No TID linked on {serviceSerial || "the old device"} — nothing will transfer. Link its TID on the old terminal&apos;s Mounted TIDs card.
+                                </div>
+                              ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                  {(terminal.transfer_tids ?? []).map((tid) => (
+                                    <div key={`${tid.source}:${tid.source_id}`} style={{ padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 7, background: "var(--surface)" }}>
+                                      <div className="mono" style={{ fontWeight: 700 }}>TID {tid.tid_value}</div>
+                                      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                                        MID {tid.mid_value || "—"} · {tid.mdr_rate_id || "No MDR"}
+                                        {tid.acceptance_name ? ` · ${tid.acceptance_name}` : ""}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </dd>
+                          </>)}
+                          {job.type === "Installation" && (<>
                             <dt>TID</dt><dd className="mono">{terminal.mid_source?.tid_value || "—"}</dd>
                             <dt>MID</dt>
                             <dd>

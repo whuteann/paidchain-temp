@@ -646,9 +646,17 @@ export interface MerchantMidAcceptanceOut {
   mdr_rate: MdrOut | null;
   terminal_serial: string | null;
   terminal_id?: string | null;
+  pending_transfer?: PendingTransferOut | null;
   status: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Set when this TID's terminal is being replaced by an open Replacement job —
+ *  the TID moves to to_serial when job_id completes. */
+export interface PendingTransferOut {
+  job_id: string;
+  to_serial: string;
 }
 
 export interface MerchantMidOut {
@@ -662,6 +670,7 @@ export interface MerchantMidOut {
   status: string;
   terminal_serial: string | null;
   terminal_id?: string | null;
+  pending_transfer?: PendingTransferOut | null;
   created_at: string;
   updated_at: string;
   acceptances: MerchantMidAcceptanceOut[];
@@ -1276,6 +1285,9 @@ export interface JobTerminalOut {
   terminal: { id: string; serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
   service_terminal: { id: string; serial: string; serial_no?: string; brand: string; model: string; sim_card?: SimCardRef | null } | null;
   mid_source: AvailableTidOut | null;
+  /** Replacement lines: every TID moving from the old device to the new one —
+   *  live from the old device until completion, then what actually moved. */
+  transfer_tids?: AvailableTidOut[];
 }
 
 export interface ShipmentTrackingOut {
