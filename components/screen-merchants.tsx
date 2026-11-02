@@ -2206,6 +2206,18 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved, onMidUnli
                             </button>
                           ) : mid.terminal_serial
                         ) : "-"}
+                        {mid.pending_transfer && (
+                          <div style={{ fontSize: 12, color: "var(--warn)", fontFamily: "inherit", marginTop: 2 }}>
+                            Pending transfer to {mid.pending_transfer.to_serial} via{" "}
+                            <button
+                              type="button"
+                              style={{ border: 0, background: "transparent", padding: 0, color: "var(--info)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+                              onClick={() => nav("job-detail", mid.pending_transfer!.job_id)}
+                            >
+                              {mid.pending_transfer.job_id}
+                            </button>
+                          </div>
+                        )}
                       </dd>
                       <dt>Status</dt><dd>{mid.status ? <Chip cls={mid.status === "Active" ? "chip-ok" : "chip-neutral"} dot>{mid.status}</Chip> : "-"}</dd>
                     </dl>
@@ -2230,7 +2242,7 @@ function OverviewTab({ m, nav, canEdit, onMidSaved, onAcceptanceSaved, onMidUnli
                                 <div className="td-mut" style={{ fontSize: 12 }}>
                                   {row.requires_tid_mid
                                     ? (row.uses_own_tid_mid
-                                      ? `Own pair · TID ${row.tid_value || "-"} · MID ${row.mid_value || "-"}${row.mdr_rate ? ` · ${row.mdr_rate.rate}%` : ""}`
+                                      ? `Own pair · TID ${row.tid_value || "-"} · MID ${row.mid_value || "-"}${row.mdr_rate ? ` · ${row.mdr_rate.rate}%` : ""}${row.pending_transfer ? ` · Pending transfer to ${row.pending_transfer.to_serial} via ${row.pending_transfer.job_id}` : ""}`
                                       : "Uses original MID/TID")
                                     : "No TID/MID required"}
                                 </div>

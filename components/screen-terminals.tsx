@@ -1318,6 +1318,9 @@ export function TerminalDetail({
   ].filter(Boolean).join(" · ");
   const mountedTids = terminal.mids ?? [];
   const assignedMerchant = terminal.merchant;
+  // Only a free In Stock device can go live from here — a Reserved one is held by a
+  // job (its completion installs it) and Faulty/Maintenance/Retired must not go live.
+  const canAssignMerchant = !assignedMerchant && terminal.status === "In Stock";
   const assignedCustomer = terminal.customer ?? assignedMerchant?.customer ?? null;
 
   function flash(message: string) {
@@ -1523,7 +1526,7 @@ export function TerminalDetail({
             icon="terminal"
             actions={can("Terminals.Edit") ? (
               <>
-                {!assignedMerchant && <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>}
+                {canAssignMerchant && <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>}
                 {terminal.status === "Installed" && assignedMerchant?.id && (
                   <Btn variant="ghost" sm icon="plus" onClick={openLinkTid}>Link TID</Btn>
                 )}
@@ -1535,7 +1538,7 @@ export function TerminalDetail({
                 No TID mounted on this device.
                 {can("Terminals.Edit") && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                    {!assignedMerchant && <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>}
+                    {canAssignMerchant && <Btn variant="ghost" sm icon="merchants" onClick={() => setShowAssignMerchant(true)}>Assign to merchant</Btn>}
                     {terminal.status === "Installed" && assignedMerchant?.id && (
                       <Btn variant="ghost" sm icon="plus" onClick={openLinkTid}>Link TID</Btn>
                     )}
