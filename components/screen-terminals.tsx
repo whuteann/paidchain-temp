@@ -4,7 +4,7 @@ import { useServerSort } from "./table-sorting";
 import { useState, useEffect, useRef } from "react";
 import { Icon } from "./icons";
 import { Card, Btn, PageHead, Toolbar, SearchBox, TerminalStatus, Pagination, Empty, JobStatus, Modal, Field, Chip, MobileListItem, ResponsiveTable, SingleFileDropzone } from "./components";
-import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER } from "./data";
+import { TERMINAL_STATUS, TERMINAL_STATUS_ORDER, terminalLocationOptions } from "./data";
 import { api, ApiError, terminalSerial, merchantDisplayMid } from "@/lib/api";
 import type { MerchantOut, TermSettingOut, TermSettingCreate, TerminalOut, TerminalCreate, SimCardOut, BulkCreateResult, TerminalBulkCreate, AvailableTidOut } from "@/lib/api";
 import { NavFn } from "./shell";
@@ -330,7 +330,7 @@ function EditTerminalModal({ terminal, onClose, onUpdated }: {
       )}
       <Field label="Location">
         <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
-          {["KL Warehouse", "Repair Center", "In Transit", "Merchant Site"].map((l) => <option key={l}>{l}</option>)}
+          {terminalLocationOptions(terminal.location).map((l) => <option key={l}>{l}</option>)}
         </select>
       </Field>
       <Field label="Condition note">
@@ -1750,7 +1750,7 @@ export function TerminalDetail({
           </Field>
           <Field label="Location">
             <select className="input" value={pendingLocation} onChange={(e) => setPendingLocation(e.target.value)}>
-              {["KL Warehouse", "Repair Center", "In Transit", "Merchant Site"].map((l) => <option key={l}>{l}</option>)}
+              {terminalLocationOptions(terminal.location).map((l) => <option key={l}>{l}</option>)}
             </select>
           </Field>
           <Field label="Note (optional)">
