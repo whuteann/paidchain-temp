@@ -166,6 +166,19 @@ export const TERMINAL_STATUS: Record<string, StatusMeta> = {
 };
 export const TERMINAL_STATUS_ORDER = Object.keys(TERMINAL_STATUS);
 
+/** Every location the backend can put a terminal in — including the ones jobs set
+ *  automatically (Retrieval/Force Unlink → Returns Bay, For Parts → Parts Storage,
+ *  Lost → Unknown; see OUTCOME_LOCATIONS in the backend's job_workflow.py). */
+export const TERMINAL_LOCATIONS = [
+  "KL Warehouse", "Repair Center", "In Transit", "Merchant Site", "Returns Bay", "Parts Storage", "Unknown",
+];
+
+/** Location options for a dropdown editing an existing terminal — always includes the
+ *  terminal's current value, so the select never shows one location while holding another. */
+export function terminalLocationOptions(current: string | null | undefined): string[] {
+  return current && !TERMINAL_LOCATIONS.includes(current) ? [...TERMINAL_LOCATIONS, current] : TERMINAL_LOCATIONS;
+}
+
 export const MERCHANT_STATUS: Record<string, StatusMeta> = {
   "Active":     { chip: "chip-ok" },
   "Onboarding": { chip: "chip-info" },
